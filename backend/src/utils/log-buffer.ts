@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { StringDecoder } from 'node:string_decoder'
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import { z } from 'zod'
+import { JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
 import type {
   ManagerLogEntry,
   ManagerLogLevel,
@@ -14,7 +16,7 @@ const entries: ManagerLogEntry[] = []
 let nextSeq = 1
 let dropped = 0
 
-const LEVEL_SEVERITY: Record<ManagerLogLevel, number> = {
+const LEVEL_SEVERITY = {
   debug: 0,
   info: 1,
   warn: 2,
@@ -23,12 +25,15 @@ const LEVEL_SEVERITY: Record<ManagerLogLevel, number> = {
 
 const TRUNCATION_SUFFIX = ' …[truncated]'
 
-export function stringifyLogArg(value: unknown): string {
+const LogArgSchema = z.union([JsonValueSchema, z.instanceof(Error)])
+
+export function stringifyLogArg(value: JsonValue | Error): string {
   if (value instanceof Error) {
     return `${value.name}: ${value.message}\n${value.stack ?? ''}`
   }
-  if (typeof value === 'string') {
-    return value
+  const text = z.string().safeParse(value)
+  if (text.success) {
+    return text.data
   }
   try {
     return JSON.stringify(value) ?? String(value)
@@ -37,12 +42,16 @@ export function stringifyLogArg(value: unknown): string {
   }
 }
 
-export function composeLogMessage(prefix: string, message: string, args: unknown[]): string {
+export function composeLogMessage(prefix: string, message: string, args: readonly unknown[]): string {
   const prefixed = prefix ? `[${prefix}] ${message}` : message
   if (args.length === 0) {
     return prefixed
   }
-  return [prefixed, ...args.map(stringifyLogArg)].join(' ')
+  const stringifiedArgs = args.map((arg) => {
+    const parsedArg = LogArgSchema.safeParse(arg)
+    return stringifyLogArg(parsedArg.success ? parsedArg.data : String(arg))
+  })
+  return [prefixed, ...stringifiedArgs].join(' ')
 }
 
 export function appendManagerLogEntry(input: {
@@ -89,10 +98,15 @@ export function parseProcessLogLevel(line: string, fallback: ManagerLogLevel): M
   return fallback
 }
 
+export interface ProcessLogForwarder {
+  write: (chunk: Uint8Array | string) => void
+  flush: () => void
+}
+
 export function createProcessLogForwarder(options: {
   source: ManagerLogSource
   defaultLevel: ManagerLogLevel
-}): { write: (chunk: Uint8Array | string) => void; flush: () => void } {
+}): ProcessLogForwarder {
   const decoder = new StringDecoder('utf8')
   let remainder = ''
 

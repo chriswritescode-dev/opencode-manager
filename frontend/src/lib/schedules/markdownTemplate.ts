@@ -17,15 +17,15 @@ interface FrontmatterMap {
   description?: string
 }
 
-const KEY_MAP: Record<string, keyof FrontmatterMap> = {
-  title: 'title',
-  category: 'category',
-  cadenceHint: 'cadenceHint',
-  cadence: 'cadenceHint',
-  suggestedName: 'suggestedName',
-  suggestedDescription: 'suggestedDescription',
-  description: 'description',
-}
+const KEY_MAP = new Map<string, keyof FrontmatterMap>([
+  ['title', 'title'],
+  ['category', 'category'],
+  ['cadenceHint', 'cadenceHint'],
+  ['cadence', 'cadenceHint'],
+  ['suggestedName', 'suggestedName'],
+  ['suggestedDescription', 'suggestedDescription'],
+  ['description', 'description'],
+])
 
 function stripQuotes(value: string): string {
   const trimmed = value.trim()
@@ -61,7 +61,7 @@ function parseFrontmatter(raw: string): { frontmatter: FrontmatterMap; body: str
     const value = line.slice(colonIndex + 1).trim()
     if (!key || value === undefined) continue
 
-    const mappedKey = KEY_MAP[key]
+    const mappedKey = KEY_MAP.get(key)
     if (mappedKey) {
       frontmatter[mappedKey] = stripQuotes(value)
     }

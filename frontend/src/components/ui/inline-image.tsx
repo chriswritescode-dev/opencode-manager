@@ -2,10 +2,6 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
-/**
- * Renders an image as a bounded thumbnail that opens a full-size preview dialog when expandable.
- * Falls back to a muted alt-text span (or nothing) when the image fails to load, retrying when the source changes.
- */
 export function InlineImage({
   src,
   alt,

@@ -51,7 +51,6 @@ function AssistantTurnSkeleton() {
   )
 }
 
-/** Placeholder transcript shown while a session loads, mirroring the CLI-style turn layout. */
 export function MessageSkeleton() {
   return (
     <div className="flex flex-col overflow-x-hidden p-2" aria-hidden="true">

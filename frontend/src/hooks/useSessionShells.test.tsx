@@ -1,23 +1,19 @@
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, waitFor } from '@testing-library/react'
+import type { QueryClient } from '@tanstack/react-query'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { useKillShell, useShell } from './useSessionShells'
 import { applyShellExit, clearShellExitRecord, recordShellExit, type ShellRecord } from '@/lib/backgroundWork'
+import { renderHookWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const api = vi.hoisted(() => ({
-  listShells: vi.fn(),
-  removeShell: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/api/opencode', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/api/opencode')>()),
-  ...api,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), loading: vi.fn() },
-}))
+const SHELLS_KEY = ['opencode', 'shells', '/repo']
 
 const shell = (id: string, sessionID = 'session-1'): ShellRecord => ({
   id,
@@ -30,73 +26,87 @@ const shell = (id: string, sessionID = 'session-1'): ShellRecord => ({
   time: { started: 1 },
 })
 
-const createWrapper = (queryClient: QueryClient) => {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+interface ShellServer {
+  routes: FetchRoute[]
+  setShells: (shells: ShellRecord[]) => void
 }
 
-const createQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function shellServer(initial: ShellRecord[] = []): ShellServer {
+  let current = initial
+  return {
+    setShells: (shells) => {
+      current = shells
+    },
+    routes: [
+      {
+        method: 'GET',
+        path: '/api/opencode/api/shell',
+        respond: () => ({ json: { data: current } }),
+      },
+      {
+        method: 'DELETE',
+        path: '/api/opencode/api/shell/:id',
+        respond: () => ({ status: 204 }),
+      },
+    ],
+  }
+}
+
+function cachedShells(queryClient: QueryClient): ShellRecord[] {
+  return queryClient.getQueryData<ShellRecord[]>(SHELLS_KEY) ?? []
+}
 
 describe('useKillShell', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    api.listShells.mockResolvedValue([])
-    api.removeShell.mockResolvedValue(undefined)
+    clearShellExitRecord('/repo', 'dev')
+    clearShellExitRecord('/repo', 'other')
   })
 
   it('marks a killed shell terminal without erasing it', async () => {
-    const queryClient = createQueryClient()
-    queryClient.setQueryData(['opencode', 'shells', '/repo'], [shell('dev')])
-
-    const { result } = renderHook(() => useKillShell('/repo'), {
-      wrapper: createWrapper(queryClient),
+    const { result, queryClient, fetchFake } = renderHookWithProviders(() => useKillShell('/repo'), {
+      ...hookProviders,
+      fetchRoutes: shellServer([]).routes,
     })
+    queryClient.setQueryData<ShellRecord[]>(SHELLS_KEY, [shell('dev')])
 
     await act(async () => {
       await result.current.mutateAsync('dev')
     })
 
-    const [updated] = queryClient.getQueryData<ShellRecord[]>(['opencode', 'shells', '/repo']) ?? []
+    const [updated] = cachedShells(queryClient)
     expect(updated?.status).toBe('killed')
     expect(updated?.time.completed).toBeDefined()
-    clearShellExitRecord('/repo', 'dev')
+    expect(fetchFake.lastRequest('DELETE', '/api/opencode/api/shell/dev')?.method).toBe('DELETE')
   })
 
   it('records a killed shell so a later refetch keeps it killed', async () => {
-    const queryClient = createQueryClient()
-    const key = ['opencode', 'shells', '/repo']
-    queryClient.setQueryData(key, [shell('dev')])
-
-    const { result } = renderHook(
+    const server = shellServer([shell('dev')])
+    const { result, queryClient } = renderHookWithProviders(
       () => ({ kill: useKillShell('/repo'), shell: useShell('dev', '/repo') }),
-      { wrapper: createWrapper(queryClient) },
+      { ...hookProviders, fetchRoutes: server.routes },
     )
 
     await act(async () => {
       await result.current.kill.mutateAsync('dev')
     })
 
-    queryClient.setQueryData(key, [])
-    api.listShells.mockResolvedValue([shell('dev')])
+    queryClient.setQueryData<ShellRecord[]>(SHELLS_KEY, [])
+    server.setShells([shell('dev')])
 
     await act(async () => {
-      await queryClient.invalidateQueries({ queryKey: key })
+      await queryClient.invalidateQueries({ queryKey: SHELLS_KEY })
     })
 
-    const [refetched] = queryClient.getQueryData<ShellRecord[]>(key) ?? []
+    const [refetched] = cachedShells(queryClient)
     expect(refetched?.status).toBe('killed')
-    clearShellExitRecord('/repo', 'dev')
   })
 
   it('keeps a killed shell killed through a later exit event', async () => {
-    const queryClient = createQueryClient()
-    const key = ['opencode', 'shells', '/repo']
-    queryClient.setQueryData(key, [shell('dev')])
-
-    const { result } = renderHook(() => useKillShell('/repo'), {
-      wrapper: createWrapper(queryClient),
+    const { result, queryClient } = renderHookWithProviders(() => useKillShell('/repo'), {
+      ...hookProviders,
+      fetchRoutes: shellServer([shell('dev')]).routes,
     })
+    queryClient.setQueryData<ShellRecord[]>(SHELLS_KEY, [shell('dev')])
 
     await act(async () => {
       await result.current.mutateAsync('dev')
@@ -104,30 +114,27 @@ describe('useKillShell', () => {
 
     await act(async () => {
       recordShellExit('/repo', { id: 'dev', status: 'exited', exit: 0 })
-      queryClient.setQueryData<ShellRecord[]>(key, (current) =>
+      queryClient.setQueryData<ShellRecord[]>(SHELLS_KEY, (current) =>
         current ? applyShellExit(current, { id: 'dev', status: 'exited', exit: 0 }) : current,
       )
     })
 
-    const [after] = queryClient.getQueryData<ShellRecord[]>(key) ?? []
+    const [after] = cachedShells(queryClient)
     expect(after?.status).toBe('killed')
-    clearShellExitRecord('/repo', 'dev')
   })
 })
 
 describe('useShell', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    api.listShells.mockResolvedValue([])
-    api.removeShell.mockResolvedValue(undefined)
+    clearShellExitRecord('/repo', 'dev')
+    clearShellExitRecord('/repo', 'other')
   })
 
   it('returns only the matching shell record once the list loads', async () => {
-    const queryClient = createQueryClient()
-    api.listShells.mockResolvedValue([shell('dev'), shell('other')])
-
-    const { result } = renderHook(() => useShell('dev', '/repo'), {
-      wrapper: createWrapper(queryClient),
+    const server = shellServer([shell('dev'), shell('other')])
+    const { result } = renderHookWithProviders(() => useShell('dev', '/repo'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     await waitFor(() => expect(result.current.shell?.id).toBe('dev'))
@@ -135,25 +142,24 @@ describe('useShell', () => {
   })
 
   it('does not re-render when an unrelated shell record changes', async () => {
-    const queryClient = createQueryClient()
     const dev = shell('dev')
     const other = shell('other')
-    api.listShells.mockResolvedValue([dev, other])
-
+    const server = shellServer([dev, other])
     let renderCount = 0
-    const { result } = renderHook(
+
+    const { result, queryClient } = renderHookWithProviders(
       () => {
         renderCount += 1
         return useShell('dev', '/repo')
       },
-      { wrapper: createWrapper(queryClient) },
+      { ...hookProviders, fetchRoutes: server.routes },
     )
 
-    await waitFor(() => expect(result.current.shell).toBe(dev))
+    await waitFor(() => expect(result.current.shell).toEqual(dev))
     const rendersAfterLoad = renderCount
 
     await act(async () => {
-      queryClient.setQueryData(['opencode', 'shells', '/repo'], [dev, { ...other, command: 'changed' }])
+      queryClient.setQueryData(SHELLS_KEY, [dev, { ...other, command: 'changed' }])
     })
 
     expect(renderCount).toBe(rendersAfterLoad)

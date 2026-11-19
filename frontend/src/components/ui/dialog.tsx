@@ -74,7 +74,7 @@ const DialogContent = React.forwardRef<
       event.preventDefault()
     }
   }
-  const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+  const [isMobile, setIsMobile] = React.useState(() => 'window' in globalThis ? window.innerWidth < 768 : false)
   const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile && isDialogOpen
   const shouldAnimateSwipe = shouldEnableMobileSwipe && isMobileFullscreenMode
   const { keyboardHeight } = useVisualViewport({ enabled: keyboardAware === true && isDialogOpen })
@@ -83,10 +83,11 @@ const DialogContent = React.forwardRef<
   
   const combinedRef = React.useCallback((node: HTMLDivElement | null) => {
     setSwipeContainer(node)
-    if (typeof ref === 'function') {
-      ref(node)
-    } else if (ref) {
+    if (ref === null) return
+    if ('current' in ref) {
       ref.current = node
+    } else {
+      ref(node)
     }
   }, [ref])
   

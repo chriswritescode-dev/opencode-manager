@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   STORED_AUTH_USER_KEY,
+  StoredAuthUserSchema,
   clearStoredAuthUser,
   readStoredAuthUser,
   reconcileStoredAuthUser,
@@ -9,8 +10,8 @@ import {
 
 const STORED_USER = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
 
-function storedValue(): unknown {
-  return JSON.parse(localStorage.getItem(STORED_AUTH_USER_KEY) ?? 'null')
+function storedValue() {
+  return StoredAuthUserSchema.parse(JSON.parse(localStorage.getItem(STORED_AUTH_USER_KEY) ?? 'null'))
 }
 
 describe('reconcileStoredAuthUser', () => {

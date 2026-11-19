@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import { describeUserAgent } from '@opencode-manager/shared/utils'
 import { useSession, signIn, signUp, signOut, authClient } from '@/lib/auth-client'
 import { redeemDevicePairingCode } from '@/api/devicePairing'
@@ -13,35 +12,10 @@ import {
   reconcileStoredAuthUser,
   type StoredAuthUser,
 } from '@/lib/authSession'
+import { AuthContext, type AuthConfig, type AuthContextValue } from './auth-context'
 
 const RATE_LIMITED_MESSAGE = 'Too many attempts. Wait a minute and try again.'
 const SIGN_IN_FAILED_MESSAGE = 'Sign-in failed'
-
-interface AuthConfig {
-  enabledProviders: string[]
-  registrationEnabled: boolean
-  isFirstUser: boolean
-  adminConfigured: boolean
-}
-
-interface AuthContextValue {
-  user: StoredAuthUser | null
-  isAuthenticated: boolean
-  isLoading: boolean
-  config: AuthConfig | null
-  signInWithEmail: (email: string, password: string) => Promise<{ error?: string }>
-  signInWithProvider: (provider: 'github' | 'google' | 'discord') => Promise<{ error?: string }>
-  signInWithPasskey: () => Promise<{ error?: string }>
-  signInWithPairingCode: (code: string) => Promise<{ error?: string }>
-  signUpWithEmail: (email: string, password: string, name: string) => Promise<{ error?: string }>
-  addPasskey: (name?: string) => Promise<{ error?: string }>
-  logout: () => Promise<void>
-  refreshSession: () => Promise<void>
-}
-
-export const AuthContext = createContext<AuthContextValue | null>(null)
-
-export { useAuth } from '@/hooks/useAuth'
 
 interface AuthProviderProps {
   children: ReactNode

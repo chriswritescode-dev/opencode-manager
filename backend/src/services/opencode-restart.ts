@@ -4,6 +4,8 @@ import { sseAggregator } from './sse-aggregator'
 import type { OpenCodeClient } from './opencode/client'
 import type { OpenCodeOperationReason, OpenCodeSupervisor } from './opencode-supervisor'
 
+export type OpenCodeRestartTarget = Pick<OpenCodeSupervisor, 'restart'>
+
 export interface ActiveSessionsSource {
   getActiveSessions(): Record<string, string[]>
   isSubagentSession(sessionId: string): boolean
@@ -24,27 +26,45 @@ export function listActiveUserSessions(source: ActiveSessionsSource = sseAggrega
   )
 }
 
-function restartFailureError(): Error {
-  const startupError = opencodeServerManager.getLastStartupError()
-  return new Error(startupError ?? 'OpenCode server restart did not complete successfully')
+export interface OpenCodeManagerProcess {
+  clearStartupError: () => void
+  restart: () => Promise<void>
+  checkHealth: () => Promise<boolean>
+  getLastStartupError: () => string | null
 }
 
-async function restartServer(supervisor: OpenCodeSupervisor | undefined, reason: OpenCodeOperationReason): Promise<boolean> {
+interface RestartOutcome {
+  healthy: boolean
+  error: string | null
+}
+
+function restartFailureError(manager: OpenCodeManagerProcess, supervisorError: string | null): Error {
+  const reason = supervisorError ?? manager.getLastStartupError()
+  return new Error(reason ?? 'OpenCode server restart did not complete successfully')
+}
+
+async function restartServer(
+  supervisor: OpenCodeRestartTarget | undefined,
+  reason: OpenCodeOperationReason,
+  manager: OpenCodeManagerProcess,
+): Promise<RestartOutcome> {
   if (supervisor) {
-    return (await supervisor.restart(reason)).healthy
+    const status = await supervisor.restart(reason)
+    return { healthy: status.healthy, error: status.lastError }
   }
-  opencodeServerManager.clearStartupError()
-  await opencodeServerManager.restart()
-  return opencodeServerManager.checkHealth()
+  manager.clearStartupError()
+  await manager.restart()
+  return { healthy: await manager.checkHealth(), error: null }
 }
 
 export async function restartOpenCode(
-  supervisor?: OpenCodeSupervisor,
+  supervisor?: OpenCodeRestartTarget,
   reason: OpenCodeOperationReason = 'settings_restart',
+  manager: OpenCodeManagerProcess = opencodeServerManager,
 ): Promise<void> {
-  const healthy = await restartServer(supervisor, reason)
-  if (!healthy) {
-    throw restartFailureError()
+  const outcome = await restartServer(supervisor, reason, manager)
+  if (!outcome.healthy) {
+    throw restartFailureError(manager, outcome.error)
   }
 }
 

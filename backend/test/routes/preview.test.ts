@@ -3,14 +3,21 @@ import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ENV } from '@opencode-manager/shared/config/env'
-import type { PreviewPort } from '@opencode-manager/shared/schemas'
+import {
+  CreatePreviewSessionResponseSchema,
+  PreviewPortsResponseSchema,
+} from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
 import { createPreviewRoutes, createPreviewAvailability } from '../../src/routes/preview'
 import { PreviewSessionStore } from '../../src/services/preview/gateway'
 import type { PreviewPortEntry } from '../../src/services/preview/ports'
+import { readJson } from '../helpers/read-json'
 
 function entry(overrides: Partial<PreviewPortEntry>): PreviewPortEntry {
   return { port: 5173, host: '127.0.0.1', pid: 1, command: 'node', cwd: null, ...overrides }
 }
+
+const ErrorResponseSchema = z.object({ error: z.string() })
 
 const tempDirs: string[] = []
 
@@ -41,7 +48,7 @@ describe('Preview Routes', () => {
     const res = await app.request(`/ports?directory=${encodeURIComponent(root)}`)
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { enabled: boolean; ports: PreviewPortEntry[] }
+    const body = await readJson(res, PreviewPortsResponseSchema)
     expect(body.enabled).toBe(true)
     expect(body.ports.map((port) => port.port)).toEqual([5173, 9000])
   })
@@ -53,7 +60,7 @@ describe('Preview Routes', () => {
     })
 
     const res = await app.request('/ports')
-    const body = await res.json() as { ports: PreviewPortEntry[] }
+    const body = await readJson(res, PreviewPortsResponseSchema)
 
     expect(body.ports.map((port) => port.port)).toEqual([5173, 9000])
   })
@@ -72,7 +79,7 @@ describe('Preview Routes', () => {
     })
 
     const res = await app.request(`/ports?directory=${encodeURIComponent(root)}`)
-    const body = await res.json() as { ports: PreviewPort[] }
+    const body = await readJson(res, PreviewPortsResponseSchema)
 
     expect(body.ports.map((port) => ({ port: port.port, inDirectory: port.inDirectory }))).toEqual([
       { port: 9000, inDirectory: true },
@@ -93,7 +100,7 @@ describe('Preview Routes', () => {
     })
 
     const res = await app.request(`/ports?directory=${encodeURIComponent(realDir)}`)
-    const body = await res.json() as { ports: PreviewPort[] }
+    const body = await readJson(res, PreviewPortsResponseSchema)
 
     expect(body.ports[0]?.inDirectory).toBe(true)
   })
@@ -105,7 +112,7 @@ describe('Preview Routes', () => {
     })
 
     const res = await app.request('/ports')
-    const body = await res.json() as { ports: PreviewPort[] }
+    const body = await readJson(res, PreviewPortsResponseSchema)
 
     expect(body.ports.map((port) => port.inDirectory)).toEqual([false, false])
   })
@@ -115,7 +122,7 @@ describe('Preview Routes', () => {
 
     const res = await app.request('/ports')
 
-    expect(await res.json()).toEqual({ enabled: false, ports: [] })
+    await expect(readJson(res, PreviewPortsResponseSchema)).resolves.toEqual({ enabled: false, ports: [] })
   })
 
   it('issues a preview start token for a listening port', async () => {
@@ -129,8 +136,7 @@ describe('Preview Routes', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { token: string; previewPort: number; publicUrl: string | null }
-    expect(typeof body.token).toBe('string')
+    const body = await readJson(res, CreatePreviewSessionResponseSchema)
     expect(body.token.length).toBeGreaterThan(0)
     expect(body.previewPort).toBe(ENV.PREVIEW.PORT)
     expect(body.publicUrl).toBe(ENV.PREVIEW.PUBLIC_URL || null)
@@ -158,7 +164,7 @@ describe('Preview Routes', () => {
     })
 
     expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ error: 'Port 6000 is not listening' })
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Port 6000 is not listening' })
   })
 
   it('returns 503 when preview is disabled', async () => {
@@ -190,11 +196,11 @@ describe('Preview Routes', () => {
     const app = createPreviewRoutes({ isEnabled: () => enabled, listPorts: async () => [entry({ port: 5173 })] })
 
     const first = await app.request('/ports')
-    expect((await first.json() as { enabled: boolean }).enabled).toBe(true)
+    expect((await readJson(first, PreviewPortsResponseSchema)).enabled).toBe(true)
 
     enabled = false
     const second = await app.request('/ports')
-    expect((await second.json() as { enabled: boolean }).enabled).toBe(false)
+    expect((await readJson(second, PreviewPortsResponseSchema)).enabled).toBe(false)
 
     const disabledSession = await app.request('/sessions', {
       method: 'POST',

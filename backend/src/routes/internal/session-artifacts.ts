@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { toContentfulStatus } from '../../utils/error-utils'
 import type { OpenCodeClient } from '../../services/opencode/client'
 import { resolveSessionArtifactFile, SessionArtifactError } from '../../services/session-artifacts'
 import { handleOpenCodeError, parseJsonBody } from '../../utils/route-helpers'
@@ -21,7 +21,7 @@ export function createInternalSessionArtifactRoutes(openCodeClient: OpenCodeClie
       return c.json({ path })
     } catch (error) {
       if (error instanceof SessionArtifactError) {
-        return c.json({ error: error.message }, error.status as ContentfulStatusCode)
+        return c.json({ error: error.message }, toContentfulStatus(error.status))
       }
       return handleOpenCodeError(c, error, 'Failed to resolve artifact file', { unknownStatus: 502 })
     }

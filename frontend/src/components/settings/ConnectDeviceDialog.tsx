@@ -18,11 +18,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PairingQrCode } from './PairingQrCode'
 
-const WARNING_MESSAGES: Record<DevicePairingLinkWarning, string> = {
+const WARNING_MESSAGES = {
   'plain-http': 'This address uses plain HTTP, so the sign-in code travels unencrypted.',
   loopback: 'This address is localhost; other devices cannot reach it.',
   'headers-unreadable': 'Stored remote access headers could not be decrypted and are not included.',
-}
+} satisfies Record<DevicePairingLinkWarning, string>
 
 const INSECURE_ORIGIN_EXPLANATION =
   "The mobile app QR code needs HTTPS. Use an HTTPS address, or turn on 'Allow plain-HTTP app links on private networks' if this Manager uses a private IP address."

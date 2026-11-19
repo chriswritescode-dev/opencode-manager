@@ -21,6 +21,7 @@ import {
 import { showToast } from '@/lib/toast'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { randomId } from '@/lib/utils'
+import { ProjectActionIconSchema } from '@opencode-manager/shared/schemas'
 import type {
   ProjectAction,
   ProjectActionIcon,
@@ -110,7 +111,10 @@ function ActionForm({ draft, isSaving, onChange, onSave, onCancel }: ActionFormP
           <Label htmlFor="action-icon">Icon</Label>
           <Select
             value={draft.icon}
-            onValueChange={(value) => onChange({ ...draft, icon: value as ProjectActionIcon })}
+            onValueChange={(value) => {
+              const parsed = ProjectActionIconSchema.safeParse(value)
+              if (parsed.success) onChange({ ...draft, icon: parsed.data })
+            }}
           >
             <SelectTrigger id="action-icon">
               <SelectValue />

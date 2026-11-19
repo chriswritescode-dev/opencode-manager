@@ -1,129 +1,158 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
 import {
   buildManagerBrowserPairingLink,
   PAIRING_CODE_INVALID_MESSAGE,
 } from '@opencode-manager/shared/schemas'
 import { Login } from '../Login'
-
-const mocks = vi.hoisted(() => ({
-  signInWithEmail: vi.fn(),
-  signInWithProvider: vi.fn(),
-  signInWithPasskey: vi.fn(),
-  signInWithPairingCode: vi.fn(),
-  scanText: { value: '' },
-}))
-
-vi.mock('react-router-dom', () => ({
-  useLoaderData: () => ({
-    config: {
-      enabledProviders: ['credentials', 'passkey'],
-      registrationEnabled: true,
-      isFirstUser: false,
-      adminConfigured: false,
-    },
-  }),
-}))
-
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({
-    signInWithEmail: mocks.signInWithEmail,
-    signInWithProvider: mocks.signInWithProvider,
-    signInWithPasskey: mocks.signInWithPasskey,
-    signInWithPairingCode: mocks.signInWithPairingCode,
-  }),
-}))
-
-vi.mock('@/hooks/useTheme', () => ({
-  useTheme: () => 'light',
-}))
-
-vi.mock('@/components/settings/QrCodeScanner', () => ({
-  QrCodeScanner: ({ open, onResult }: { open: boolean; onResult: (text: string) => void }) =>
-    open ? (
-      <button type="button" onClick={() => onResult(mocks.scanText.value)}>
-        Deliver scanned text
-      </button>
-    ) : null,
-}))
+import { AuthProvider } from '@/contexts/AuthContext'
+import { createFetchFake, type FetchRoute } from '@/test/fetchFake'
+import { createTestQueryClient } from '@/test/render'
+import { installQrScanner } from '@/test/browserFakes'
+import { makeAuthConfig, makeAuthSession } from '@/test/fixtures/api'
+import type { AuthConfigFixture } from '@/test/fixtures/api'
 
 const code = 'a'.repeat(43)
 
-function renderLogin() {
-  return render(<Login />)
+class NavigationRequest {
+  url: string
+  method: string
+  headers: Headers
+  signal: AbortSignal
+
+  constructor(input: string | URL, init: RequestInit = {}) {
+    this.url = input.toString()
+    this.method = init.method ?? 'GET'
+    this.headers = new Headers(init.headers)
+    this.signal = new AbortController().signal
+  }
 }
 
-async function scan(text: string) {
+function installNavigationRequestStub() {
+  vi.stubGlobal('Request', NavigationRequest)
+}
+
+interface LoginRenderOptions {
+  config?: AuthConfigFixture
+  redeem?: FetchRoute['respond']
+}
+
+function renderLogin(options: LoginRenderOptions = {}) {
+  installNavigationRequestStub()
+  const config = options.config ?? makeAuthConfig({ enabledProviders: ['credentials', 'passkey'] })
+  const routes: FetchRoute[] = [
+    { method: 'GET', path: '/api/auth/get-session', respond: () => ({ json: makeAuthSession() }) },
+    { method: 'GET', path: '/api/auth-info/config', respond: () => ({ json: config }) },
+  ]
+  if (options.redeem) {
+    routes.push({ method: 'POST', path: '/api/auth/device-pairing/redeem', respond: options.redeem })
+  }
+  const fetchFake = createFetchFake(routes)
+  fetchFake.install()
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/',
+        element: <div>home marker</div>,
+        hydrateFallbackElement: <p>Hydrating login</p>,
+      },
+      {
+        path: '/login',
+        element: (
+          <AuthProvider>
+            <Login />
+          </AuthProvider>
+        ),
+        loader: () => ({ config }),
+        hydrateFallbackElement: <p>Hydrating login</p>,
+      },
+    ],
+    { initialEntries: ['/login'] },
+  )
+  return {
+    fetchFake,
+    ...render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  }
+}
+
+async function scanQrCode(text: string) {
   const user = userEvent.setup()
-  mocks.scanText.value = text
-  await user.click(screen.getByRole('button', { name: 'Sign in with QR code' }))
-  await user.click(await screen.findByRole('button', { name: 'Deliver scanned text' }))
+  const scanner = installQrScanner(text)
+  await user.click(await screen.findByRole('button', { name: 'Sign in with QR code' }))
+  await scanner.scan()
 }
 
 describe('Login', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.scanText.value = ''
-    mocks.signInWithPairingCode.mockResolvedValue({})
+    installNavigationRequestStub()
   })
 
   it('starts a QR scan from the sign-in button', async () => {
     const user = userEvent.setup()
     renderLogin()
 
-    const button = screen.getByRole('button', { name: 'Sign in with QR code' })
-    expect(button).toBeEnabled()
-    expect(screen.queryByRole('button', { name: 'Deliver scanned text' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Scan sign-in QR code')).not.toBeInTheDocument()
 
-    await user.click(button)
+    await user.click(await screen.findByRole('button', { name: 'Sign in with QR code' }))
 
-    expect(await screen.findByRole('button', { name: 'Deliver scanned text' })).toBeInTheDocument()
+    expect(await screen.findByText('Scan sign-in QR code')).toBeInTheDocument()
+    expect(screen.getByLabelText('QR code scanner preview')).toBeInTheDocument()
   })
 
   it('redeems the code from a manager sign-in QR code', async () => {
-    renderLogin()
+    const { fetchFake } = renderLogin({
+      redeem: () => ({ json: { user: { id: 'u1', name: 'User', email: 'u@example.com' } } }),
+    })
 
-    await scan(buildManagerBrowserPairingLink(window.location.origin, code))
+    await scanQrCode(buildManagerBrowserPairingLink(window.location.origin, code))
 
     await waitFor(() => {
-      expect(mocks.signInWithPairingCode).toHaveBeenCalledTimes(1)
+      expect(fetchFake.findRequests('POST', '/api/auth/device-pairing/redeem')).toHaveLength(1)
     })
-    expect(mocks.signInWithPairingCode).toHaveBeenCalledWith(code)
+    expect(fetchFake.lastRequest('POST', '/api/auth/device-pairing/redeem')?.body).toMatchObject({ code })
+    expect(await screen.findByText('home marker')).toBeInTheDocument()
   })
 
   it('rejects a QR code for another origin', async () => {
-    renderLogin()
+    const { fetchFake } = renderLogin()
 
-    await scan(buildManagerBrowserPairingLink('https://other.example.com', code))
+    await scanQrCode(buildManagerBrowserPairingLink('https://other.example.com', code))
 
     expect(
       await screen.findByText(
         'This QR code is for https://other.example.com. Open that address to sign in.',
       ),
     ).toBeInTheDocument()
-    expect(mocks.signInWithPairingCode).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', '/api/auth/device-pairing/redeem')).toHaveLength(0)
   })
 
   it.each(['ocm://link?v=2&kind=manager&name=Desk', 'not a pairing link'])(
     'rejects text that is not a manager sign-in code: %s',
     async (text) => {
-      renderLogin()
+      const { fetchFake } = renderLogin()
 
-      await scan(text)
+      await scanQrCode(text)
 
       expect(
         await screen.findByText('That QR code is not a Manager sign-in code.'),
       ).toBeInTheDocument()
-      expect(mocks.signInWithPairingCode).not.toHaveBeenCalled()
+      expect(fetchFake.findRequests('POST', '/api/auth/device-pairing/redeem')).toHaveLength(0)
     },
   )
 
   it('shows the redeem error in the page alert', async () => {
-    mocks.signInWithPairingCode.mockResolvedValue({ error: PAIRING_CODE_INVALID_MESSAGE })
-    renderLogin()
+    renderLogin({
+      redeem: () => ({ status: 400, json: { error: PAIRING_CODE_INVALID_MESSAGE } }),
+    })
 
-    await scan(buildManagerBrowserPairingLink(window.location.origin, code))
+    await scanQrCode(buildManagerBrowserPairingLink(window.location.origin, code))
 
     expect(await screen.findByText(PAIRING_CODE_INVALID_MESSAGE)).toBeInTheDocument()
   })

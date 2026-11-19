@@ -1,74 +1,56 @@
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
-// Adapter to make node:sqlite compatible with bun:sqlite API
-export class Database {
-  private db: DatabaseSync
+export interface StatementChanges {
+  changes: number
+  lastInsertRowid: number | bigint
+}
+
+export class Database extends DatabaseSync {
   private transactionDepth = 0
 
   constructor(path: string) {
-    this.db = new DatabaseSync(path)
-    this.db.exec('PRAGMA foreign_keys = OFF')
+    super(path)
+    this.exec('PRAGMA foreign_keys = OFF')
   }
 
-  prepare(sql: string) {
-    const stmt = this.db.prepare(sql)
-    return {
-      run: (...params: unknown[]) => {
-        const result = (stmt.run as (...args: unknown[]) => { changes: number; lastInsertRowid: number })(...params)
-        return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
-      },
-      get: (...params: unknown[]) => (stmt.get as (...args: unknown[]) => unknown)(...params),
-      all: (...params: unknown[]) => (stmt.all as (...args: unknown[]) => unknown[])(...params),
-    }
+  run(sql: string, ...params: SQLInputValue[]): StatementChanges {
+    const result = this.prepare(sql).run(...params)
+    return { changes: Number(result.changes), lastInsertRowid: result.lastInsertRowid }
   }
 
   query(sql: string) {
     return this.prepare(sql)
   }
 
-  exec(sql: string) {
-    this.db.exec(sql)
-  }
-
-  run(sql: string, ...params: unknown[]) {
-    const stmt = this.db.prepare(sql)
-    const result = (stmt.run as (...args: unknown[]) => { changes: number; lastInsertRowid: number })(...params)
-    return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
-  }
-
-  transaction<T extends (...args: unknown[]) => void>(fn: T) {
-    return (...args: unknown[]) => {
+  transaction<Args extends unknown[], Result>(fn: (...args: Args) => Result): (...args: Args) => Result {
+    return (...args: Args) => {
       const nested = this.transactionDepth > 0
       const savepoint = `ocm_sp_${this.transactionDepth}`
       if (nested) {
-        this.db.exec(`SAVEPOINT ${savepoint}`)
+        this.exec(`SAVEPOINT ${savepoint}`)
       } else {
-        this.db.exec('BEGIN')
+        this.exec('BEGIN')
       }
       this.transactionDepth += 1
       try {
         const result = fn(...args)
         if (nested) {
-          this.db.exec(`RELEASE ${savepoint}`)
+          this.exec(`RELEASE ${savepoint}`)
         } else {
-          this.db.exec('COMMIT')
+          this.exec('COMMIT')
         }
         return result
-      } catch (e) {
+      } catch (error) {
         if (nested) {
-          this.db.exec(`ROLLBACK TO ${savepoint}`)
-          this.db.exec(`RELEASE ${savepoint}`)
+          this.exec(`ROLLBACK TO ${savepoint}`)
+          this.exec(`RELEASE ${savepoint}`)
         } else {
-          this.db.exec('ROLLBACK')
+          this.exec('ROLLBACK')
         }
-        throw e
+        throw error
       } finally {
         this.transactionDepth -= 1
       }
     }
-  }
-
-  close() {
-    this.db.close()
   }
 }

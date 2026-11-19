@@ -1,107 +1,88 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { ScheduleService } from '../../src/services/schedules'
+import { z } from 'zod'
 import { SettingsService } from '../../src/services/settings'
-import { createOpenCodeClient } from '../../src/services/opencode/client'
-import { allMigrations } from '../../src/db/migrations'
+import { ScheduleService } from '../../src/services/schedules'
+import { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
-import { migrate } from '../../src/db/migration-runner'
-import { createRepo } from '../../src/db/queries'
-import type { CreateRepoInput } from '../../src/types/repo'
-import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
+
+const RepoSummarySchema = z.object({
+  id: z.number(),
+  localPath: z.string(),
+  fullPath: z.string(),
+  cloneStatus: z.string(),
+})
+
+const ReposResponseSchema = z.object({ repos: z.array(RepoSummarySchema) })
+const SchedulesResponseSchema = z.object({ jobs: z.array(z.object({ id: z.number() })) })
+const ErrorResponseSchema = z.object({ error: z.string() })
 
 describe('internal-repos routes', () => {
-  let db: Database
-  let scheduleService: ScheduleService
+  let db: ReturnType<typeof createTestDatabase>
   let settingsService: SettingsService
   let app: Hono
   let token: string
 
+  function authHeaders() {
+    return { authorization: `Bearer ${token}` }
+  }
+
+  function jsonHeaders() {
+    return { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+  }
+
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    const openCodeClient = createOpenCodeClient()
-    const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
-    scheduleService = new ScheduleService(db, openCodeClient, stubWorktreeManager)
+    db = createTestDatabase()
+    const openCodeClient = createStubOpenCodeClient()
+    const gitAuthService = createGitAuthService()
+    const scheduleService = new ScheduleService(
+      db,
+      openCodeClient,
+      new ScheduleWorktreeManager(gitAuthService, db),
+    )
     settingsService = new SettingsService(db)
-    app = new Hono()
-    app.route('/api/internal', createInternalTestApp(db, { scheduleService, settingsService }))
     token = getOrCreateInternalToken(db)
+    app = new Hono()
+    app.route('/api/internal', createInternalTestApp(db, { scheduleService, settingsService, gitAuthService }))
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('GET /api/internal/repos returns 401 without bearer token', async () => {
     const res = await app.request('/api/internal/repos')
+
     expect(res.status).toBe(401)
   })
 
-  it('GET /api/internal/repos returns 200 with bearer token', async () => {
-    const res = await app.request('/api/internal/repos', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+  it('GET /api/internal/repos returns every repo', async () => {
+    const first = seedRepo(db, { localPath: 'repo1' })
+    const second = seedRepo(db, { localPath: 'repo2' })
+
+    const res = await app.request('/api/internal/repos', { headers: authHeaders() })
+    const body = await readJson(res, ReposResponseSchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { repos: unknown[] }
-    expect(body).toHaveProperty('repos')
-    expect(Array.isArray(body.repos)).toBe(true)
+    expect(body.repos.map((repo) => repo.id)).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(body.repos.map((repo) => repo.localPath)).toEqual(expect.arrayContaining(['repo1', 'repo2']))
   })
 
-  it('GET /api/internal/repos returns repos in default order', async () => {
-    const repo1Input: CreateRepoInput = {
-      localPath: 'repo1',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    const repo2Input: CreateRepoInput = {
-      localPath: 'repo2',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    createRepo(db, repo1Input)
-    createRepo(db, repo2Input)
+  it('GET /api/internal/repos respects the repoOrder preference', async () => {
+    const first = seedRepo(db, { localPath: 'repo1' })
+    const second = seedRepo(db, { localPath: 'repo2' })
+    settingsService.updateSettings({ repoOrder: [second.id, first.id] })
 
-    const res = await app.request('/api/internal/repos', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await app.request('/api/internal/repos', { headers: authHeaders() })
+    const body = await readJson(res, ReposResponseSchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { repos: Array<{ id: number; localPath: string }> }
-    expect(body.repos.length).toBe(2)
-  })
-
-  it('GET /api/internal/repos respects repoOrder preference', async () => {
-    const repo1Input: CreateRepoInput = {
-      localPath: 'repo1',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    const repo2Input: CreateRepoInput = {
-      localPath: 'repo2',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    const repo1 = createRepo(db, repo1Input)
-    const repo2 = createRepo(db, repo2Input)
-
-    settingsService.updateSettings({
-      repoOrder: [repo2.id, repo1.id],
-    })
-
-    const res = await app.request('/api/internal/repos', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { repos: Array<{ id: number; localPath: string }> }
-    expect(body.repos.length).toBe(2)
-    expect(body.repos[0]?.id).toBe(repo2.id)
-    expect(body.repos[1]?.id).toBe(repo1.id)
+    expect(body.repos.map((repo) => repo.id)).toEqual([second.id, first.id])
   })
 
   it('POST /api/internal/repos returns 401 without bearer token', async () => {
@@ -110,56 +91,52 @@ describe('internal-repos routes', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ repoUrl: 'https://github.com/owner/name' }),
     })
+
     expect(res.status).toBe(401)
   })
 
-  it('POST /api/internal/repos rejects a missing repoUrl, unknown keys, and invalid JSON', async () => {
-    const bodies = [JSON.stringify({}), JSON.stringify({ repoUrl: 'https://github.com/owner/name', localPath: '/etc' }), 'not json']
-    for (const body of bodies) {
-      const res = await app.request('/api/internal/repos', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body,
-      })
-      expect(res.status).toBe(400)
-    }
+  it.each([
+    { label: 'a missing repoUrl', body: JSON.stringify({}) },
+    { label: 'an unknown localPath key', body: JSON.stringify({ repoUrl: 'https://github.com/owner/name', localPath: '/etc' }) },
+    { label: 'invalid JSON', body: 'not json' },
+  ])('POST /api/internal/repos rejects $label', async ({ body: requestBody }) => {
+    const res = await app.request('/api/internal/repos', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: requestBody,
+    })
+    const body = await readJson(res, ErrorResponseSchema)
+
+    expect(res.status).toBe(400)
+    expect(body.error).not.toBe('')
   })
 
   it('POST /api/internal/repos returns the already registered repo for the same URL', async () => {
-    const existing = createRepo(db, {
-      repoUrl: 'https://github.com/owner/name',
+    const existing = seedRepo(db, {
       localPath: 'name',
-      defaultBranch: 'main',
       cloneStatus: 'ready',
-      clonedAt: Date.now(),
+      isLocal: false,
+      repoUrl: 'https://github.com/owner/name',
     })
 
     const res = await app.request('/api/internal/repos', {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: jsonHeaders(),
       body: JSON.stringify({ repoUrl: 'https://github.com/owner/name.git' }),
     })
+    const body = await readJson(res, RepoSummarySchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { id: number }
     expect(body.id).toBe(existing.id)
   })
 
-  it('GET /api/internal/repos/:id/schedules still works after adding repos route', async () => {
-    const repoInput: CreateRepoInput = {
-      localPath: 'test-repo',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    const repo = createRepo(db, repoInput)
+  it('GET /api/internal/repos/:id/schedules returns the schedule jobs', async () => {
+    const repo = seedRepo(db, { localPath: 'test-repo' })
 
-    const res = await app.request(`/api/internal/repos/${repo.id}/schedules`, {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await app.request(`/api/internal/repos/${repo.id}/schedules`, { headers: authHeaders() })
+    const body = await readJson(res, SchedulesResponseSchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { jobs: unknown[] }
-    expect(body).toHaveProperty('jobs')
-    expect(Array.isArray(body.jobs)).toBe(true)
+    expect(body.jobs).toEqual([])
   })
 })

@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import migration from '../../src/db/migrations/202610181300-session-server-scope'
 import { getSessionPermissionMode, setSessionPermissionMode } from '../../src/db/session-permission-modes'
+import { selectRow, selectRows, selectTableColumns } from '../../src/db/rows'
+import { getErrorMessage } from '../../src/utils/error-utils'
+
+const ServerIdRowSchema = z.object({ serverId: z.string() })
+const GoalIdRowSchema = z.object({ id: z.number() })
+const CountRowSchema = z.object({ count: z.number() })
+const IndexColumnSchema = z.object({ name: z.string() })
 
 interface InsertSessionGoalRowInput {
   sessionId: string
@@ -52,17 +60,15 @@ function tryInsertSessionGoalRow(db: Database, input: InsertSessionGoalRowInput)
   try {
     return insertSessionGoalRow(db, input)
   } catch (error) {
-    if (/UNIQUE constraint failed/i.test((error as Error).message)) {
+    if (/UNIQUE constraint failed/i.test(getErrorMessage(error))) {
       return null
     }
     throw error
   }
 }
 
-function sessionGoalServerIdRow(db: Database, id: number): { serverId: string } | undefined {
-  return db.prepare('SELECT server_id AS serverId FROM session_goals WHERE id = ?').get(id) as
-    | { serverId: string }
-    | undefined
+function sessionGoalServerIdRow(db: Database, id: number) {
+  return selectRow(db, ServerIdRowSchema, 'SELECT server_id AS serverId FROM session_goals WHERE id = ?', id)
 }
 
 function createTestDb(): Database {
@@ -112,24 +118,22 @@ function createLegacyTables(db: Database): void {
 }
 
 function tableColumns(db: Database, table: string): string[] {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((column) => column.name)
+  return selectTableColumns(db, table).map((column) => column.name)
 }
 
 function primaryKeyColumns(db: Database, table: string): string[] {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; pk: number }>)
+  return selectTableColumns(db, table)
     .filter((column) => column.pk > 0)
     .sort((left, right) => left.pk - right.pk)
     .map((column) => column.name)
 }
 
 function openGoalIndexColumns(db: Database): string[] {
-  return (db.prepare("PRAGMA index_info('idx_session_goals_open')").all() as Array<{ name: string }>).map(
-    (column) => column.name,
-  )
+  return selectRows(db, IndexColumnSchema, "PRAGMA index_info('idx_session_goals_open')").map((column) => column.name)
 }
 
 function countRows(db: Database, table: string): number {
-  return (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
+  return selectRow(db, CountRowSchema, `SELECT COUNT(*) AS count FROM ${table}`)?.count ?? 0
 }
 
 const GOAL_INPUT = {
@@ -235,7 +239,7 @@ describe('202610181300 session server scope migration', () => {
         VALUES(?,?,?,?,?,?,?,?)
       `)
       .run('ses_root', '/repo', 'Ship it', 'active', 'waiting', 1, Date.now(), Date.now())
-    const legacyGoalId = (legacyDb.prepare('SELECT id FROM session_goals LIMIT 1').get() as { id: number }).id
+    const legacyGoalId = selectRow(legacyDb, GoalIdRowSchema, 'SELECT id FROM session_goals LIMIT 1')?.id ?? 0
 
     migration.up(legacyDb)
     setSessionPermissionMode(legacyDb, 'ses_root', 'ask', 'srv_x')

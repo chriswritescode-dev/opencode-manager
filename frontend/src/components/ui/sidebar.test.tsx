@@ -9,6 +9,12 @@ Element.prototype.setPointerCapture ??= () => {}
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.releasePointerCapture ??= () => {}
 
+function firstElement(container: HTMLElement): HTMLElement {
+  const element = container.firstElementChild
+  if (!(element instanceof HTMLElement)) throw new Error('Sidebar rendered no element')
+  return element
+}
+
 describe('Sidebar', () => {
   it('renders children', () => {
     render(
@@ -47,7 +53,7 @@ describe('Sidebar', () => {
       </Sidebar>
     )
 
-    const aside = container.firstChild as HTMLElement
+    const aside = firstElement(container)
     expect(aside.style.width).toBe('320px')
     expect(aside).not.toHaveClass('w-60')
   })
@@ -59,7 +65,7 @@ describe('Sidebar', () => {
       </Sidebar>
     )
 
-    const aside = container.firstChild as HTMLElement
+    const aside = firstElement(container)
     expect(aside).toHaveClass('w-14')
     expect(aside.style.width).toBe('')
   })

@@ -1,22 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-
-const paths = vi.hoisted(() => ({ modelState: '' }))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getOpenCodeModelStatePath: () => paths.modelState,
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}))
-
+import { z } from 'zod'
+import { getOpenCodeModelStatePath } from '@opencode-manager/shared/config/env'
 import {
   addRecentModel,
   toggleFavoriteModel,
@@ -26,20 +12,34 @@ import {
   readOpenCodeModelState,
   updateOpenCodeModelState,
 } from '../../src/services/opencode-model-state'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+
+const StoredModelStateSchema = z.object({
+  session: z.object({ current: z.string() }).optional(),
+  extra: z.number().optional(),
+  recent: z.array(z.object({ providerID: z.string(), modelID: z.string() })),
+  favorite: z.array(z.object({ providerID: z.string(), modelID: z.string() })),
+  variant: z.record(z.string(), z.string()),
+})
 
 const emptyState = (): ModelPreference => ({ recent: [], favorite: [], variant: {} })
 
 describe('opencode-model-state', () => {
-  let workDir: string
+  let workspace: TempWorkspace
+  let modelStatePath: string
+
+  async function readStoredState() {
+    return StoredModelStateSchema.parse(JSON.parse(await readFile(modelStatePath, 'utf8')))
+  }
 
   beforeEach(async () => {
-    vi.clearAllMocks()
-    workDir = await mkdtemp(path.join(tmpdir(), 'opencode-model-state-'))
-    paths.modelState = path.join(workDir, 'model.json')
+    workspace = createTempWorkspace('opencode-model-state-')
+    modelStatePath = getOpenCodeModelStatePath()
+    await mkdir(path.dirname(modelStatePath), { recursive: true })
   })
 
-  afterEach(async () => {
-    await rm(workDir, { recursive: true, force: true })
+  afterEach(() => {
+    workspace.restore()
   })
 
   describe('readOpenCodeModelState', () => {
@@ -53,14 +53,14 @@ describe('opencode-model-state', () => {
         favorite: [{ providerID: 'openai', modelID: 'gpt-4' }],
         variant: { anthropic: 'thinking' },
       }
-      await writeFile(paths.modelState, JSON.stringify(state), 'utf8')
+      await writeFile(modelStatePath, JSON.stringify(state), 'utf8')
 
       await expect(readOpenCodeModelState()).resolves.toEqual(state)
     })
 
     it('drops malformed entries without resetting the whole file', async () => {
       await writeFile(
-        paths.modelState,
+        modelStatePath,
         JSON.stringify({
           recent: [{ providerID: 'a', modelID: 'b' }, { providerID: '' }],
           variant: { 'a/b': 'default', x: '' },
@@ -76,7 +76,7 @@ describe('opencode-model-state', () => {
     })
 
     it('returns empty defaults when the file has an unexpected shape', async () => {
-      await writeFile(paths.modelState, JSON.stringify({ recent: 'not-an-array' }), 'utf8')
+      await writeFile(modelStatePath, JSON.stringify({ recent: 'not-an-array' }), 'utf8')
 
       await expect(readOpenCodeModelState()).resolves.toEqual(emptyState())
     })
@@ -85,7 +85,7 @@ describe('opencode-model-state', () => {
   describe('updateOpenCodeModelState', () => {
     it('writes the mutated state and preserves unknown top-level keys', async () => {
       await writeFile(
-        paths.modelState,
+        modelStatePath,
         JSON.stringify({ session: { current: 'abc' }, recent: [{ providerID: 'anthropic', modelID: 'claude' }] }),
         'utf8',
       )
@@ -96,12 +96,7 @@ describe('opencode-model-state', () => {
 
       expect(next.recent[0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
 
-      const file = JSON.parse(await readFile(paths.modelState, 'utf8')) as {
-        session: unknown
-        recent: unknown[]
-        favorite: unknown[]
-        variant: Record<string, unknown>
-      }
+      const file = await readStoredState()
       expect(file.session).toEqual({ current: 'abc' })
       expect(file.recent[0]).toEqual({ providerID: 'openai', modelID: 'gpt-4o' })
       expect(file.favorite).toEqual([])
@@ -109,29 +104,26 @@ describe('opencode-model-state', () => {
     })
 
     it('preserves unknown top-level keys when toggling a favorite', async () => {
-      await writeFile(paths.modelState, JSON.stringify({ extra: 1, recent: [] }), 'utf8')
+      await writeFile(modelStatePath, JSON.stringify({ extra: 1, recent: [] }), 'utf8')
 
       await updateOpenCodeModelState(state =>
         toggleFavoriteModel(state, { providerID: 'anthropic', modelID: 'claude' }),
       )
 
-      const file = JSON.parse(await readFile(paths.modelState, 'utf8')) as {
-        extra: unknown
-        favorite: unknown[]
-      }
+      const file = await readStoredState()
       expect(file.extra).toBe(1)
       expect(file.favorite).toEqual([{ providerID: 'anthropic', modelID: 'claude' }])
     })
 
     it('recovers from corrupt JSON and writes valid state', async () => {
-      await writeFile(paths.modelState, '{ invalid json content }', 'utf8')
+      await writeFile(modelStatePath, '{ invalid json content }', 'utf8')
 
       const next = await updateOpenCodeModelState(state =>
         addRecentModel(state, { providerID: 'test', modelID: 'test' }),
       )
 
       expect(next.recent).toHaveLength(1)
-      const file = JSON.parse(await readFile(paths.modelState, 'utf8')) as { recent: unknown[] }
+      const file = await readStoredState()
       expect(file.recent).toHaveLength(1)
     })
 

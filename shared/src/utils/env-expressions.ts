@@ -16,8 +16,9 @@ const ENV_EXPRESSION_PATTERN = /\$\{\{([\s\S]*?)\}\}/g
 const ENV_EXPRESSION_REFERENCE_PATTERN = /^\s*(secrets|vars)\.(\S+)\s*$/i
 
 function toReference(match: RegExpExecArray): EnvExpressionReference {
+  const context = (match[1] ?? '').toLowerCase()
   return {
-    context: (match[1] ?? '').toLowerCase() as EnvExpressionContext,
+    context: context === 'vars' ? 'vars' : 'secrets',
     name: (match[2] ?? '').toUpperCase(),
   }
 }
@@ -28,11 +29,6 @@ function matchReference(inner: string): EnvExpressionReference | null {
   return toReference(match)
 }
 
-/**
- * Parses every `${{ ... }}` occurrence in a value, accepting only
- * `secrets.<NAME>` and `vars.<NAME>` references. The context is
- * case-insensitive and the name is normalized to upper case.
- */
 export function parseEnvExpressionReferences(value: string): ParseEnvExpressionReferencesResult {
   const references: EnvExpressionReference[] = []
 
@@ -50,16 +46,10 @@ export function parseEnvExpressionReferences(value: string): ParseEnvExpressionR
   return { ok: true, references }
 }
 
-/**
- * Replaces every `${{ secrets.<NAME> }}` / `${{ vars.<NAME> }}` occurrence with
- * the value returned by `lookup`. A reference that resolves to `undefined`
- * becomes an empty string, matching GitHub Actions. Unsupported expressions and
- * expressions with an invalid name are left untouched.
- */
 export function interpolateEnvExpressions(
   value: string,
   lookup: (reference: EnvExpressionReference) => string | undefined,
-): { value: string } {
+) {
   const interpolated = value.replace(ENV_EXPRESSION_PATTERN, (expression, inner: string) => {
     const reference = matchReference(inner)
     if (!reference) {

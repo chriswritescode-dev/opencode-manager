@@ -1,284 +1,217 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import { Route, Routes } from 'react-router-dom'
+import type { QueryClient } from '@tanstack/react-query'
+import type { Chat } from '@opencode-manager/shared/schemas'
 import { SessionDetail } from '../SessionDetail'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import { installMatchMedia, installWindowSize } from '@/test/browserFakes'
+import { makeSession } from '@/test/fixtures/api'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { sessionPageRoutes } from '@/test/sessionPage'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  useChat: vi.fn(),
-  useDeleteChatSession: vi.fn(),
-  useSessionTranscript: vi.fn(),
-  useSSE: vi.fn(),
-  useRepoActivity: vi.fn(),
-  useRepoSiblings: vi.fn(),
-  usePermissions: vi.fn(),
-  useForms: vi.fn(),
-  useSettings: vi.fn(),
-  useSettingsDialog: vi.fn(),
-  useMobile: vi.fn(),
-  useVisualViewport: vi.fn(),
-  useShortcutActions: vi.fn(),
-  useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
-  useTerminalDialogParam: vi.fn(),
-  useOpenCodeServers: vi.fn(),
-  useOpenCodeServerStatuses: vi.fn(),
-  getRepo: vi.fn(),
-  useSessionStatus: vi.fn(),
-  MessageThread: vi.fn(() => <div data-testid="message-thread" />),
-  PromptInput: vi.fn(() => null),
-  FileBrowserSheet: vi.fn(() => null),
-  TerminalPanel: vi.fn(() => null),
-  PreviewPanel: vi.fn(() => null),
-  ProjectActionsMenu: vi.fn(() => null),
-  RepoActionsDialog: vi.fn(() => null),
-  ResetPermissionsDialog: vi.fn(() => null),
-  RepoSkillsDialog: vi.fn(() => null),
-  RepoMcpDialog: vi.fn(() => null),
-  SourceControlPanel: vi.fn(() => null),
-  RemoteSourceControlPanel: vi.fn(() => null),
-  ChangesWalkthroughSheet: vi.fn(() => null),
-  ToolSidePanel: vi.fn(() => null),
-  SessionMoreButton: vi.fn(() => null),
-}))
+const CHAT_ID = '20260101-120000-abcdef'
+const SESSION_ID = 'ses_chat'
+const CHAT_SESSION_PATH = `/chats/${CHAT_ID}/sessions/${SESSION_ID}`
 
-vi.mock('@/api/repos', () => ({ getRepo: mocks.getRepo }))
-
-vi.mock('@/hooks/useChats', () => ({
-  useChat: mocks.useChat,
-  useDeleteChatSession: mocks.useDeleteChatSession,
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSession: mocks.useSession,
-  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useUpdateSession: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn() })),
-  useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useSessionTranscript', () => ({ useSessionTranscript: mocks.useSessionTranscript }))
-vi.mock('@/hooks/useRepoSiblings', () => ({ useRepoSiblings: mocks.useRepoSiblings }))
-vi.mock('@/hooks/useRepoActivity', () => ({ useRepoActivity: mocks.useRepoActivity }))
-vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: mocks.useOpenCodeServers,
-  useOpenCodeServerStatuses: mocks.useOpenCodeServerStatuses,
-}))
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
-}))
-vi.mock('@/hooks/useTTS', () => ({ useTTS: vi.fn(() => ({ isEnabled: false })) }))
-vi.mock('@/hooks/useSettings', () => ({ useSettings: mocks.useSettings }))
-vi.mock('@/hooks/useSettingsDialog', () => ({ useSettingsDialog: mocks.useSettingsDialog }))
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-  useSwipeBack: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-}))
-vi.mock('@/hooks/useVisualViewport', () => ({ useVisualViewport: mocks.useVisualViewport }))
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({ useShortcutActions: mocks.useShortcutActions }))
-vi.mock('@/hooks/useAutoScroll', () => ({ useAutoScroll: mocks.useAutoScroll }))
-vi.mock('@/hooks/useDialogParam', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useDialogParam')>()
-  return { ...actual, useDialogParam: mocks.useDialogParam }
-})
-vi.mock('@/hooks/useOpenTerminal', () => ({ useTerminalDialogParam: mocks.useTerminalDialogParam }))
-vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
-  getAssistantText: vi.fn(() => ''),
-  getLatestPlayableAssistantMessage: vi.fn(() => null),
-  useAutoPlayLastResponse: vi.fn(() => {}),
-}))
-vi.mock('@/hooks/useAutoOpenWalkthrough', () => ({ useAutoOpenWalkthrough: vi.fn(() => {}) }))
-vi.mock('@/hooks/useSpeakVisibleMessages', () => ({ useSpeakVisibleMessages: vi.fn(() => vi.fn()) }))
-vi.mock('@/hooks/useUndoMessage', () => ({
-  useUndoMessage: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useRedoMessage: vi.fn(() => ({ mutateAsync: vi.fn() })),
-}))
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), loading: vi.fn() },
-}))
-vi.mock('@/stores/uiStateStore', () => ({ useUIState: vi.fn(() => false) }))
-vi.mock('@/stores/sessionStatusStore', () => ({ useSessionStatus: mocks.useSessionStatus }))
-vi.mock('@/contexts/EventContext', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/contexts/EventContext')>()
-  return { ...actual, usePermissions: mocks.usePermissions, useForms: mocks.useForms }
-})
-
-vi.mock('@/components/message/MessageThread', () => ({ MessageThread: mocks.MessageThread }))
-vi.mock('@/components/message/PromptInput', () => ({ PromptInput: mocks.PromptInput }))
-vi.mock('@/components/message/FloatingTTSButton', () => ({ FloatingTTSButton: () => null }))
-vi.mock('@/components/message/MessageSkeleton', () => ({ MessageSkeleton: () => null }))
-vi.mock('@/components/session/SessionSendErrorBanner', () => ({ SessionSendErrorBanner: () => null }))
-vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: () => null }))
-vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: () => null }))
-vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: () => null }))
-vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: () => null }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
-  ChangesWalkthroughSheet: mocks.ChangesWalkthroughSheet,
-}))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: () => null }))
-vi.mock('@/components/navigation/SessionMoreButton', () => ({ SessionMoreButton: mocks.SessionMoreButton }))
-vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: mocks.ToolSidePanel }))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: mocks.FileBrowserSheet }))
-vi.mock('@/components/source-control', () => ({
-  SourceControlPanel: mocks.SourceControlPanel,
-  RemoteSourceControlPanel: mocks.RemoteSourceControlPanel,
-}))
-vi.mock('@/components/terminal/TerminalPanel', () => ({ TerminalPanel: mocks.TerminalPanel }))
-vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewPanel: mocks.PreviewPanel }))
-vi.mock('@/components/repo/ProjectActionsMenu', () => ({ ProjectActionsMenu: mocks.ProjectActionsMenu }))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: mocks.RepoActionsDialog }))
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
-  ResetPermissionsDialog: mocks.ResetPermissionsDialog,
-}))
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: mocks.RepoSkillsDialog }))
-vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: mocks.RepoMcpDialog }))
-
-const chatId = '20260101-120000-abcdef'
-const chat = {
-  id: chatId,
-  directory: `/chats/${chatId}/work`,
-  filesPath: `/chats/${chatId}`,
+const chat: Chat = {
+  id: CHAT_ID,
+  directory: `/chats/${CHAT_ID}/work`,
+  filesPath: `/chats/${CHAT_ID}`,
   createdAt: 1,
 }
 
-const chatSession = {
-  id: 'ses_chat',
-  projectID: 'prj_chat',
+const chatSession = makeSession({
+  id: SESSION_ID,
   title: 'Scratch chat',
-  time: { created: 1, updated: 2 },
   location: { directory: chat.directory },
+})
+
+interface ChatSessionOptions {
+  route?: string
+  chatRespond?: FetchRoute['respond']
+  queryClient?: QueryClient
 }
 
-function renderChatSession() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/chats/${chatId}/sessions/ses_chat`]}>
-        <Routes>
-          <Route path="/" element={null} />
-          <Route path="/chats/:chatId/sessions/:sessionId" element={<SessionDetail />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+function chatDirectoryListing(path: string) {
+  return {
+    name: 'work',
+    path,
+    isDirectory: true,
+    size: 0,
+    children: [],
+    lastModified: 0,
+  }
+}
+
+function chatRoutes(options: ChatSessionOptions): FetchRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/api/chats/:chatId',
+      respond: options.chatRespond ?? (() => ({ json: chat })),
+    },
+    {
+      method: 'GET',
+      path: '/api/chats/:chatId/terminals',
+      respond: () => ({ json: { terminals: [] } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/files',
+      respond: () => ({ json: chatDirectoryListing(chat.filesPath) }),
+    },
+    {
+      method: 'GET',
+      path: '/api/preview/ports',
+      respond: () => ({ json: { enabled: true, ports: [] } }),
+    },
+  ]
+}
+
+function renderChatSession(options: ChatSessionOptions = {}) {
+  return renderWithProviders(
+    <KeyboardShortcutsProvider>
+      <Routes>
+        <Route path="/" element={<div>home route</div>} />
+        <Route path="/chats/:chatId/sessions/:sessionId" element={<SessionDetail />} />
+      </Routes>
+    </KeyboardShortcutsProvider>,
+    {
+      route: options.route ?? CHAT_SESSION_PATH,
+      events: true,
+      tts: true,
+      queryClient: options.queryClient,
+      fetchRoutes: sessionPageRoutes({ session: chatSession, extraRoutes: chatRoutes(options) }),
+    },
   )
 }
 
-describe('SessionDetail chat session', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useChat.mockReturnValue({ data: chat, isLoading: false, error: undefined })
-    mocks.useDeleteChatSession.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
-    mocks.useSession.mockReturnValue({ data: chatSession, isLoading: false, error: undefined })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useRepoActivity.mockReturnValue(undefined)
-    mocks.useRepoSiblings.mockReturnValue({ data: [] })
-    mocks.usePermissions.mockReturnValue({
-      pendingCount: 0,
-      hasPermissionsForSession: vi.fn(() => false),
-      syncForSession: vi.fn(),
-    })
-    mocks.useForms.mockReturnValue({
-      current: null,
-      getForSession: vi.fn(() => null),
-      pendingCount: 0,
-      hasFormsForSession: vi.fn(() => false),
-      reply: vi.fn(),
-      cancel: vi.fn(),
-      forgetPendingActionsForSession: vi.fn(),
-      syncForSession: vi.fn(),
-    })
-    mocks.useSettings.mockReturnValue({ preferences: { expandToolCalls: false }, updateSettings: vi.fn() })
-    mocks.useSettingsDialog.mockReturnValue({ open: vi.fn(), openTab: vi.fn() })
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useVisualViewport.mockReturnValue({ keyboardHeight: 0 })
-    mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn(), scrollByUser: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
-    mocks.useTerminalDialogParam.mockReturnValue([false, vi.fn()])
-    mocks.useSessionStatus.mockReturnValue({ setStatus: vi.fn() })
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [], isLoading: false })
-    mocks.useOpenCodeServerStatuses.mockReturnValue({ statusById: {} })
+async function waitForComposer() {
+  await waitFor(() => {
+    expect(document.querySelector('[data-prompt-input]')).not.toBeNull()
   })
+}
 
+beforeEach(() => {
+  installMatchMedia(false)
+  installWindowSize(900)
+})
+
+describe('SessionDetail chat session', () => {
   it('renders the transcript and labels the project as a chat', async () => {
-    renderChatSession()
+    const { fetchFake } = renderChatSession()
 
-    expect(await screen.findByTestId('message-thread')).toBeInTheDocument()
-    expect(mocks.PromptInput).toHaveBeenCalled()
+    await waitForComposer()
+
+    expect(screen.getByText('No messages yet. Start a conversation below.')).toBeInTheDocument()
     expect(screen.getByText('Chat')).toBeInTheDocument()
+    expect(
+      fetchFake.findRequests('GET', '/api/opencode/api/session/:sessionId/message').length,
+    ).toBeGreaterThan(0)
   })
 
   it('does not load a Manager repository', async () => {
-    renderChatSession()
+    const { fetchFake } = renderChatSession()
 
-    await screen.findByTestId('message-thread')
+    await waitForComposer()
 
-    expect(mocks.getRepo).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', '/api/repos/:id')).toHaveLength(0)
   })
 
-  it('scopes the file browser, terminal, and preview to the chat folder', async () => {
-    renderChatSession()
+  it('scopes the file browser to the chat folder', async () => {
+    const { fetchFake } = renderChatSession({ route: `${CHAT_SESSION_PATH}?panel=files` })
 
-    await screen.findByTestId('message-thread')
-
-    expect(mocks.FileBrowserSheet.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ basePath: chat.filesPath }),
-    )
-    expect(mocks.TerminalPanel.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({
-        target: { kind: 'chat', chatId },
-        directory: chat.directory,
-      }),
-    )
-    expect(mocks.PreviewPanel.mock.calls.at(-1)?.[0]).toEqual(
-      expect.objectContaining({ directory: chat.directory }),
-    )
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('GET', '/api/files')?.searchParams.get('path')).toBe(chat.filesPath)
+    })
+    expect(screen.getByRole('heading', { name: 'Files' })).toBeInTheDocument()
   })
 
-  it('hides repository-only surfaces', async () => {
+  it('opens terminals for the chat folder', async () => {
+    const { fetchFake } = renderChatSession({ route: `${CHAT_SESSION_PATH}?panel=terminal` })
+
+    await waitFor(() => {
+      expect(
+        fetchFake.lastRequest('GET', '/api/chats/:chatId/terminals')?.searchParams.get('directory'),
+      ).toBe(chat.directory)
+    })
+    expect(fetchFake.findRequests('GET', '/api/repos/:id/terminals')).toHaveLength(0)
+  })
+
+  it('scopes the preview to the chat folder', async () => {
+    const { fetchFake } = renderChatSession({ route: `${CHAT_SESSION_PATH}?panel=preview` })
+
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('GET', '/api/preview/ports')?.searchParams.get('directory')).toBe(
+        chat.directory,
+      )
+    })
+  })
+
+  it('keeps repository-only tools out of the chat rail', async () => {
     renderChatSession()
 
-    await screen.findByTestId('message-thread')
+    const rail = await screen.findByRole('navigation', { name: 'Tools' })
 
-    expect(mocks.ProjectActionsMenu).not.toHaveBeenCalled()
-    expect(mocks.RepoActionsDialog).not.toHaveBeenCalled()
-    expect(mocks.RepoMcpDialog).not.toHaveBeenCalled()
-    expect(mocks.RepoSkillsDialog).not.toHaveBeenCalled()
-    expect(mocks.ResetPermissionsDialog).not.toHaveBeenCalled()
-    expect(mocks.SourceControlPanel).not.toHaveBeenCalled()
-    expect(mocks.RemoteSourceControlPanel).not.toHaveBeenCalled()
-    expect(mocks.ChangesWalkthroughSheet).not.toHaveBeenCalled()
+    for (const label of ['Sessions', 'Files', 'Terminal']) {
+      expect(within(rail).getByRole('button', { name: label })).toBeInTheDocument()
+    }
+    for (const label of [
+      'MCP',
+      'Skills',
+      'Source Control',
+      'Walkthrough',
+      'Actions',
+      'Reset Permissions',
+      'Schedules',
+      'Secrets',
+    ]) {
+      expect(within(rail).queryByRole('button', { name: label })).not.toBeInTheDocument()
+    }
+    expect(screen.queryByRole('button', { name: 'Project actions' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { surface: 'actions', url: '?panel=actions', label: 'Actions' },
+    { surface: 'mcp', url: '?panel=mcp', label: 'MCP' },
+    { surface: 'skills', url: '?panel=skills', label: 'Skills' },
+    { surface: 'source control', url: '?panel=sourceControl', label: 'Source Control' },
+    { surface: 'walkthrough', url: '?panel=walkthrough', label: 'Walkthrough' },
+    { surface: 'reset permissions', url: '?dialog=resetPermissions', label: 'Reset Permissions' },
+  ])('does not open the repository $surface surface for a chat', async ({ url, label }) => {
+    installWindowSize(700)
+
+    renderChatSession({ route: `${CHAT_SESSION_PATH}${url}` })
+
+    await waitForComposer()
+
+    expect(screen.queryByRole('dialog', { name: label })).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: label })).not.toBeInTheDocument()
   })
 
   it('shows a chat not-found state for an unknown chat', async () => {
-    mocks.useChat.mockReturnValue({ data: null, isLoading: false, error: undefined })
-
-    renderChatSession()
+    const { fetchFake } = renderChatSession({
+      chatRespond: () => ({ status: 404, json: { error: 'Chat not found' } }),
+    })
 
     expect(await screen.findByText('Chat not found')).toBeInTheDocument()
-    expect(screen.queryByTestId('message-thread')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-prompt-input]')).toBeNull()
+    expect(fetchFake.findRequests('GET', '/api/chats/:chatId')).toHaveLength(1)
   })
 
   it('shows the load error instead of not-found when the chat request fails', async () => {
-    mocks.useChat.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      error: new Error('Chat request failed'),
-    })
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { retryDelay: 0 } })
 
-    renderChatSession()
+    renderChatSession({
+      queryClient,
+      chatRespond: () => ({ status: 500, json: { error: 'Chat request failed' } }),
+    })
 
     expect(await screen.findByText('Chat request failed')).toBeInTheDocument()
     expect(screen.queryByText('Chat not found')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('message-thread')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-prompt-input]')).toBeNull()
   })
 })

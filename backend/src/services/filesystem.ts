@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { getBrowseRootPath } from '@opencode-manager/shared/config/env'
 import type { BrowseDirectoryResponse, DirectoryEntry } from '@opencode-manager/shared/types'
+import { getErrorCode } from './error-code'
 
 function getRoot(): string {
   const configured = getBrowseRootPath()
@@ -21,8 +22,8 @@ async function resolveWithinRoot(root: string, requestedPath?: string): Promise<
   let realResolved: string
   try {
     realResolved = await fs.realpath(resolved)
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException | undefined)?.code
+  } catch (err) {
+    const code = getErrorCode(err)
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       throw { message: 'Directory not found', statusCode: 404 }
     }

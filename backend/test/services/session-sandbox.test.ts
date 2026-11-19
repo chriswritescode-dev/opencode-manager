@@ -13,10 +13,10 @@ import { parseMemoryMib } from '../../src/services/sandbox/command'
 import { SettingsService } from '../../src/services/settings'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SessionSandboxService } from '../../src/services/session-sandbox'
-import { logger } from '../../src/utils/logger'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { SSEEvent } from '../../src/services/sse-aggregator'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
+import { expectLoggedMessage } from '../helpers/log-assertions'
 
 const DIRECTORY = '/abs/repo'
 
@@ -37,34 +37,54 @@ function createService(
   return new SessionSandboxService(db, new SessionAncestry(client), settingsService, sandboxes)
 }
 
+type SessionCreatedEvent = Extract<SSEEvent, { type: 'session.created' }>
+type SessionForkedEvent = Extract<SSEEvent, { type: 'session.forked' }>
+type SessionDeletedEvent = Extract<SSEEvent, { type: 'session.deleted' }>
+
 function sessionCreatedEvent(sessionID: string, parentID?: string): SSEEvent {
-  return {
-    id: `evt_created_${sessionID}`,
-    created: Date.now(),
-    type: 'session.created',
+  const data: SessionCreatedEvent['data'] = {
+    sessionID,
+    projectID: 'proj_test',
     location: { directory: DIRECTORY },
-    data: { sessionID, parentID },
-  } as unknown as SSEEvent
+    slug: sessionID,
+    version: '2.0.15',
+  }
+  if (parentID !== undefined) {
+    data.parentID = parentID
+  }
+  const event: SessionCreatedEvent = {
+    id: `evt_created_${sessionID}`,
+    created: 1,
+    type: 'session.created',
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
+    location: { directory: DIRECTORY },
+    data,
+  }
+  return event
 }
 
 function sessionForkedEvent(sessionID: string, parentID: string): SSEEvent {
-  return {
+  const event: SessionForkedEvent = {
     id: `evt_forked_${sessionID}`,
-    created: Date.now(),
+    created: 1,
     type: 'session.forked',
+    durable: { aggregateID: sessionID, seq: 1, version: 2 },
     location: { directory: DIRECTORY },
-    data: { sessionID, parentID, boundary: { messageID: 'msg_1', partID: null } },
-  } as unknown as SSEEvent
+    data: { sessionID, parentID, boundary: { type: 'before', messageID: 'msg_1' } },
+  }
+  return event
 }
 
 function sessionDeletedEvent(sessionID: string): SSEEvent {
-  return {
+  const event: SessionDeletedEvent = {
     id: `evt_deleted_${sessionID}`,
-    created: Date.now(),
+    created: 1,
     type: 'session.deleted',
+    durable: { aggregateID: sessionID, seq: 1, version: 2 },
     location: { directory: DIRECTORY },
     data: { sessionID },
-  } as unknown as SSEEvent
+  }
+  return event
 }
 
 describe('SessionSandboxService', () => {
@@ -336,22 +356,17 @@ describe('SessionSandboxService', () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', true)
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
-    try {
-      const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-        removeSessionSandbox: async () => {
-          throw new Error('msb rm failed')
-        },
-      })
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async () => {
+        throw new Error('msb rm failed')
+      },
+    })
 
-      await expect(service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))).resolves.toBeUndefined()
-      await vi.waitFor(() => {
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('msb rm failed'))
-      })
-      expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
-    } finally {
-      warn.mockRestore()
-    }
+    await expect(service.handleEvent(DIRECTORY, sessionDeletedEvent('ses_root'))).resolves.toBeUndefined()
+    await vi.waitFor(() => {
+      expectLoggedMessage('msb rm failed', 'warn')
+    })
+    expect(getSessionSandboxMode(db, 'ses_root')).toBeNull()
   })
 
   it('removes the sandbox microVM when sandboxing is turned off and returns the updated state', async () => {
@@ -411,23 +426,17 @@ describe('SessionSandboxService', () => {
     const settingsService = new SettingsService(db)
     settingsService.updateSettings({ sandbox: { enabled: true } })
     setSessionSandboxed(db, 'ses_root', true)
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
-    try {
-      const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
-        removeSessionSandbox: async () => {
-          throw new Error('msb rm failed')
-        },
-      })
+    const service = createService(db, createFakeSessionPermissionClient(), settingsService, {
+      removeSessionSandbox: async () => {
+        throw new Error('msb rm failed')
+      },
+    })
 
-      await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({ sandboxed: false })
-      await vi.waitFor(() => {
-        expect(warn).toHaveBeenCalledWith(expect.stringContaining('msb rm failed'))
-      })
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ses_root'))
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('turned off'))
-    } finally {
-      warn.mockRestore()
-    }
+    await expect(service.update('ses_root', { sandboxed: false })).resolves.toMatchObject({ sandboxed: false })
+    await vi.waitFor(() => {
+      expectLoggedMessage('ses_root after its sandbox was turned off', 'warn')
+    })
+    expectLoggedMessage('msb rm failed', 'warn')
   })
 
   it('does not remove the sandbox microVM when sandboxing is turned off and support is disabled', async () => {

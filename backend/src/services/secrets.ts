@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import type { SecretEntry, SecretKind } from '@opencode-manager/shared/schemas'
+import { SecretKindSchema, type SecretEntry, type SecretKind } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
 import { GLOBAL_SECRETS_SCOPE_ID } from '../db/secrets-scope'
 import { decryptSecret, encryptSecret } from '../utils/crypto'
 import { logger } from '../utils/logger'
@@ -11,16 +12,19 @@ export class SecretsServiceError extends Error {
   }
 }
 
-interface SecretRow {
-  kind: SecretKind
-  repo_id: number | null
-  environment: string
-  name: string
-  value: string
-  updated_at: number
-}
+const secretValueRowSchema = z.object({
+  kind: SecretKindSchema,
+  repo_id: z.number().nullable(),
+  environment: z.string(),
+  name: z.string(),
+  value: z.string(),
+})
 
-type SecretValueRow = Omit<SecretRow, 'updated_at'>
+const secretRowSchema = secretValueRowSchema.extend({ updated_at: z.number() })
+
+type SecretValueRow = z.infer<typeof secretValueRowSchema>
+
+type SecretRow = z.infer<typeof secretRowSchema>
 
 export interface ResolvedSecretValues {
   secrets: Record<string, string>
@@ -61,13 +65,15 @@ export class SecretsService {
   }
 
   resolveValues(repoId: number, environment: string | null): ResolvedSecretValues {
-    const rows = this.db
-      .prepare(
-        `SELECT kind, repo_id, environment, name, value FROM secrets
-         WHERE repo_id IS NULL OR repo_id = ?
-         ORDER BY CASE WHEN repo_id IS NULL THEN 0 WHEN environment = '' THEN 1 ELSE 2 END`,
-      )
-      .all(repoId) as SecretValueRow[]
+    const rows: SecretValueRow[] = secretValueRowSchema.array().parse(
+      this.db
+        .prepare(
+          `SELECT kind, repo_id, environment, name, value FROM secrets
+           WHERE repo_id IS NULL OR repo_id = ?
+           ORDER BY CASE WHEN repo_id IS NULL THEN 0 WHEN environment = '' THEN 1 ELSE 2 END`,
+        )
+        .all(repoId),
+    )
 
     const secrets: Record<string, string> = {}
     const vars: Record<string, string> = {}
@@ -92,19 +98,22 @@ export class SecretsService {
   }
 
   private selectRows(kind: SecretKind, repoId: number | null): SecretRow[] {
-    return this.db
-      .prepare(
-        'SELECT kind, repo_id, environment, name, value, updated_at FROM secrets WHERE kind = ? AND repo_id IS ? ORDER BY name',
-      )
-      .all(kind, repoId) as SecretRow[]
+    return secretRowSchema.array().parse(
+      this.db
+        .prepare(
+          'SELECT kind, repo_id, environment, name, value, updated_at FROM secrets WHERE kind = ? AND repo_id IS ? ORDER BY name',
+        )
+        .all(kind, repoId),
+    )
   }
 
   private toEntry(kind: SecretKind, row: SecretRow): SecretEntry {
-    return {
+    const entry: SecretEntry = {
       name: row.name,
       environment: row.environment === '' ? null : row.environment,
       updatedAt: row.updated_at,
-      ...(kind === 'variable' ? { value: row.value } : {}),
     }
+    if (kind === 'variable') entry.value = row.value
+    return entry
   }
 }

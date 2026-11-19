@@ -1,202 +1,195 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import type { RefObject } from 'react'
 import type { SessionMessageAssistant, SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import type { TTSState } from '@/hooks/useTTS'
-
-const mocks = vi.hoisted(() => ({
-  useTTS: vi.fn(),
-  showToastError: vi.fn(),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: mocks.useTTS,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: { error: mocks.showToastError },
-}))
-
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
+import { renderHookWithProviders } from '@/test/render'
+import { installAudio, installObjectUrl } from '@/test/browserFakes'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
+import { DEFAULT_TTS_CONFIG } from '@/api/types/settings'
+import { useTTS } from '@/hooks/useTTS'
 import { useSpeakVisibleMessages } from '../useSpeakVisibleMessages'
 
-interface MockTTSReturn {
-  speak: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  isEnabled: boolean
-  isPlaying: boolean
-  isLoading: boolean
-  state: TTSState
-  error: string | null
-  activeMessageId: string | null
+const SYNTHESIZE_ROUTE = '/api/tts/synthesize'
+
+const enabledTtsSettings: FetchRoute = {
+  method: 'GET',
+  path: '/api/settings',
+  respond: () => ({
+    json: makeSettingsResponse({
+      preferences: makeUserPreferences({
+        tts: { ...DEFAULT_TTS_CONFIG, enabled: true, provider: 'external', apiKey: 'test-key' },
+      }),
+    }),
+  }),
 }
 
-const rect = (top: number, bottom: number): DOMRect => ({
-  top,
-  bottom,
-  left: 0,
-  right: 100,
-  width: 100,
-  height: bottom - top,
-  x: 0,
-  y: top,
-  toJSON: () => ({}),
-} as DOMRect)
+function audioReply(): FetchRouteResult {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'audio/mpeg' },
+    blob: new Blob(['audio'], { type: 'audio/mpeg' }),
+  }
+}
 
-const buildContainer = (messageId: string): HTMLDivElement => {
+function rect(top: number, bottom: number): DOMRect {
+  return {
+    top,
+    bottom,
+    left: 0,
+    right: 100,
+    width: 100,
+    height: bottom - top,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  }
+}
+
+function buildContainer(messageIds: string[]): HTMLDivElement {
   const container = document.createElement('div')
   container.getBoundingClientRect = () => rect(0, 100)
-  const element = document.createElement('div')
-  element.dataset.messageId = messageId
-  element.getBoundingClientRect = () => rect(10, 30)
-  container.appendChild(element)
+  for (const messageId of messageIds) {
+    const element = document.createElement('div')
+    element.dataset.messageId = messageId
+    element.getBoundingClientRect = () => rect(10, 30)
+    container.appendChild(element)
+  }
   return container
 }
 
-const assistantMessage = (id: string, text: string): SessionMessageAssistant => ({
-  id,
-  type: 'assistant',
-  agent: 'test-agent',
-  model: { providerID: 'test-provider', id: 'test-model' },
-  content: [{ type: 'text', text }],
-  time: { created: 1, completed: 2 },
-})
+function assistantMessage(id: string, text: string): SessionMessageAssistant {
+  return {
+    id,
+    type: 'assistant',
+    agent: 'test-agent',
+    model: { providerID: 'test-provider', id: 'test-model' },
+    content: [{ type: 'text', text }],
+    time: { created: 1, completed: 2 },
+  }
+}
 
-describe('useSpeakVisibleMessages', () => {
-  const mockSpeak = vi.fn()
-  const mockStop = vi.fn()
+function renderSpeak(
+  messages: SessionMessageInfo[],
+  messageIds: string[],
+  routes: FetchRoute[],
+) {
+  const containerRef: RefObject<HTMLElement | null> = { current: buildContainer(messageIds) }
+  const rendered = renderHookWithProviders(
+    () => {
+      const tts = useTTS()
+      return { speakVisible: useSpeakVisibleMessages(containerRef, messages, 0), tts }
+    },
+    { theme: false, tts: true, fetchRoutes: routes },
+  )
 
-  const setupTTS = (overrides: Partial<MockTTSReturn> = {}) => {
-    const value: MockTTSReturn = {
-      speak: mockSpeak,
-      stop: mockStop,
-      isEnabled: true,
-      isPlaying: false,
-      isLoading: false,
-      state: 'idle',
-      error: null,
-      activeMessageId: null,
-      ...overrides,
-    }
-    mocks.useTTS.mockReturnValue(value)
+  const speakVisible = async () => {
+    await act(async () => {
+      rendered.result.current.speakVisible()
+      await Promise.resolve()
+    })
   }
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockSpeak.mockResolvedValue(true)
+  return { ...rendered, speakVisible }
+}
+
+describe('useSpeakVisibleMessages', () => {
+  it('speaks the visible assistant texts joined by a blank line', async () => {
+    const messages = [assistantMessage('a1', 'hello world'), assistantMessage('a2', 'second message')]
+    const { result, fetchFake, speakVisible } = renderSpeak(messages, ['a1', 'a2'], [
+      enabledTtsSettings,
+      { method: 'POST', path: SYNTHESIZE_ROUTE, respond: audioReply },
+    ])
+
+    await waitFor(() => expect(result.current.tts.isEnabled).toBe(true))
+    await speakVisible()
+
+    await waitFor(() => expect(fetchFake.lastRequest('POST', SYNTHESIZE_ROUTE)).toBeDefined())
+    expect(fetchFake.lastRequest('POST', SYNTHESIZE_ROUTE)?.body).toEqual({
+      text: 'hello world\nsecond message',
+    })
   })
 
-  it('stops playback while playing', () => {
-    setupTTS({ isPlaying: true })
-    const containerRef: RefObject<HTMLElement | null> = { current: null }
+  it('stops playback instead of restarting it while speaking', async () => {
+    const audio = installAudio()
+    installObjectUrl()
+    const messages = [assistantMessage('a1', 'hello world')]
+    const { result, fetchFake, speakVisible } = renderSpeak(messages, ['a1'], [
+      enabledTtsSettings,
+      { method: 'POST', path: SYNTHESIZE_ROUTE, respond: audioReply },
+    ])
 
-    const { result } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, [], 0)
-    )
+    await waitFor(() => expect(result.current.tts.isEnabled).toBe(true))
+    await speakVisible()
+    await waitFor(() => expect(result.current.tts.isPlaying).toBe(true))
 
-    result.current()
+    await speakVisible()
 
-    expect(mockStop).toHaveBeenCalledTimes(1)
-    expect(mockSpeak).not.toHaveBeenCalled()
+    expect(result.current.tts.isPlaying).toBe(false)
+    expect(audio.pause).toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', SYNTHESIZE_ROUTE)).toHaveLength(1)
   })
 
-  it('speaks the visible assistant texts joined by a blank line', () => {
-    setupTTS()
-    const container = buildContainer('a1')
-    const containerRef: RefObject<HTMLElement | null> = { current: container }
-    const messages: SessionMessageInfo[] = [assistantMessage('a1', 'hello world')]
+  it('does nothing when TTS is disabled', async () => {
+    const messages = [assistantMessage('a1', 'hello world')]
+    const { fetchFake, speakVisible, result } = renderSpeak(messages, ['a1'], [])
 
-    const { result } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, messages, 0)
-    )
+    await waitFor(() => expect(result.current.tts.isEnabled).toBe(false))
+    await speakVisible()
 
-    result.current()
-
-    expect(mockSpeak).toHaveBeenCalledTimes(1)
-    expect(mockSpeak).toHaveBeenCalledWith('hello world')
+    expect(fetchFake.findRequests('POST', SYNTHESIZE_ROUTE)).toHaveLength(0)
   })
 
-  it('does nothing when TTS is disabled', () => {
-    setupTTS({ isEnabled: false })
-    const container = buildContainer('a1')
-    const containerRef: RefObject<HTMLElement | null> = { current: container }
-    const messages: SessionMessageInfo[] = [assistantMessage('a1', 'hello world')]
+  it('shows one error toast after shortcut-started playback fails', async () => {
+    const messages = [assistantMessage('a1', 'hello world')]
+    const { result, fetchFake, speakVisible } = renderSpeak(messages, ['a1'], [
+      enabledTtsSettings,
+      { method: 'POST', path: SYNTHESIZE_ROUTE, respond: () => ({ status: 500, json: { error: 'Service down' } }) },
+    ])
 
-    const { result } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, messages, 0)
-    )
+    await waitFor(() => expect(result.current.tts.isEnabled).toBe(true))
+    await speakVisible()
 
-    result.current()
+    expect(await screen.findByText('Service down')).toBeInTheDocument()
 
-    expect(mockSpeak).not.toHaveBeenCalled()
+    await act(async () => {
+      void result.current.tts.speak('another attempt')
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fetchFake.findRequests('POST', SYNTHESIZE_ROUTE)).toHaveLength(2))
+
+    expect(screen.getAllByText('Service down')).toHaveLength(1)
   })
 
-  it('shows an error toast once after shortcut-started playback fails', () => {
-    setupTTS()
-    const container = buildContainer('a1')
-    const containerRef: RefObject<HTMLElement | null> = { current: container }
-    const messages: SessionMessageInfo[] = [assistantMessage('a1', 'hello world')]
+  it('does not toast when playback returns to idle before failing', async () => {
+    const messages = [assistantMessage('a1', 'hello world')]
+    let failNext = false
+    const { result, fetchFake, speakVisible } = renderSpeak(messages, ['a1'], [
+      enabledTtsSettings,
+      {
+        method: 'POST',
+        path: SYNTHESIZE_ROUTE,
+        respond: () => (failNext ? { status: 500, json: { error: 'Service down' } } : audioReply()),
+      },
+    ])
 
-    const { result, rerender } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, messages, 0)
-    )
+    await waitFor(() => expect(result.current.tts.isEnabled).toBe(true))
+    await speakVisible()
+    await waitFor(() => expect(result.current.tts.isPlaying).toBe(true))
 
-    result.current()
-    expect(mockSpeak).toHaveBeenCalledTimes(1)
+    act(() => {
+      result.current.tts.stop()
+    })
+    await waitFor(() => expect(result.current.tts.state).toBe('idle'))
 
-    setupTTS({ state: 'error', error: 'network failure' })
-    rerender()
+    failNext = true
+    await act(async () => {
+      void result.current.tts.speak('later failure')
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.tts.state).toBe('error'))
 
-    expect(mocks.showToastError).toHaveBeenCalledTimes(1)
-    expect(mocks.showToastError).toHaveBeenCalledWith('network failure')
-
-    setupTTS({ state: 'error', error: 'another failure' })
-    rerender()
-
-    expect(mocks.showToastError).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not toast when shortcut-started playback returns to idle', () => {
-    setupTTS()
-    const container = buildContainer('a1')
-    const containerRef: RefObject<HTMLElement | null> = { current: container }
-    const messages: SessionMessageInfo[] = [assistantMessage('a1', 'hello world')]
-
-    const { result, rerender } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, messages, 0)
-    )
-
-    result.current()
-
-    setupTTS({ state: 'playing' })
-    rerender()
-
-    setupTTS({ state: 'idle' })
-    rerender()
-
-    setupTTS({ state: 'error', error: 'late failure' })
-    rerender()
-
-    expect(mocks.showToastError).not.toHaveBeenCalled()
-  })
-
-  it('does not toast when playback becomes message-attributed', () => {
-    setupTTS()
-    const container = buildContainer('a1')
-    const containerRef: RefObject<HTMLElement | null> = { current: container }
-    const messages: SessionMessageInfo[] = [assistantMessage('a1', 'hello world')]
-
-    const { result, rerender } = renderHook(() =>
-      useSpeakVisibleMessages(containerRef, messages, 0)
-    )
-
-    result.current()
-
-    setupTTS({ state: 'playing', activeMessageId: 'a1' })
-    rerender()
-
-    setupTTS({ state: 'error', error: 'late failure', activeMessageId: 'a1' })
-    rerender()
-
-    expect(mocks.showToastError).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', SYNTHESIZE_ROUTE)).toHaveLength(2)
+    expect(screen.queryByText('Service down')).toBeNull()
   })
 })

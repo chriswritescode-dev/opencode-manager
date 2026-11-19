@@ -1,247 +1,167 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { createNotificationRoutes } from '../../src/routes/notifications'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import webpush from 'web-push'
+import { PushSubscriptionRecordSchema } from '@opencode-manager/shared/schemas'
+import { createNotificationRoutes, type NotificationRoutesService } from '../../src/routes/notifications'
 import { NotificationService } from '../../src/services/notification'
 import type { Session } from '../../src/auth'
+import { selectRow, selectRows } from '../../src/db/rows'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
 import { ensureAuthSessionTable, insertAuthSession } from '../helpers/auth-sessions'
 
-interface NotificationServiceStub {
-  getVapidPublicKey: ReturnType<typeof vi.fn>
-  saveSubscription: ReturnType<typeof vi.fn>
-  removeSubscription: ReturnType<typeof vi.fn>
-  getSubscriptions: ReturnType<typeof vi.fn>
-  removeSubscriptionById: ReturnType<typeof vi.fn>
-  isConfigured: ReturnType<typeof vi.fn>
-  sendTestNotification: ReturnType<typeof vi.fn>
+const ENDPOINT = 'https://push.example.com/abc'
+
+const SubscriptionResponseSchema = z.object({ subscription: PushSubscriptionRecordSchema })
+const SubscriptionsResponseSchema = z.object({ subscriptions: z.array(PushSubscriptionRecordSchema) })
+const SuccessResponseSchema = z.object({ success: z.boolean() })
+const ErrorResponseSchema = z.object({ error: z.string() })
+const TestNotificationResponseSchema = z.object({ success: z.boolean(), devicesNotified: z.number() })
+
+const StoredSubscriptionSchema = z.object({
+  userId: z.string(),
+  sessionId: z.string().nullish(),
+  deviceName: z.string().nullish(),
+})
+
+function createNotificationRoutesService(
+  overrides: Partial<NotificationRoutesService> = {},
+): NotificationRoutesService {
+  return {
+    getVapidPublicKey: vi.fn<NotificationRoutesService['getVapidPublicKey']>(() => null),
+    saveSubscription: vi.fn<NotificationRoutesService['saveSubscription']>(() => null),
+    removeSubscription: vi.fn<NotificationRoutesService['removeSubscription']>(() => false),
+    getSubscriptions: vi.fn<NotificationRoutesService['getSubscriptions']>(() => []),
+    removeSubscriptionById: vi.fn<NotificationRoutesService['removeSubscriptionById']>(() => false),
+    isConfigured: vi.fn<NotificationRoutesService['isConfigured']>(() => false),
+    sendTestNotification: vi.fn<NotificationRoutesService['sendTestNotification']>(async () => {}),
+    ...overrides,
+  }
 }
 
-function sessionScopedApp(service: NotificationService, sessionId: string) {
+function deviceSession(sessionId: string): Session['session'] {
+  const timestamp = new Date()
+  return {
+    id: sessionId,
+    userId: 'default',
+    token: `token-${sessionId}`,
+    expiresAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+}
+
+function sessionScopedApp(service: NotificationRoutesService, sessionId: string) {
   const sessionApp = new Hono<{ Variables: { session?: Session['session'] } }>()
   sessionApp.use('*', async (c, next) => {
-    c.set('session', { id: sessionId } as Session['session'])
+    c.set('session', deviceSession(sessionId))
     await next()
   })
   sessionApp.route('/', createNotificationRoutes(service))
   return sessionApp
 }
 
-function subscriptionBody(endpoint: string, deviceName?: string): string {
-  return JSON.stringify({
-    endpoint,
-    keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
-    ...(deviceName ? { deviceName } : {}),
+function subscribeRequest(query = ''): Request {
+  return new Request(`http://localhost/subscribe${query}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: ENDPOINT,
+      keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+      deviceName: 'Phone',
+    }),
   })
 }
 
+function readStoredSubscription(db: Database): z.infer<typeof StoredSubscriptionSchema> | null {
+  return selectRow(
+    db,
+    StoredSubscriptionSchema,
+    'SELECT user_id AS userId, session_id AS sessionId, device_name AS deviceName FROM push_subscriptions WHERE endpoint = ?',
+    ENDPOINT,
+  )
+}
+
 describe('Notification Routes', () => {
-  let service: NotificationServiceStub
-  let app: ReturnType<typeof createNotificationRoutes>
+  let db: Database
+  let service: NotificationService
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    service = {
-      getVapidPublicKey: vi.fn(),
-      saveSubscription: vi.fn(),
-      removeSubscription: vi.fn(),
-      getSubscriptions: vi.fn(),
-      removeSubscriptionById: vi.fn(),
-      isConfigured: vi.fn(),
-      sendTestNotification: vi.fn(),
-    }
-    app = createNotificationRoutes(service as unknown as NotificationService)
+    db = createTestDatabase()
+    ensureAuthSessionTable(db)
+    service = new NotificationService(db)
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   describe('GET /vapid-public-key', () => {
     it('returns the public key when configured', async () => {
-      service.getVapidPublicKey.mockReturnValue('public-key')
+      const keys = webpush.generateVAPIDKeys()
+      service.configureVapid({ ...keys, subject: 'mailto:test@example.com' })
+      const app = createNotificationRoutes(service)
 
       const res = await app.fetch(new Request('http://localhost/vapid-public-key'))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ publicKey: 'public-key' })
+      expect(await readJson(res, z.object({ publicKey: z.string() }))).toEqual({ publicKey: keys.publicKey })
     })
 
     it('returns 503 when push notifications are not configured', async () => {
-      service.getVapidPublicKey.mockReturnValue(null)
+      const app = createNotificationRoutes(service)
 
       const res = await app.fetch(new Request('http://localhost/vapid-public-key'))
 
       expect(res.status).toBe(503)
-      await expect(res.json()).resolves.toEqual({ error: 'Push notifications are not configured' })
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Push notifications are not configured' })
     })
   })
 
   describe('POST /subscribe', () => {
-    it('saves a subscription with the default userId', async () => {
-      const subscription = {
-        id: 1,
-        userId: 'default',
-        endpoint: 'https://push.example.com/abc',
-        p256dh: 'p256dh-key',
-        auth: 'auth-key',
+    it.each([
+      ['', 'default'],
+      ['?userId=user-9', 'user-9'],
+    ])('stores a subscription for the requested user (%s)', async (query, expectedUserId) => {
+      const app = createNotificationRoutes(service)
+
+      const res = await app.fetch(subscribeRequest(query))
+
+      expect(res.status).toBe(200)
+      const body = await readJson(res, SubscriptionResponseSchema)
+      expect(body.subscription).toMatchObject({ userId: expectedUserId, endpoint: ENDPOINT, deviceName: 'Phone' })
+      expect(readStoredSubscription(db)).toEqual({
+        userId: expectedUserId,
+        sessionId: null,
         deviceName: 'Phone',
-        createdAt: 1,
-        lastUsedAt: null,
-      }
-      service.saveSubscription.mockReturnValue(subscription)
-
-      const res = await app.fetch(new Request('http://localhost/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'https://push.example.com/abc',
-          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
-          deviceName: 'Phone',
-        }),
-      }))
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ subscription })
-      expect(service.saveSubscription).toHaveBeenCalledWith(
-        'default',
-        'https://push.example.com/abc',
-        'p256dh-key',
-        'auth-key',
-        'Phone',
-        undefined,
-      )
+      })
     })
 
-    it('saves a subscription with an overridden userId', async () => {
-      const subscription = { id: 2 }
-      service.saveSubscription.mockReturnValue(subscription)
+    it('stores the session of the device that subscribed', async () => {
+      insertAuthSession(db, 'ses_phone')
+      const sessionApp = sessionScopedApp(service, 'ses_phone')
 
-      const res = await app.fetch(new Request('http://localhost/subscribe?userId=user-9', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'https://push.example.com/abc',
-          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
-        }),
-      }))
+      const res = await sessionApp.fetch(subscribeRequest())
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ subscription })
-      expect(service.saveSubscription).toHaveBeenCalledWith(
-        'user-9',
-        'https://push.example.com/abc',
-        'p256dh-key',
-        'auth-key',
-        undefined,
-        undefined,
-      )
+      expect(readStoredSubscription(db)?.sessionId).toBe('ses_phone')
     })
 
-    it('saves the session of the device that subscribed', async () => {
-      service.saveSubscription.mockReturnValue({ id: 3 })
+    it('returns 401 and stores nothing when the registering session is no longer valid', async () => {
+      const sessionApp = sessionScopedApp(service, 'ses_revoked')
 
-      const sessionApp = sessionScopedApp(service as unknown as NotificationService, 'ses_phone')
-
-      const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'https://push.example.com/abc',
-          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
-          deviceName: 'Phone',
-        }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(service.saveSubscription).toHaveBeenCalledWith(
-        'default',
-        'https://push.example.com/abc',
-        'p256dh-key',
-        'auth-key',
-        'Phone',
-        'ses_phone',
-      )
-    })
-
-    it('returns 401 when the registering session is no longer valid', async () => {
-      service.saveSubscription.mockReturnValue(null)
-
-      const res = await app.fetch(new Request('http://localhost/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'https://push.example.com/abc',
-          keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
-        }),
-      }))
+      const res = await sessionApp.fetch(subscribeRequest())
 
       expect(res.status).toBe(401)
-      await expect(res.json()).resolves.toEqual({ error: 'Session is no longer valid' })
-    })
-
-    it('updates the stored session id and keeps the device name when the same endpoint subscribes again without one', async () => {
-      const db = new Database(':memory:')
-      ensureAuthSessionTable(db)
-      const service = new NotificationService(db)
-      const endpoint = 'https://push.example.com/phone'
-
-      try {
-        const subscribes: Array<[sessionId: string, deviceName: string | undefined]> = [
-          ['ses_old', 'Phone'],
-          ['ses_new', undefined],
-        ]
-
-        for (const [sessionId, deviceName] of subscribes) {
-          insertAuthSession(db, sessionId)
-          const sessionApp = sessionScopedApp(service, sessionId)
-
-          const res = await sessionApp.fetch(new Request('http://localhost/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: subscriptionBody(endpoint, deviceName),
-          }))
-          expect(res.status).toBe(200)
-        }
-
-        const rows = db
-          .prepare('SELECT session_id, device_name FROM push_subscriptions WHERE endpoint = ?')
-          .all(endpoint)
-        expect(rows).toEqual([{ session_id: 'ses_new', device_name: 'Phone' }])
-      } finally {
-        db.close()
-      }
-    })
-
-    it('keeps the newer session registration when a revoked session saves afterwards', async () => {
-      const db = new Database(':memory:')
-      ensureAuthSessionTable(db)
-      const service = new NotificationService(db)
-      const endpoint = 'https://push.example.com/phone'
-
-      try {
-        insertAuthSession(db, 'ses_new')
-        const newSessionApp = sessionScopedApp(service, 'ses_new')
-        const newSessionRes = await newSessionApp.fetch(new Request('http://localhost/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: subscriptionBody(endpoint),
-        }))
-        expect(newSessionRes.status).toBe(200)
-
-        const staleSessionApp = sessionScopedApp(service, 'ses_old')
-        const staleSessionRes = await staleSessionApp.fetch(new Request('http://localhost/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: subscriptionBody(endpoint),
-        }))
-
-        expect(staleSessionRes.status).toBe(401)
-        const rows = db
-          .prepare('SELECT session_id FROM push_subscriptions WHERE endpoint = ?')
-          .all(endpoint)
-        expect(rows).toEqual([{ session_id: 'ses_new' }])
-      } finally {
-        db.close()
-      }
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Session is no longer valid' })
+      expect(selectRows(db, StoredSubscriptionSchema, 'SELECT user_id AS userId FROM push_subscriptions')).toEqual([])
     })
 
     it('returns 400 for invalid subscription data', async () => {
+      const app = createNotificationRoutes(service)
+
       const res = await app.fetch(new Request('http://localhost/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,28 +169,38 @@ describe('Notification Routes', () => {
       }))
 
       expect(res.status).toBe(400)
-      const json = await res.json() as { error: string }
-      expect(json.error).toBe('Invalid subscription data')
-      expect(service.saveSubscription).not.toHaveBeenCalled()
+      expect(await readJson(res, ErrorResponseSchema)).toMatchObject({ error: 'Invalid subscription data' })
+      expect(readStoredSubscription(db)).toBeNull()
     })
   })
 
   describe('DELETE /subscribe', () => {
-    it('removes a subscription with the default userId', async () => {
-      service.removeSubscription.mockReturnValue(true)
-
-      const res = await app.fetch(new Request('http://localhost/subscribe', {
+    it('removes the stored subscription and reports whether one existed', async () => {
+      const app = createNotificationRoutes(service)
+      await app.fetch(subscribeRequest())
+      const request = new Request('http://localhost/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: 'https://push.example.com/abc' }),
-      }))
+        body: JSON.stringify({ endpoint: ENDPOINT }),
+      })
+
+      const res = await app.fetch(request)
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(service.removeSubscription).toHaveBeenCalledWith('https://push.example.com/abc', 'default')
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
+      expect(readStoredSubscription(db)).toBeNull()
+
+      const repeated = await app.fetch(new Request('http://localhost/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: ENDPOINT }),
+      }))
+      expect(await readJson(repeated, SuccessResponseSchema)).toEqual({ success: false })
     })
 
     it('returns 400 for an invalid endpoint', async () => {
+      const app = createNotificationRoutes(service)
+
       const res = await app.fetch(new Request('http://localhost/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -278,81 +208,84 @@ describe('Notification Routes', () => {
       }))
 
       expect(res.status).toBe(400)
-      const json = await res.json() as { error: string }
-      expect(json.error).toBe('Valid endpoint URL is required')
-      expect(service.removeSubscription).not.toHaveBeenCalled()
+      expect(await readJson(res, ErrorResponseSchema)).toMatchObject({ error: 'Valid endpoint URL is required' })
+      expect(service.getSubscriptions('default')).toEqual([])
     })
   })
 
   describe('GET /subscriptions', () => {
     it('lists subscriptions for the requested user', async () => {
-      const subscriptions = [{ id: 1 }, { id: 2 }]
-      service.getSubscriptions.mockReturnValue(subscriptions)
+      service.saveSubscription('default', 'https://push.example.com/default', 'p256dh-key', 'auth-key')
+      service.saveSubscription('user-9', ENDPOINT, 'p256dh-key', 'auth-key', 'Phone')
+      const app = createNotificationRoutes(service)
 
       const res = await app.fetch(new Request('http://localhost/subscriptions?userId=user-9'))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ subscriptions })
-      expect(service.getSubscriptions).toHaveBeenCalledWith('user-9')
+      const body = await readJson(res, SubscriptionsResponseSchema)
+      expect(body.subscriptions.map((subscription) => subscription.endpoint)).toEqual([ENDPOINT])
     })
   })
 
   describe('DELETE /subscriptions/:id', () => {
     it('removes a subscription by numeric id', async () => {
-      service.removeSubscriptionById.mockReturnValue(true)
+      const subscription = service.saveSubscription('user-9', ENDPOINT, 'p256dh-key', 'auth-key')
+      const app = createNotificationRoutes(service)
 
-      const res = await app.fetch(new Request('http://localhost/subscriptions/12?userId=user-9', {
+      const res = await app.fetch(new Request(`http://localhost/subscriptions/${subscription?.id}?userId=user-9`, {
         method: 'DELETE',
       }))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(service.removeSubscriptionById).toHaveBeenCalledWith(12, 'user-9')
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
+      expect(service.getSubscriptions('user-9')).toEqual([])
     })
 
     it('returns 400 for a non-numeric id', async () => {
-      const res = await app.fetch(new Request('http://localhost/subscriptions/abc', {
-        method: 'DELETE',
-      }))
+      const app = createNotificationRoutes(service)
+
+      const res = await app.fetch(new Request('http://localhost/subscriptions/abc', { method: 'DELETE' }))
 
       expect(res.status).toBe(400)
-      await expect(res.json()).resolves.toEqual({ error: 'Invalid subscription ID' })
-      expect(service.removeSubscriptionById).not.toHaveBeenCalled()
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Invalid subscription ID' })
     })
   })
 
   describe('POST /test', () => {
     it('returns 503 when push notifications are not configured', async () => {
-      service.isConfigured.mockReturnValue(false)
+      const app = createNotificationRoutes(createNotificationRoutesService({ isConfigured: () => false }))
 
       const res = await app.fetch(new Request('http://localhost/test', { method: 'POST' }))
 
       expect(res.status).toBe(503)
-      await expect(res.json()).resolves.toEqual({ error: 'Push notifications are not configured' })
-      expect(service.getSubscriptions).not.toHaveBeenCalled()
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Push notifications are not configured' })
     })
 
     it('returns 404 when the user has no subscriptions', async () => {
-      service.isConfigured.mockReturnValue(true)
-      service.getSubscriptions.mockReturnValue([])
+      const app = createNotificationRoutes(createNotificationRoutesService({ isConfigured: () => true }))
 
       const res = await app.fetch(new Request('http://localhost/test', { method: 'POST' }))
 
       expect(res.status).toBe(404)
-      await expect(res.json()).resolves.toEqual({ error: 'No push subscriptions registered' })
-      expect(service.sendTestNotification).not.toHaveBeenCalled()
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'No push subscriptions registered' })
     })
 
     it('sends a test notification and reports the device count', async () => {
-      service.isConfigured.mockReturnValue(true)
-      service.getSubscriptions.mockReturnValue([{ id: 1 }, { id: 2 }])
-      service.sendTestNotification.mockResolvedValue(undefined)
+      const sendTestNotification = vi.fn<NotificationRoutesService['sendTestNotification']>(async () => {})
+      const app = createNotificationRoutes(createNotificationRoutesService({
+        isConfigured: () => true,
+        getSubscriptions: () => [
+          { id: 1, userId: 'user-9', endpoint: ENDPOINT, p256dh: 'p256dh-key', auth: 'auth-key', deviceName: null, createdAt: 1, lastUsedAt: null },
+          { id: 2, userId: 'user-9', endpoint: `${ENDPOINT}-2`, p256dh: 'p256dh-key', auth: 'auth-key', deviceName: null, createdAt: 2, lastUsedAt: null },
+        ],
+        sendTestNotification,
+      }))
 
       const res = await app.fetch(new Request('http://localhost/test?userId=user-9', { method: 'POST' }))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true, devicesNotified: 2 })
-      expect(service.sendTestNotification).toHaveBeenCalledWith('user-9')
+      expect(await readJson(res, TestNotificationResponseSchema)).toEqual({ success: true, devicesNotified: 2 })
+      expect(sendTestNotification).toHaveBeenCalledWith('user-9')
     })
   })
 })

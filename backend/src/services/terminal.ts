@@ -3,12 +3,17 @@ import { formatTerminalTitle, parseTerminalTitle } from '@opencode-manager/share
 import type { TerminalInfo, TerminalKind } from '@opencode-manager/shared/types'
 import type { OpenCodeClient } from './opencode/client'
 import type { CredentialProvider } from './credential-provider'
-import type { RepoEnvService } from './repo-env'
+import type { RepoEnvResolver } from './repo-env'
 import { toWebSocketUrl } from './opencode/upstream'
 import { bridgeWebSocket, type WebSocketBridge, type WebSocketPeer } from '../utils/websocket-bridge'
 import { TerminalHub, TerminalHubRegistry } from './terminal-hub'
 
 type OpenCodePty = Awaited<ReturnType<OpenCodeClient['api']['pty']['list']>>['data'][number]
+type OpenCodePtyCreateInput = Parameters<OpenCodeClient['api']['pty']['create']>[0]
+
+type MutableFields<T> = T extends object ? { -readonly [K in keyof T]: T[K] } : T
+
+type MutablePtyCreateInput = MutableFields<OpenCodePtyCreateInput>
 type OpenCodePersistentPty = Awaited<ReturnType<OpenCodeClient['api']['experimental']['persistentPty']['list']>>[number]
 
 export interface CreateTerminalInput {
@@ -46,7 +51,7 @@ const DEFERRED_START_KINDS: ReadonlySet<TerminalKind> = new Set(['action', 'setu
 
 type DeferredRelease = 'pending' | 'released'
 
-function deferCommandStart(command: string, args: readonly string[]): { command: string; args: string[] } {
+function deferCommandStart(command: string, args: readonly string[]) {
   return {
     command: DEFERRED_START_SHELL,
     args: ['-c', DEFERRED_START_SCRIPT, DEFERRED_START_HANDLE, command, ...args],
@@ -56,8 +61,8 @@ function deferCommandStart(command: string, args: readonly string[]): { command:
 export class TerminalService {
   constructor(
     private readonly target: TerminalTarget,
-    private readonly credentialProvider: CredentialProvider,
-    private readonly repoEnvService: RepoEnvService,
+    private readonly credentialProvider: Pick<CredentialProvider, 'getGhCliEnv'>,
+    private readonly repoEnvService: RepoEnvResolver,
     private readonly openSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
     private readonly hubs: TerminalHubRegistry = new TerminalHubRegistry(),
     private readonly deferredReleases: Map<string, DeferredRelease> = new Map(),
@@ -90,20 +95,22 @@ export class TerminalService {
           ...(await this.repoEnvService.resolveForDirectory(directory)).env,
         }
       : {}
-    const result = await this.target.client.api.pty.create({
+    const ptyInput: MutablePtyCreateInput = {
       location: { directory },
       title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
-      ...(deferred
-        ? { command: deferred.command, args: deferred.args }
-        : {
-            ...(input.command !== undefined ? { command: input.command } : {}),
-            ...(input.args !== undefined ? { args: input.args } : {}),
-          }),
       env: {
         ...localEnv,
         ...input.env,
       },
-    })
+    }
+    if (deferred) {
+      ptyInput.command = deferred.command
+      ptyInput.args = deferred.args
+    } else {
+      if (input.command !== undefined) ptyInput.command = input.command
+      if (input.args !== undefined) ptyInput.args = input.args
+    }
+    const result = await this.target.client.api.pty.create(ptyInput)
     const terminal = this.toTerminalInfo(result.data)
     this.recordTerminal(directory, terminal.id, deferred !== undefined)
     return terminal
@@ -256,14 +263,15 @@ export class TerminalService {
 
   private toTerminalInfo(pty: OpenCodePty): TerminalInfo {
     const parsed = parseTerminalTitle(pty.title)
-    return {
+    const terminal: TerminalInfo = {
       id: pty.id,
       title: parsed.title,
       kind: parsed.kind,
-      ...(parsed.actionId ? { actionId: parsed.actionId } : {}),
       cwd: pty.cwd,
       status: pty.status,
-      ...(pty.exitCode !== undefined ? { exitCode: pty.exitCode } : {}),
     }
+    if (parsed.actionId) terminal.actionId = parsed.actionId
+    if (pty.exitCode !== undefined) terminal.exitCode = pty.exitCode
+    return terminal
   }
 }

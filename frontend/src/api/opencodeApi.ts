@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { ClientError, createOpenCodeApi, openCodeErrorStatus, type OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@opencode-manager/shared'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
@@ -5,7 +6,8 @@ import { API_BASE_URL, OPENCODE_API_ENDPOINT } from '@/config'
 
 const openCodeApis = new Map<string, OpenCodeApi>()
 
-/** Base URL of the OpenCode API for a server: the direct local endpoint or the remote proxy. */
+const clientErrorStatusSchema = z.object({ status: z.number().optional() })
+
 export function openCodeApiBaseUrl(serverId: string = LOCAL_OPENCODE_SERVER_ID): string {
   return serverId === LOCAL_OPENCODE_SERVER_ID
     ? OPENCODE_API_ENDPOINT
@@ -24,19 +26,19 @@ export function getOpenCodeApi(serverId: string = LOCAL_OPENCODE_SERVER_ID): Ope
   return api
 }
 
-function toFetchError(error: unknown): FetchError {
-  if (error instanceof FetchError) {
-    return error
+function toFetchError(cause: unknown): FetchError {
+  if (cause instanceof FetchError) {
+    return cause
   }
 
-  if (error instanceof ClientError) {
-    const status = (error.cause as { status?: number } | undefined)?.status
-    return new FetchError(error.message, status, error.reason)
+  if (cause instanceof ClientError) {
+    const parsedStatus = clientErrorStatusSchema.safeParse(cause.cause)
+    return new FetchError(cause.message, parsedStatus.success ? parsedStatus.data.status : undefined, cause.reason)
   }
 
-  const status = openCodeErrorStatus(error)
-  if (error instanceof Error) {
-    return new FetchError(error.message, status ?? 0, error.name)
+  const status = openCodeErrorStatus(cause)
+  if (cause instanceof Error) {
+    return new FetchError(cause.message, status ?? 0, cause.name)
   }
 
   return new FetchError('Request failed', status ?? 0)

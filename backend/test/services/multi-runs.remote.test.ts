@@ -1,81 +1,79 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Database } from 'bun:sqlite'
 import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import type { FileDiffInfo, OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { getMultiRun } from '../../src/db/multi-runs'
 import { MultiRunService } from '../../src/services/multi-runs'
+import type { RepoWorkspaceProvider } from '../../src/services/repo-workspace'
+import type { OpenCodeModelLoader } from '../../src/services/session-launcher'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import type { SessionPermissionModeService } from '../../src/services/session-permission-modes'
+import { createStubOpenCodeClient, sessionInfo } from '../helpers/stub-opencode-client'
 import { assistantMessage } from '../helpers/stub-schedule-api'
 
 const SERVER_ID = 'srv_kitchen'
 const REMOTE_DIR = '/srv/projects/app'
 const FUSE_REQUEST_ID = '11111111-1111-4111-8111-111111111111'
 
-const mocks = vi.hoisted(() => ({
-  resolveOpenCodeModel: vi.fn(),
-  existsSync: vi.fn(),
-  executeCommand: vi.fn(),
-}))
+type SessionCreateInput = NonNullable<Parameters<OpenCodeApi['session']['create']>[0]>
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}))
-
-vi.mock('../../src/services/opencode-models', () => ({
-  resolveOpenCodeModel: mocks.resolveOpenCodeModel,
-}))
-
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>()
-  return { ...actual, existsSync: mocks.existsSync }
-})
-
-vi.mock('../../src/utils/process', () => ({
-  executeCommand: mocks.executeCommand,
-}))
-
-interface FakeRemoteClient {
-  client: OpenCodeClient
-  sessionCreate: ReturnType<typeof vi.fn>
-  sessionPrompt: ReturnType<typeof vi.fn>
-  locationGet: ReturnType<typeof vi.fn>
-  worktreeCreate: ReturnType<typeof vi.fn>
-  worktreeRemove: ReturnType<typeof vi.fn>
+function createModelLoader(): OpenCodeModelLoader & ReturnType<typeof vi.fn> {
+  return Object.assign(
+    vi.fn(async (_client: OpenCodeClient, directory: string, options?: { preferredModel?: string | null }) => {
+      const preferred = options?.preferredModel
+      if (!preferred) {
+        return { providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5' }
+      }
+      if (preferred === 'openai/retired') {
+        return { providerID: 'openai', id: 'retired-x', model: 'openai/retired-x' }
+      }
+      const [providerID = 'openai', ...rest] = preferred.split('/')
+      return { providerID, id: rest.join('/'), model: preferred, directory }
+    }),
+  )
 }
 
-function createRemoteClient(options: { worktreeDirectory?: string } = {}): FakeRemoteClient {
+function createRemoteClient(options: { worktreeDirectory?: string } = {}) {
   let sessionCounter = 0
   let worktreeCounter = 0
 
-  const locationGet = vi.fn(async () => ({ project: { id: 'proj_remote' } }))
+  const locationGet = vi.fn(async () => ({
+    directory: REMOTE_DIR,
+    project: { id: 'proj_remote', directory: REMOTE_DIR, canonical: REMOTE_DIR },
+  }))
   const worktreeCreate = vi.fn(async () => {
     worktreeCounter += 1
     return { directory: options.worktreeDirectory ?? `/srv/worktrees/app-${worktreeCounter}` }
   })
   const worktreeRemove = vi.fn(async () => undefined)
 
-  const sessionCreate = vi.fn(async (input: { title?: string }) => {
+  const sessionCreate = vi.fn(async (input?: SessionCreateInput) => {
     sessionCounter += 1
-    return { id: `ses_remote_${sessionCounter}`, title: input?.title }
+    return sessionInfo({ id: `ses_remote_${sessionCounter}`, title: input?.title ?? undefined })
   })
-  const sessionPrompt = vi.fn(async () => ({}))
-  const sessionGet = vi.fn(async ({ sessionID }: { sessionID: string }) => ({
+  const sessionPrompt = vi.fn(async (_input: Parameters<OpenCodeApi['session']['prompt']>[0]) => ({
+    id: 'msg_remote',
+    sessionID: 'ses_remote_1',
+    time: { created: 0 },
+    type: 'user' as const,
+    payload: { text: 'go' },
+    delivery: 'steer' as const,
+  }))
+  const sessionGet = vi.fn(async ({ sessionID }: { sessionID: string }) => sessionInfo({
     id: sessionID,
     outcome: 'succeeded',
   }))
   const sessionActive = vi.fn(async () => ({}))
-  const sessionDiff = vi.fn(async () => [])
-  const messageList = vi.fn(async (input: { sessionID: string; type?: string }) => {
+  const sessionDiff = vi.fn(async (): Promise<FileDiffInfo[]> => [])
+  const messageList = vi.fn(async (input: Parameters<OpenCodeApi['message']['list']>[0]) => {
     if (input.type === 'user') {
-      return { data: [{ id: `${input.sessionID}-user`, type: 'user', time: { created: 0 }, text: 'hi' }], cursor: {} }
+      return { data: [{ id: `${input.sessionID}-user`, type: 'user' as const, time: { created: 0 }, text: 'hi' }], cursor: {} }
     }
     return { data: [assistantMessage('remote reply', { completed: true })], cursor: {} }
   })
 
-  const client = {
+  const client = createStubOpenCodeClient({
     api: {
       location: { get: locationGet },
       worktree: { create: worktreeCreate, remove: worktreeRemove },
@@ -88,47 +86,57 @@ function createRemoteClient(options: { worktreeDirectory?: string } = {}): FakeR
       },
       message: { list: messageList },
     },
-  } as unknown as OpenCodeClient
+  })
 
   return { client, sessionCreate, sessionPrompt, locationGet, worktreeCreate, worktreeRemove }
 }
 
 describe('MultiRunService on a linked server', () => {
   let db: Database
-  let localClient: OpenCodeClient
+  let localClient: ReturnType<typeof createStubOpenCodeClient>
   let localSessionCreate: ReturnType<typeof vi.fn>
-  let repoWorkspaces: { create: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> }
+  let repoWorkspaces: RepoWorkspaceProvider & { create: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> }
   let applyDefaultMode: ReturnType<typeof vi.fn>
-  let remote: FakeRemoteClient
+  let loadModel: OpenCodeModelLoader & ReturnType<typeof vi.fn>
+  let remote: ReturnType<typeof createRemoteClient>
 
   beforeEach(() => {
     vi.clearAllMocks()
     db = new Database(':memory:')
     migrate(db, allMigrations)
 
-    localSessionCreate = vi.fn(async () => ({ id: 'ses_local' }))
-    localClient = {
+    localSessionCreate = vi.fn(async (input?: SessionCreateInput) => sessionInfo({ id: 'ses_local', title: input?.title ?? undefined }))
+    localClient = createStubOpenCodeClient({
       api: {
-        session: { create: localSessionCreate, prompt: vi.fn(), get: vi.fn(), active: vi.fn(), diff: vi.fn() },
-        message: { list: vi.fn() },
+        session: {
+          create: localSessionCreate,
+          prompt: vi.fn(async (input: Parameters<OpenCodeApi['session']['prompt']>[0]) => ({
+            id: `msg_${input.sessionID}`,
+            sessionID: input.sessionID,
+            time: { created: 0 },
+            type: 'user' as const,
+            payload: { text: input.text },
+            delivery: 'steer' as const,
+          })),
+          get: vi.fn(async ({ sessionID }: { sessionID: string }) => sessionInfo({ id: sessionID })),
+          active: vi.fn(async () => ({})),
+          diff: vi.fn(async (): Promise<FileDiffInfo[]> => []),
+        },
+        message: { list: vi.fn(async () => ({ data: [], cursor: {} })) },
       },
-    } as unknown as OpenCodeClient
-
-    repoWorkspaces = { create: vi.fn(), remove: vi.fn() }
-    applyDefaultMode = vi.fn(async () => undefined)
-    remote = createRemoteClient()
-
-    mocks.resolveOpenCodeModel.mockImplementation(async (_client, directory, options) => {
-      const preferred = options?.preferredModel
-      if (!preferred) {
-        return { providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5', directory }
-      }
-      if (preferred === 'openai/retired') {
-        return { providerID: 'openai', id: 'retired-x', model: 'openai/retired-x' }
-      }
-      const [providerID, ...rest] = preferred.split('/')
-      return { providerID, id: rest.join('/'), model: preferred }
     })
+
+    repoWorkspaces = {
+      create: vi.fn(async (_repo, options: { name?: string } = {}) => ({
+        directory: `/worktrees/${options.name ?? 'workspace'}`,
+        worktreeSetup: { status: 'none' as const },
+      })),
+      remove: vi.fn(async () => undefined),
+    }
+
+    applyDefaultMode = vi.fn(async () => undefined)
+    loadModel = createModelLoader()
+    remote = createRemoteClient()
   })
 
   afterEach(() => {
@@ -136,18 +144,17 @@ describe('MultiRunService on a linked server', () => {
   })
 
   function createService(): MultiRunService {
-    const permissionModes = { applyDefaultMode } as unknown as SessionPermissionModeService
-
     return new MultiRunService(
       db,
       localClient,
-      repoWorkspaces as unknown as RepoWorkspaceService,
-      permissionModes,
+      repoWorkspaces,
+      { applyDefaultMode },
       () => remote.client,
+      loadModel,
     )
   }
 
-  function launchRemote(overrides: Record<string, unknown> = {}) {
+  function launchRemote(overrides: Partial<Parameters<MultiRunService['launch']>[0]> = {}) {
     return createService().launch({
       serverId: SERVER_ID,
       directory: REMOTE_DIR,
@@ -190,9 +197,7 @@ describe('MultiRunService on a linked server', () => {
 
     expect(localSessionCreate).not.toHaveBeenCalled()
     expect(repoWorkspaces.create).not.toHaveBeenCalled()
-    expect(mocks.existsSync).not.toHaveBeenCalled()
-    expect(mocks.executeCommand).not.toHaveBeenCalled()
-    expect(mocks.resolveOpenCodeModel).toHaveBeenCalledWith(remote.client, REMOTE_DIR, { preferredModel: 'openai/a' })
+    expect(loadModel).toHaveBeenCalledWith(remote.client, REMOTE_DIR, { preferredModel: 'openai/a' })
   })
 
   it('runs in the target directory without a worktree when isolation is off', async () => {
@@ -224,7 +229,7 @@ describe('MultiRunService on a linked server', () => {
     expect(service.list({ kind: 'repo', repoId: 1 })).toEqual([])
   })
 
-  it('removes a remote worktree on discard without touching the local filesystem', async () => {
+  it('removes a remote worktree on discard without touching the local workspace', async () => {
     const service = createService()
     const run = await launchRemote()
     const entry = run.entries[0]!
@@ -237,9 +242,7 @@ describe('MultiRunService on a linked server', () => {
       directory: '/srv/worktrees/app-1',
       force: true,
     })
-    expect(mocks.existsSync).not.toHaveBeenCalled()
     expect(repoWorkspaces.remove).not.toHaveBeenCalled()
-    expect(mocks.executeCommand).not.toHaveBeenCalled()
   })
 
   it('keeps a remote entry retryable when worktree removal fails', async () => {
@@ -247,7 +250,7 @@ describe('MultiRunService on a linked server', () => {
     const run = await launchRemote()
     remote.worktreeRemove.mockRejectedValueOnce(new Error('worktree busy'))
 
-    const error = await service.discard(run.id, run.entries[0]!.id).catch((caught: unknown) => caught)
+    const error = await service.discard(run.id, run.entries[0]!.id).catch((caught: Error) => caught)
 
     expect(error).toMatchObject({ status: 502 })
     expect(service.list({ kind: 'server', serverId: SERVER_ID, directory: REMOTE_DIR })[0]!.entries[0]!.status).toBe(

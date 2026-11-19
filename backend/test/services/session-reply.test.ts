@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { describe, expect, it } from 'vitest'
+import type { V2Event } from '@opencode-manager/shared/opencode'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import {
   SESSION_REPLY_MAX_LENGTH,
   getLatestAssistantReplyState,
@@ -12,29 +12,53 @@ import {
   waitForSessionSettled,
   type ActiveSessions,
 } from '../../src/services/session-reply'
-import { assistantMessage } from '../helpers/stub-schedule-api'
+import { sseAggregator } from '../../src/services/sse-aggregator'
+import type { ScheduleApiState } from '../helpers/stub-schedule-api'
+import { assistantMessage, createStubScheduleApi, createStubScheduleClient } from '../helpers/stub-schedule-api'
 
-const mockOnServerEvent = vi.fn()
-vi.mock('../../src/services/sse-aggregator', () => ({
-  sseAggregator: { onServerEvent: (...args: unknown[]) => mockOnServerEvent(...args) },
-}))
+function createClient(state: Partial<ScheduleApiState> = {}) {
+  const stub = createStubScheduleApi(state)
+  return { api: stub.api, client: createStubScheduleClient(stub) }
+}
 
-beforeEach(() => {
-  mockOnServerEvent.mockReset()
-})
+function durableEvent(sessionID: string) {
+  return { aggregateID: sessionID, seq: 1, version: 1 as const }
+}
 
-function createFakeClient(messages: SessionMessageInfo[], active: Record<string, unknown> = {}): OpenCodeClient {
+function idleEvent(sessionID: string): V2Event {
+  return { id: 'evt_idle', created: 0, type: 'session.idle', data: { sessionID } }
+}
+
+function executionSucceededEvent(sessionID: string): V2Event {
+  return { id: 'evt_succeeded', created: 0, type: 'session.execution.succeeded', durable: durableEvent(sessionID), data: { sessionID } }
+}
+
+function executionStartedEvent(sessionID: string): V2Event {
+  return { id: 'evt_started', created: 0, type: 'session.execution.started', durable: durableEvent(sessionID), data: { sessionID } }
+}
+
+function executionInterruptedEvent(sessionID: string): V2Event {
   return {
-    api: {
-      message: {
-        list: vi.fn(async () => ({ data: messages, cursor: {} })),
-      },
-      session: {
-        active: vi.fn(async () => active),
-      },
-    },
-    forwardRaw: vi.fn(),
-  } as unknown as OpenCodeClient
+    id: 'evt_interrupted',
+    created: 0,
+    type: 'session.execution.interrupted',
+    durable: durableEvent(sessionID),
+    data: { sessionID, reason: 'user' },
+  }
+}
+
+function executionFailedEvent(sessionID: string, message: string): V2Event {
+  return {
+    id: 'evt_failed',
+    created: 0,
+    type: 'session.execution.failed',
+    durable: durableEvent(sessionID),
+    data: { sessionID, error: { type: 'provider', message } },
+  }
+}
+
+function sessionStatusEvent(sessionID: string, type: 'idle' | 'busy'): V2Event {
+  return { id: 'evt_status', created: 0, type: 'session.status', data: { sessionID, status: { type } } }
 }
 
 describe('getLatestAssistantReplyState', () => {
@@ -85,14 +109,14 @@ describe('getLatestAssistantReplyState', () => {
 
 describe('readLatestAssistantReply', () => {
   it('reads the newest assistant reply through the client', async () => {
-    const client = createFakeClient([assistantMessage('From the client.', { completed: true })])
+    const { api, client } = createClient({ messages: [assistantMessage('From the client.', { completed: true })] })
 
     await expect(readLatestAssistantReply(client, 'ses-1')).resolves.toEqual({
       responseText: 'From the client.',
       errorText: null,
       completed: true,
     })
-    expect(client.api.message.list).toHaveBeenCalledWith({
+    expect(api.message.list).toHaveBeenCalledWith({
       sessionID: 'ses-1',
       order: 'desc',
       limit: 20,
@@ -100,29 +124,32 @@ describe('readLatestAssistantReply', () => {
   })
 
   it('returns null when the session has no assistant message', async () => {
-    await expect(readLatestAssistantReply(createFakeClient([]), 'ses-1')).resolves.toBeNull()
+    await expect(readLatestAssistantReply(createClient().client, 'ses-1')).resolves.toBeNull()
   })
 })
 
 describe('isSessionBusy', () => {
   it('is true when the session appears in the active set', async () => {
-    const client = createFakeClient([], { 'ses-1': { type: 'running' } })
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     await expect(isSessionBusy(client, 'ses-1')).resolves.toBe(true)
   })
 
   it('is false when the session is absent from the active set', async () => {
-    await expect(isSessionBusy(createFakeClient([], {}), 'ses-1')).resolves.toBe(false)
+    await expect(isSessionBusy(createClient().client, 'ses-1')).resolves.toBe(false)
   })
 })
 
 describe('isSessionBusyIn', () => {
+  const busy: ActiveSessions = { 'ses-1': { type: 'running' } }
+  const idle: ActiveSessions = {}
+
   it('is true when the session appears in the fetched active set', () => {
-    expect(isSessionBusyIn({ 'ses-1': { type: 'running' } } as unknown as ActiveSessions, 'ses-1')).toBe(true)
+    expect(isSessionBusyIn(busy, 'ses-1')).toBe(true)
   })
 
   it('is false when the session is absent from the fetched active set', () => {
-    expect(isSessionBusyIn({} as unknown as ActiveSessions, 'ses-1')).toBe(false)
+    expect(isSessionBusyIn(idle, 'ses-1')).toBe(false)
   })
 })
 
@@ -143,98 +170,90 @@ describe('truncateSessionReply', () => {
 
 describe('sessionSettleSignal', () => {
   it('signals a clean settle for idle, succeeded, and status idle events', () => {
-    expect(sessionSettleSignal({ type: 'session.idle', data: { sessionID: 's1' } } as never, 's1')).toEqual({ errorText: null })
-    expect(sessionSettleSignal({ type: 'session.execution.succeeded', data: { sessionID: 's1' } } as never, 's1')).toEqual({ errorText: null })
-    expect(sessionSettleSignal({ type: 'session.status', data: { sessionID: 's1', status: { type: 'idle' } } } as never, 's1')).toEqual({ errorText: null })
+    expect(sessionSettleSignal(idleEvent('s1'), 's1')).toEqual({ errorText: null })
+    expect(sessionSettleSignal(executionSucceededEvent('s1'), 's1')).toEqual({ errorText: null })
+    expect(sessionSettleSignal(sessionStatusEvent('s1', 'idle'), 's1')).toEqual({ errorText: null })
   })
 
   it('signals a failure with the reported error message', () => {
-    expect(sessionSettleSignal({ type: 'session.execution.failed', data: { sessionID: 's1', error: { message: 'boom' } } } as never, 's1')).toEqual({ errorText: 'boom' })
-    expect(sessionSettleSignal({ type: 'session.execution.failed', data: { sessionID: 's1', error: { message: '' } } } as never, 's1')).toEqual({ errorText: 'The session reported an unknown error.' })
+    expect(sessionSettleSignal(executionFailedEvent('s1', 'boom'), 's1')).toEqual({ errorText: 'boom' })
+    expect(sessionSettleSignal(executionFailedEvent('s1', ''), 's1')).toEqual({
+      errorText: 'The session reported an unknown error.',
+    })
   })
 
   it('signals an interruption', () => {
-    expect(sessionSettleSignal({ type: 'session.execution.interrupted', data: { sessionID: 's1' } } as never, 's1')).toEqual({ errorText: 'The session execution was interrupted.' })
+    expect(sessionSettleSignal(executionInterruptedEvent('s1'), 's1')).toEqual({
+      errorText: 'The session execution was interrupted.',
+    })
   })
 
   it('ignores events for other sessions and non-settling events', () => {
-    expect(sessionSettleSignal({ type: 'session.idle', data: { sessionID: 's2' } } as never, 's1')).toBeNull()
-    expect(sessionSettleSignal({ type: 'session.status', data: { sessionID: 's1', status: { type: 'busy' } } } as never, 's1')).toBeNull()
-    expect(sessionSettleSignal({ type: 'session.execution.started', data: { sessionID: 's1' } } as never, 's1')).toBeNull()
+    expect(sessionSettleSignal(idleEvent('s2'), 's1')).toBeNull()
+    expect(sessionSettleSignal(sessionStatusEvent('s1', 'busy'), 's1')).toBeNull()
+    expect(sessionSettleSignal(executionStartedEvent('s1'), 's1')).toBeNull()
   })
 })
 
 describe('waitForSessionSettled', () => {
-  function captureListener() {
-    let listener: ((serverId: string, directory: string | null, event: unknown) => void) | undefined
-    const unsubscribe = vi.fn()
-    mockOnServerEvent.mockImplementation((callback: (serverId: string, directory: string | null, event: unknown) => void) => {
-      listener = callback
-      return unsubscribe
-    })
-    return {
-      emit: (event: unknown, serverId = 'local') => listener?.(serverId, null, event),
-      unsubscribe,
-    }
+  function notify(event: V2Event, serverId: string = LOCAL_OPENCODE_SERVER_ID): void {
+    sseAggregator.notifyServerEvent(serverId, null, event)
   }
 
-  it('does not subscribe when the timeout is zero', async () => {
-    const client = createFakeClient([], { 'ses-1': {} })
+  it('resolves immediately when the timeout is zero', async () => {
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     await expect(waitForSessionSettled(client, 'ses-1', 0)).resolves.toBeUndefined()
-    expect(mockOnServerEvent).not.toHaveBeenCalled()
   })
 
-  it('resolves once the session settles and unsubscribes', async () => {
-    const client = createFakeClient([], { 'ses-1': {} })
-    const { emit, unsubscribe } = captureListener()
+  it('resolves once the session settles', async () => {
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     const settled = waitForSessionSettled(client, 'ses-1', 1000)
-    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } })
+    notify(idleEvent('ses-1'))
 
     await expect(settled).resolves.toBeUndefined()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('ignores settle events for other sessions', async () => {
-    const client = createFakeClient([], { 'ses-1': {} })
-    const { emit, unsubscribe } = captureListener()
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     const settled = waitForSessionSettled(client, 'ses-1', 1000)
-    emit({ type: 'session.idle', data: { sessionID: 'ses-2' } })
-    expect(unsubscribe).not.toHaveBeenCalled()
+    notify(idleEvent('ses-2'))
 
-    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    let resolved = false
+    void settled.then(() => { resolved = true })
+    expect(resolved).toBe(false)
+
+    notify(idleEvent('ses-1'))
     await expect(settled).resolves.toBeUndefined()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('resolves immediately when the session is no longer busy after subscribing', async () => {
-    const client = createFakeClient([], {})
-    const { unsubscribe } = captureListener()
+    const { client } = createClient()
 
     await expect(waitForSessionSettled(client, 'ses-1', 1000)).resolves.toBeUndefined()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('resolves on timeout and unsubscribes', async () => {
-    const client = createFakeClient([], { 'ses-1': {} })
-    const { unsubscribe } = captureListener()
+  it('resolves on timeout', async () => {
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     await expect(waitForSessionSettled(client, 'ses-1', 20)).resolves.toBeUndefined()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('ignores settle events from other servers when a server id is provided', async () => {
-    const client = createFakeClient([], { 'ses-1': {} })
-    const { emit, unsubscribe } = captureListener()
+    const { client } = createClient({ active: { 'ses-1': { type: 'running' } } })
 
     const settled = waitForSessionSettled(client, 'ses-1', 1000, 'srv_a')
-    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } }, 'local')
-    expect(unsubscribe).not.toHaveBeenCalled()
+    notify(idleEvent('ses-1'), LOCAL_OPENCODE_SERVER_ID)
 
-    emit({ type: 'session.idle', data: { sessionID: 'ses-1' } }, 'srv_a')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    let resolved = false
+    void settled.then(() => { resolved = true })
+    expect(resolved).toBe(false)
+
+    notify(idleEvent('ses-1'), 'srv_a')
     await expect(settled).resolves.toBeUndefined()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 })

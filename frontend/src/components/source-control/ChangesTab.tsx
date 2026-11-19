@@ -15,7 +15,7 @@ interface ChangesTabProps {
   onClearFileSelection?: () => void
   selectedFile?: {path: string, staged: boolean}
   isMobile: boolean
-  onError?: (error: unknown) => void
+  onError?: (cause: unknown) => void
 }
 
 export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selectedFile, isMobile, onError }: ChangesTabProps) {

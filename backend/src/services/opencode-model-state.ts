@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { JsonObjectSchema, JsonValueSchema } from '@opencode-manager/shared/utils'
 import { getOpenCodeModelStatePath } from '@opencode-manager/shared/config/env'
 import {
   decodeModelPreference,
@@ -14,7 +15,7 @@ export const ModelSelectionSchema = z.object({
 })
 
 export async function readOpenCodeModelState(): Promise<ModelPreference> {
-  const raw = await readJsonSafe<unknown>(getOpenCodeModelStatePath(), null)
+  const raw = await readJsonSafe(getOpenCodeModelStatePath(), JsonValueSchema, null)
   return toModelPreference(decodeModelPreference(raw))
 }
 
@@ -24,7 +25,7 @@ export async function updateOpenCodeModelState(
   const modelStatePath = getOpenCodeModelStatePath()
 
   return withFileLock(modelStatePath, async () => {
-    const raw = await readJsonSafe<unknown>(modelStatePath, {})
+    const raw = await readJsonSafe(modelStatePath, JsonObjectSchema, {})
     const decoded = decodeModelPreference(raw)
     const next = mutate(decoded)
 

@@ -1,86 +1,111 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ServerHealthStatus } from './ServerHealthStatus'
-import { useServerHealth } from '@/hooks/useServerHealth'
-import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
+import { renderWithProviders } from '@/test/render'
+import { makeHealthResponse } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { HealthResponse } from '@/hooks/useServerHealth'
 
-vi.mock('@/hooks/useServerHealth')
-vi.mock('@/hooks/useOpenCodeServerActions')
-vi.mock('@/components/settings/RestartServerDialog', () => ({
-  RestartServerDialog: () => null,
-}))
-
-function mockHealth() {
-  vi.mocked(useServerHealth).mockReturnValue({
-    data: { opencode: 'healthy', opencodeVersion: '1.18.16' },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  } as ReturnType<typeof useServerHealth>)
+interface HealthRenderOptions {
+  health?: Partial<HealthResponse>
+  activeSessions?: number
 }
 
-function mockActions(overrides: Partial<ReturnType<typeof useOpenCodeServerActions>> = {}) {
-  vi.mocked(useOpenCodeServerActions).mockReturnValue({
-    restartServerMutation: { isPending: false },
-    upgradeOpenCodeMutation: { isPending: false },
-    confirmOpen: false,
-    setConfirmOpen: vi.fn(),
-    activeSessionCount: 0,
-    requestRestart: vi.fn(),
-    confirmRestart: vi.fn(),
-    performUpgrade: vi.fn(),
-    ...overrides,
-  } as ReturnType<typeof useOpenCodeServerActions>)
+function renderHealthStatus(options: HealthRenderOptions = {}) {
+  const fetchRoutes: FetchRoute[] = [
+    { method: 'GET', path: '/api/health', respond: () => ({ json: makeHealthResponse({ opencode: 'healthy', opencodeVersion: '1.18.16', ...options.health }) }) },
+    {
+      method: 'POST',
+      path: '/api/settings/opencode-upgrade',
+      respond: () => ({ json: { success: true, message: 'Upgraded', upgraded: true, newVersion: '1.19.0' } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/settings/opencode-active-sessions',
+      respond: () => ({ json: { count: options.activeSessions ?? 0, sessions: [] } }),
+    },
+    {
+      method: 'POST',
+      path: '/api/settings/opencode-restart',
+      respond: () => ({ json: { success: true, message: 'Server restarted' } }),
+    },
+  ]
+  const result = renderWithProviders(<ServerHealthStatus />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
+  })
+  return result
 }
 
 describe('ServerHealthStatus', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockHealth()
-    mockActions()
-  })
+  it('keeps Update, Restart, and Versions enabled once health is reported', async () => {
+    renderHealthStatus()
 
-  it('keeps Update, Restart, and Versions enabled', () => {
-    render(<ServerHealthStatus />)
-
+    expect(await screen.findByText('Server Status: Healthy')).toBeInTheDocument()
+    expect(screen.getByText('OpenCode v1.18.16')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Update/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Restart/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Versions/i })).toBeEnabled()
   })
 
-  it('invokes an upgrade when Update is clicked', async () => {
-    const user = userEvent.setup()
-    const performUpgrade = vi.fn()
-    mockActions({ performUpgrade })
+  it('reports an unhealthy server with its error', async () => {
+    renderHealthStatus({ health: { opencode: 'unhealthy', error: 'connection refused' } })
 
-    render(<ServerHealthStatus />)
-
-    await user.click(screen.getByRole('button', { name: /Update/i }))
-
-    expect(performUpgrade).toHaveBeenCalled()
+    expect(await screen.findByText('Server Status: Unhealthy')).toBeInTheDocument()
+    expect(screen.getByText('connection refused')).toBeInTheDocument()
   })
 
-  it('invokes a restart when Restart is clicked', async () => {
+  it('upgrades OpenCode when Update is clicked', async () => {
     const user = userEvent.setup()
-    const requestRestart = vi.fn()
-    mockActions({ requestRestart })
+    const { fetchFake } = renderHealthStatus()
 
-    render(<ServerHealthStatus />)
+    await user.click(await screen.findByRole('button', { name: /Update/i }))
 
-    await user.click(screen.getByRole('button', { name: /Restart/i }))
+    expect(fetchFake.findRequests('POST', '/api/settings/opencode-upgrade')).toHaveLength(1)
+    expect(await screen.findByText('Upgraded to v1.19.0 and server restarted')).toBeInTheDocument()
+  })
 
-    expect(requestRestart).toHaveBeenCalled()
+  it('restarts immediately when no session is working', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderHealthStatus()
+
+    await user.click(await screen.findByRole('button', { name: /Restart/i }))
+
+    expect(fetchFake.findRequests('POST', '/api/settings/opencode-restart')).toHaveLength(1)
+    expect(await screen.findByText('Server restarted successfully')).toBeInTheDocument()
+  })
+
+  it('asks for confirmation before interrupting working sessions', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderHealthStatus({ activeSessions: 2 })
+
+    await user.click(await screen.findByRole('button', { name: /Restart/i }))
+
+    expect(await screen.findByText(/2 sessions are currently working/)).toBeInTheDocument()
+    expect(fetchFake.findRequests('POST', '/api/settings/opencode-restart')).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Restart now' }))
+
+    expect(fetchFake.findRequests('POST', '/api/settings/opencode-restart')).toHaveLength(1)
   })
 
   it('opens the version dialog when Versions is clicked', async () => {
     const user = userEvent.setup()
     const onOpenVersionDialog = vi.fn()
+    renderWithProviders(<ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />, {
+      auth: false,
+      theme: false,
+      tts: false,
+      fetchRoutes: [
+        { method: 'GET', path: '/api/health', respond: () => ({ json: makeHealthResponse({ opencode: 'healthy' }) }) },
+      ],
+    })
 
-    render(<ServerHealthStatus onOpenVersionDialog={onOpenVersionDialog} />)
+    await user.click(await screen.findByRole('button', { name: /Versions/i }))
 
-    await user.click(screen.getByRole('button', { name: /Versions/i }))
-
-    expect(onOpenVersionDialog).toHaveBeenCalled()
+    expect(onOpenVersionDialog).toHaveBeenCalledTimes(1)
   })
 })

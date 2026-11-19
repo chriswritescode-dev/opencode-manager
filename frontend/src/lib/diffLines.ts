@@ -9,7 +9,6 @@ export interface DiffRow {
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
 
-/** Parses a unified diff patch into numbered rows, emitting a gap row between hunks. */
 export function parseUnifiedDiff(patch: string): DiffRow[] {
   const rows: DiffRow[] = []
   let oldLine = 0

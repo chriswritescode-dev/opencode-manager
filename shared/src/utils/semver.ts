@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export type SemverPrereleaseIdentifier = number | string
 
 export interface Semver {
@@ -27,26 +29,40 @@ export function parseSemver(version: string): Semver | null {
   }
 }
 
+type PrereleaseIdentifierKind =
+  | { kind: 'numeric'; value: number }
+  | { kind: 'text'; value: string }
+
+function classifyPrereleaseIdentifier(identifier: SemverPrereleaseIdentifier): PrereleaseIdentifierKind {
+  const numeric = z.number().safeParse(identifier)
+  return numeric.success ? { kind: 'numeric', value: numeric.data } : { kind: 'text', value: String(identifier) }
+}
+
 function comparePrereleaseIdentifiers(
   left: SemverPrereleaseIdentifier[],
   right: SemverPrereleaseIdentifier[],
 ): number {
   if (left.length === 0 || right.length === 0) return right.length - left.length
 
-  for (let index = 0; index < Math.max(left.length, right.length); index++) {
-    const leftIdentifier = left[index]
-    const rightIdentifier = right[index]
+  const leftIdentifiers = left.map(classifyPrereleaseIdentifier)
+  const rightIdentifiers = right.map(classifyPrereleaseIdentifier)
+
+  for (let index = 0; index < Math.max(leftIdentifiers.length, rightIdentifiers.length); index++) {
+    const leftIdentifier = leftIdentifiers[index]
+    const rightIdentifier = rightIdentifiers[index]
 
     if (leftIdentifier === undefined) return -1
     if (rightIdentifier === undefined) return 1
-    if (leftIdentifier === rightIdentifier) continue
 
-    const leftNumeric = typeof leftIdentifier === 'number'
-    const rightNumeric = typeof rightIdentifier === 'number'
-    if (leftNumeric && rightNumeric) return leftIdentifier > rightIdentifier ? 1 : -1
-    if (leftNumeric) return -1
-    if (rightNumeric) return 1
-    return leftIdentifier > rightIdentifier ? 1 : -1
+    if (leftIdentifier.kind === 'numeric' && rightIdentifier.kind === 'numeric') {
+      if (leftIdentifier.value !== rightIdentifier.value) return leftIdentifier.value > rightIdentifier.value ? 1 : -1
+      continue
+    }
+    if (leftIdentifier.kind === 'text' && rightIdentifier.kind === 'text') {
+      if (leftIdentifier.value !== rightIdentifier.value) return leftIdentifier.value > rightIdentifier.value ? 1 : -1
+      continue
+    }
+    return leftIdentifier.kind === 'numeric' ? -1 : 1
   }
 
   return 0

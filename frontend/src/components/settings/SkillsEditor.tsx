@@ -60,11 +60,17 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
     setDialogOpen(true)
   }
 
-  const handleSubmit = (data: CreateSkillRequest | (UpdateSkillRequest & { name: string; scope: SkillScope; repoId?: number })) => {
-    if ('name' in data && editingSkill) {
-      updateMutation.mutate(data as UpdateSkillRequest & { name: string; scope: SkillScope; repoId?: number })
+  const handleSubmit = (data: CreateSkillRequest) => {
+    if (editingSkill) {
+      updateMutation.mutate({
+        name: data.name,
+        scope: data.scope,
+        repoId: data.repoId,
+        description: data.description,
+        body: data.body,
+      })
     } else {
-      createMutation.mutate(data as CreateSkillRequest)
+      createMutation.mutate(data)
     }
   }
 

@@ -27,7 +27,9 @@ import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { mcpServersFromConfig } from '@opencode-manager/shared/opencode'
 import { FetchError } from '@/api/fetchWrapper'
 import { getPreferredOpenCodeConfigSource, downloadOpenCodeConfigSource } from '@/api/types/settings'
-import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus, OpenCodeAgentPatch, OpenCodeCommandPatch } from '@/api/types/settings'
+import type { OpenCodeConfigFile, OpenCodeConfigSaveResponse, OpenCodeImportStatus, OpenCodeAgentPatch, OpenCodeCommandPatch, UpdateOpenCodeConfigPatchRequest } from '@/api/types/settings'
+
+type ManagedConfigPatch = UpdateOpenCodeConfigPatchRequest['patch']
 
 type ConfigSectionKey = 'agentsMd' | 'commands' | 'agents' | 'skills' | 'mcp' | 'models' | 'hostImport'
 
@@ -46,11 +48,6 @@ interface ManagedConfigSectionFallbackProps {
   errorMessage: string | null
 }
 
-/**
- * Renders the placeholder for a managed config section while its data is loading or unavailable,
- * prioritising the loading state, then a 503 message, then a generic error. Returns `null` when
- * none of the conditions apply.
- */
 function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMessage }: ManagedConfigSectionFallbackProps) {
   if (isLoading) {
     return (
@@ -77,12 +74,6 @@ function ManagedConfigSectionFallback({ isLoading, unavailableMessage, errorMess
   return null
 }
 
-/**
- * Renders the OpenCode settings panel whose collapsible sections manage
- * AGENTS.md, commands, agents, skills, MCP servers, provider models, and host
- * import. Config patches are revision-guarded, and a server restart is offered
- * whenever saved changes require one.
- */
 export function OpenCodeConfigManager() {
   const sectionIdPrefix = useId()
   const agentsMdContentId = `${sectionIdPrefix}-agents-md`
@@ -178,16 +169,12 @@ export function OpenCodeConfigManager() {
 
   const getApiErrorMessage = getOpenCodeApiErrorMessage
 
-  /**
-   * Returns the detail of a protected-host import failure, or the standard API
-   * error text with an import-specific fallback for other errors.
-   */
-  const getOpenCodeImportErrorMessage = (error: unknown): string => {
-    if (error instanceof FetchError && error.code === 'OPENCODE_IMPORT_PROTECTED') {
-      return error.detail || error.message
+  const getOpenCodeImportErrorMessage = (cause: unknown): string => {
+    if (cause instanceof FetchError && cause.code === 'OPENCODE_IMPORT_PROTECTED') {
+      return cause.detail || cause.message
     }
 
-    return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
+    return getApiErrorMessage(cause, 'Failed to import existing OpenCode host data')
   }
 
   const isManagedConfigPending = isManagedConfigLoading || Boolean(managedConfigError)
@@ -195,20 +182,12 @@ export function OpenCodeConfigManager() {
     ? getApiErrorMessage(managedConfigError, 'Failed to load the OpenCode configuration')
     : null
 
-  /**
-   * Builds the section meta label for a managed config collection, substituting loading and
-   * unavailable states for the configured item count.
-   */
   const getManagedConfigCountLabel = (count: number): string => {
     if (isManagedConfigLoading) return 'Loading...'
     if (managedConfigError) return 'Unavailable'
     return `${count} configured`
   }
 
-  /**
-   * Returns the section content when managed config is settled, otherwise the shared loading or
-   * error fallback; the 503 message is only surfaced when the error is an unavailable response.
-   */
   const renderManagedConfigSection = (unavailableMessage: string, content: React.ReactNode) =>
     isManagedConfigPending ? (
       <ManagedConfigSectionFallback
@@ -229,7 +208,7 @@ export function OpenCodeConfigManager() {
     })
   }
 
-  const patchManagedConfig = async (patch: Record<string, unknown>) => {
+  const patchManagedConfig = async (patch: ManagedConfigPatch) => {
     const expectedRevision = queryClient.getQueryData<OpenCodeConfigFile>(
       OPEN_CODE_CONFIG_QUERY_KEY,
     )?.revision
@@ -237,28 +216,18 @@ export function OpenCodeConfigManager() {
     applyOpenCodeConfigSave(result)
   }
 
-  const patchManagedConfigSafely = (patch: Record<string, unknown>) => {
+  const patchManagedConfigSafely = (patch: ManagedConfigPatch) => {
     void patchManagedConfig(patch).catch((error) => {
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     })
   }
 
-  /**
-   * Persists an agent or command entry under `name`; when a rename occurred it also nulls the
-   * previous key so the old entry is removed in the same patch. Fire-and-forget, surfacing failures
-   * as a toast.
-   */
   const saveManagedEntity = (
     key: 'agents' | 'commands',
     name: string,
     value: OpenCodeAgentPatch | OpenCodeCommandPatch,
-    previousName?: string,
   ) => {
-    const entries: Record<string, unknown> = { [name]: value }
-    if (previousName && previousName !== name) {
-      entries[previousName] = null
-    }
-    patchManagedConfigSafely({ [key]: entries })
+    patchManagedConfigSafely({ [key]: { [name]: value } })
   }
 
   const deleteManagedEntity = (key: 'agents' | 'commands', name: string) => {
@@ -460,7 +429,7 @@ export function OpenCodeConfigManager() {
                   <CommandsEditor
                     commands={managedCommands}
                     directoryCommands={directoryCommands}
-                    onSave={(name, command, previousName) => saveManagedEntity('commands', name, command, previousName)}
+                    onSave={(name, command) => saveManagedEntity('commands', name, command)}
                     onDelete={(name) => deleteManagedEntity('commands', name)}
                   />,
                 )}
@@ -493,7 +462,7 @@ export function OpenCodeConfigManager() {
                   <AgentsEditor
                     agents={managedAgents}
                     directoryAgents={directoryAgents}
-                    onSave={(name, agent, previousName) => saveManagedEntity('agents', name, agent, previousName)}
+                    onSave={(name, agent) => saveManagedEntity('agents', name, agent)}
                     onDelete={(name) => deleteManagedEntity('agents', name)}
                   />,
                 )}

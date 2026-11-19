@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { WSContext, WSEvents } from 'hono/ws'
 import { getErrorMessage } from './error-utils'
 import {
@@ -44,9 +45,11 @@ export const UPSTREAM_CONNECT_TIMEOUT_MS = 10_000
 
 const MAX_CLOSE_REASON_BYTES = 120
 
+const BufferedAmountSchema = z.object({ bufferedAmount: z.number() })
+
 export function peerBufferedAmount(peer: { raw?: unknown }): number {
-  const raw = peer.raw as { bufferedAmount?: number } | undefined
-  return typeof raw?.bufferedAmount === 'number' ? raw.bufferedAmount : 0
+  const raw = BufferedAmountSchema.safeParse(peer.raw)
+  return raw.success ? raw.data.bufferedAmount : 0
 }
 
 export function toWebSocketPeer(ws: WSContext): WebSocketPeer {
@@ -76,16 +79,17 @@ export async function forwardPeerMessage(
   bridge: WebSocketBridge,
   data: string | Blob | ArrayBufferLike,
 ): Promise<void> {
-  if (typeof data === 'string') {
-    bridge.send(data)
-    return
-  }
   if (data instanceof Blob) {
     bridge.send(await data.arrayBuffer())
     return
   }
   if (data instanceof ArrayBuffer) {
     bridge.send(data)
+    return
+  }
+  const text = z.string().safeParse(data)
+  if (text.success) {
+    bridge.send(text.data)
   }
 }
 
@@ -96,7 +100,7 @@ function defaultMapCloseCode(code: number): number {
 }
 
 function toBytes(data: ArrayBuffer | Uint8Array): Uint8Array<ArrayBuffer> {
-  return data instanceof Uint8Array ? (data as Uint8Array<ArrayBuffer>) : new Uint8Array(data)
+  return new Uint8Array(data)
 }
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
@@ -129,12 +133,10 @@ export function bridgeWebSocket(
   }
 
   const deliverToPeer = (data: string | ArrayBuffer | Uint8Array): void => {
-    if (typeof data === 'string') {
-      peer.send(data)
-    } else if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
+    if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
       peer.send(toBytes(data))
     } else {
-      return
+      peer.send(data)
     }
     if (peer.bufferedAmount() > MAX_PEER_BUFFERED_BYTES) {
       finish()
@@ -165,13 +167,13 @@ export function bridgeWebSocket(
 
   upstream.addEventListener('message', (event) => {
     if (finished) return
-    deliverToPeer((event as MessageEvent).data)
+    deliverToPeer(event.data)
   })
 
   upstream.addEventListener('close', (event) => {
     if (finished) return
     finish()
-    peer.close(defaultMapCloseCode((event as CloseEvent).code))
+    peer.close(defaultMapCloseCode(event.code))
   })
 
   upstream.addEventListener('error', () => {
@@ -202,7 +204,7 @@ export function bridgeWebSocket(
   return {
     send(data) {
       if (finished) return
-      const payload = typeof data === 'string' ? data : toBytes(data)
+      const payload = data instanceof ArrayBuffer || data instanceof Uint8Array ? toBytes(data) : data
       if (upstreamOpen) {
         upstream.send(payload)
         if (upstream.bufferedAmount > MAX_UPSTREAM_BUFFERED_BYTES) {
@@ -211,7 +213,7 @@ export function bridgeWebSocket(
         return
       }
       queue.push(payload)
-      queuedBytes += typeof payload === 'string' ? Buffer.byteLength(payload) : payload.byteLength
+      queuedBytes += payload instanceof Uint8Array ? payload.byteLength : Buffer.byteLength(payload)
       if (queuedBytes > MAX_UPSTREAM_BUFFERED_BYTES) {
         failUpstream(1013, 'Upstream too slow')
       }
@@ -262,7 +264,7 @@ export function connectUpstreamWebSocket(
       socket.close()
     }
 
-    const rejectBeforeOpen = (error: unknown): void => {
+    const rejectBeforeOpen = (error: Error): void => {
       if (settled) return
       settled = true
       clearTimer()
@@ -296,15 +298,19 @@ export function connectUpstreamWebSocket(
       })
     }
 
-    const handleMessage = (event: Event): void => {
+    const handleMessage = (event: MessageEvent): void => {
       if (attached) return
-      const data = (event as MessageEvent).data
-      if (typeof data === 'string') {
-        buffered.push(data)
-      } else if (data instanceof ArrayBuffer) {
-        buffered.push(data)
-      } else if (data instanceof Uint8Array) {
-        buffered.push(toArrayBuffer(data))
+      const text = z.string().safeParse(event.data)
+      if (text.success) {
+        buffered.push(text.data)
+        return
+      }
+      if (event.data instanceof ArrayBuffer) {
+        buffered.push(event.data)
+        return
+      }
+      if (event.data instanceof Uint8Array) {
+        buffered.push(toArrayBuffer(event.data))
       }
     }
 
@@ -351,9 +357,9 @@ export function createBridgedSocketEvents(
           return
         }
         bridge = connected
-      })().catch((error: unknown) => {
+      })().catch((cause: unknown) => {
         if (closed) return
-        ws.close(1011, truncateCloseReason(getErrorMessage(error)))
+        ws.close(1011, truncateCloseReason(getErrorMessage(cause)))
       })
     },
     async onMessage(event) {

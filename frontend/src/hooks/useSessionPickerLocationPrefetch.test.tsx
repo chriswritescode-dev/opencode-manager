@@ -1,130 +1,79 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import type { Repo } from '@/api/types'
 import { openCodeLocationQueryOptions } from '@/lib/openCodeLocation'
 import { useSessionPickerLocationPrefetch } from './useSessionPickerLocationPrefetch'
-
-const mocks = vi.hoisted(() => ({
-  listRepos: vi.fn(),
-  getOpenCodeLocation: vi.fn(),
-}))
-
-vi.mock('@/api/repos', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/repos')>()
-  return {
-    ...actual,
-    listRepos: mocks.listRepos,
-  }
-})
-
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return {
-    ...actual,
-    getOpenCodeLocation: mocks.getOpenCodeLocation,
-  }
-})
+import { renderHookWithProviders } from '@/test/render'
+import { makeRepo } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
 const REPO_PATH = '/repo'
-const LOCATION = { directory: REPO_PATH, projectID: 'proj_1', worktree: REPO_PATH }
+const LOCATION_PATH = '/api/opencode/api/location'
 
-const repo: Repo = {
-  id: 1,
-  fullPath: REPO_PATH,
-  localPath: REPO_PATH,
-  defaultBranch: 'main',
-  cloneStatus: 'ready',
-  clonedAt: 0,
+const repo = makeRepo({ id: 1, fullPath: REPO_PATH })
+
+const locationInfo = {
+  directory: REPO_PATH,
+  project: { id: 'proj_1', directory: REPO_PATH, canonical: REPO_PATH },
 }
 
-function createQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+const locationRoute: FetchRoute = {
+  method: 'GET',
+  path: LOCATION_PATH,
+  respond: () => ({ json: locationInfo }),
 }
 
-function createWrapper(queryClient: QueryClient) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>{children}</MemoryRouter>
-      </QueryClientProvider>
-    )
-  }
+const locationQueryKey = openCodeLocationQueryOptions(REPO_PATH, LOCAL_OPENCODE_SERVER_ID).queryKey
+
+function renderPrefetch(route: string, reposRoute: FetchRoute['respond']) {
+  return renderHookWithProviders(() => useSessionPickerLocationPrefetch(), {
+    auth: false,
+    theme: false,
+    tts: false,
+    toaster: false,
+    route,
+    fetchRoutes: [
+      { method: 'GET', path: '/api/repos', respond: reposRoute },
+      locationRoute,
+    ],
+  })
 }
 
 describe('useSessionPickerLocationPrefetch', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.getOpenCodeLocation.mockResolvedValue(LOCATION)
-  })
-
-  afterEach(() => {
-    mocks.listRepos.mockReset()
-  })
-
   it('prefetches the location once repos data arrives after mount', async () => {
-    let resolveRepos: (repos: Repo[]) => void = () => {}
-    mocks.listRepos.mockImplementation(
-      () => new Promise<Repo[]>((resolve) => {
-        resolveRepos = resolve
-      }),
+    let resolveRepos: (result: { json: object }) => void = () => undefined
+    const { queryClient, fetchFake } = renderPrefetch(
+      '/repos/1/sessions/session-1',
+      () =>
+        new Promise((resolve) => {
+          resolveRepos = resolve
+        }),
     )
-    const queryClient = createQueryClient()
 
-    renderHook(() => useSessionPickerLocationPrefetch(), {
-      wrapper: createWrapper(queryClient),
-    })
+    expect(fetchFake.findRequests('GET', LOCATION_PATH)).toHaveLength(0)
 
-    expect(mocks.getOpenCodeLocation).not.toHaveBeenCalled()
+    resolveRepos({ json: [repo] })
 
-    await act(async () => {
-      resolveRepos([repo])
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', LOCATION_PATH)).toHaveLength(1))
+    await waitFor(() => expect(queryClient.getQueryData(locationQueryKey)).toEqual(locationInfo))
 
-    await waitFor(() => {
-      expect(mocks.getOpenCodeLocation).toHaveBeenCalledWith(REPO_PATH, LOCAL_OPENCODE_SERVER_ID)
-    })
-
-    const locationQuery = queryClient
-      .getQueryCache()
-      .find({ queryKey: openCodeLocationQueryOptions(REPO_PATH, LOCAL_OPENCODE_SERVER_ID).queryKey })
+    const locationQuery = queryClient.getQueryCache().find({ queryKey: locationQueryKey })
     expect(locationQuery?.observers.length).toBe(0)
   })
 
   it('prefetches the location when repos data is already cached', async () => {
-    mocks.listRepos.mockResolvedValue([repo])
-    const queryClient = createQueryClient()
-    queryClient.setQueryData<Repo[]>(['repos'], [repo])
+    const { queryClient, fetchFake } = renderPrefetch('/repos/1/sessions/session-1', () => ({ json: [repo] }))
+    queryClient.setQueryData(['repos'], [repo])
 
-    renderHook(() => useSessionPickerLocationPrefetch(), {
-      wrapper: createWrapper(queryClient),
-    })
-
-    await waitFor(() => {
-      expect(mocks.getOpenCodeLocation).toHaveBeenCalledWith(REPO_PATH, LOCAL_OPENCODE_SERVER_ID)
-    })
+    await waitFor(() => expect(fetchFake.findRequests('GET', LOCATION_PATH)).toHaveLength(1))
+    await waitFor(() => expect(queryClient.getQueryData(locationQueryKey)).toEqual(locationInfo))
   })
 
   it('does not prefetch when the route has no repo', async () => {
-    mocks.listRepos.mockResolvedValue([repo])
-    const queryClient = createQueryClient()
-    queryClient.setQueryData<Repo[]>(['repos'], [repo])
+    const { queryClient, fetchFake } = renderPrefetch('/sessions/session-1', () => ({ json: [repo] }))
+    queryClient.setQueryData(['repos'], [repo])
 
-    renderHook(() => useSessionPickerLocationPrefetch(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/sessions/session-1']}>{children}</MemoryRouter>
-        </QueryClientProvider>
-      ),
-    })
-
-    await waitFor(() => {
-      expect(mocks.listRepos).toHaveBeenCalled()
-    })
-
-    expect(mocks.getOpenCodeLocation).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchFake.findRequests('GET', '/api/repos').length).toBeGreaterThan(0))
+    expect(fetchFake.findRequests('GET', LOCATION_PATH)).toHaveLength(0)
   })
 })

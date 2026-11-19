@@ -46,30 +46,24 @@ interface MultiRunCardProps {
   onDiscard: (entry: MultiRunEntry) => void
 }
 
-const TONE_CLASSES: Record<StatusTone, string> = {
+const TONE_CLASSES = {
   success: 'border-success/40 text-success',
   warning: 'border-warning/40 text-warning',
   destructive: 'border-destructive/40 text-destructive',
   info: 'border-info/40 text-info',
   muted: 'border-border text-muted-foreground',
-}
+} satisfies Record<StatusTone, string>
 
-const FUSION_STATUS: Record<MultiRunFusionStatus, { label: string; tone: StatusTone }> = {
+const FUSION_STATUS = {
   starting: { label: 'Starting', tone: 'info' },
   started: { label: 'Started', tone: 'muted' },
   failed: { label: 'Failed', tone: 'destructive' },
-}
+} satisfies Record<MultiRunFusionStatus, { label: string; tone: StatusTone }>
 
 const PROMPT_PREVIEW_LENGTH = 240
 
 const HEADER_BUTTON_CLASS = 'h-7 px-2 text-xs'
 
-/**
- * Derives the display status of a multi-run entry from its stored status and the
- * live session status. The stored `started` status only means the session was
- * launched; an entry reads as ready once its session is idle. The server remains
- * authoritative when a fusion is submitted.
- */
 function describeEntryReadiness(entry: MultiRunEntry, live: SessionStatusType): EntryReadiness {
   switch (entry.status) {
     case 'discarded':

@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
+import { TerminalInfoSchema } from '@opencode-manager/shared/schemas'
 import type { CreateTerminalRequest, ResizeTerminalRequest, TerminalInfo } from '@opencode-manager/shared/types'
+
+const terminalListResponseSchema = z.object({ terminals: z.array(TerminalInfoSchema) })
 import { API_BASE_URL } from '@/config'
 import { terminalCollectionPath, terminalItemPath, terminalTargetScope, type TerminalTarget } from '@/lib/terminal-target'
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
@@ -13,15 +17,16 @@ function terminalsScopeQueryKey(target: TerminalTarget) {
 }
 
 async function listTerminals(target: TerminalTarget, directory?: string): Promise<TerminalInfo[]> {
-  const data = await fetchWrapper<{ terminals: TerminalInfo[] }>(
+  const data = await fetchWrapper(
     `${API_BASE_URL}${terminalCollectionPath(target)}`,
+    terminalListResponseSchema,
     { params: { directory } },
   )
   return data.terminals
 }
 
 async function createTerminal(target: TerminalTarget, body: CreateTerminalRequest): Promise<TerminalInfo> {
-  return fetchWrapper<TerminalInfo>(`${API_BASE_URL}${terminalCollectionPath(target)}`, {
+  return fetchWrapper(`${API_BASE_URL}${terminalCollectionPath(target)}`, TerminalInfoSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

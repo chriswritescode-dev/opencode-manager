@@ -1,12 +1,21 @@
+import { parseJsonText } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+
 const META_FRAME_PREFIX = 0x00
 
-const CTRL_SYMBOLS: Record<string, string> = {
-  '@': '\x00',
-  '[': '\x1b',
-  '\\': '\x1c',
-  ']': '\x1d',
-  '^': '\x1e',
-  '_': '\x1f',
+const MetaFrameSchema = z.looseObject({ cursor: z.number() })
+
+const CTRL_SYMBOLS = new Map<string, string>([
+  ['@', '\x00'],
+  ['[', '\x1b'],
+  ['\\', '\x1c'],
+  [']', '\x1d'],
+  ['^', '\x1e'],
+  ['_', '\x1f'],
+])
+
+function isBinaryFrame(data: string | ArrayBuffer): data is ArrayBuffer {
+  return Object.prototype.toString.call(data) === '[object ArrayBuffer]'
 }
 
 export type TerminalFrame =
@@ -17,7 +26,7 @@ export class TerminalFrameDecoder {
   private readonly decoder = new TextDecoder('utf-8')
 
   decode(data: string | ArrayBuffer): TerminalFrame {
-    if (typeof data === 'string') {
+    if (!isBinaryFrame(data)) {
       return { type: 'output', text: data }
     }
 
@@ -31,9 +40,11 @@ export class TerminalFrameDecoder {
 
   private decodeMetaFrame(payload: Uint8Array): TerminalFrame {
     try {
-      const parsed = JSON.parse(new TextDecoder('utf-8').decode(payload)) as { cursor?: unknown }
-      if (typeof parsed.cursor === 'number' && Number.isSafeInteger(parsed.cursor)) {
-        return { type: 'cursor', cursor: parsed.cursor }
+      const parsed = MetaFrameSchema.safeParse(
+        parseJsonText(new TextDecoder('utf-8').decode(payload)),
+      )
+      if (parsed.success && Number.isSafeInteger(parsed.data.cursor)) {
+        return { type: 'cursor', cursor: parsed.data.cursor }
       }
     } catch {
       return { type: 'output', text: '' }
@@ -50,5 +61,5 @@ export function applyCtrlModifier(data: string): string {
     return String.fromCharCode(upper.charCodeAt(0) - 64)
   }
 
-  return CTRL_SYMBOLS[data] ?? data
+  return CTRL_SYMBOLS.get(data) ?? data
 }

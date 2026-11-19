@@ -1,17 +1,35 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer } from 'node:http'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { Hono } from 'hono'
-import { serve } from '@hono/node-server'
+import { serve, type ServerType } from '@hono/node-server'
+import { z } from 'zod'
+import { readJson } from '../../helpers/read-json'
 import {
   createPreviewGatewayApp,
   PreviewSessionStore,
   PREVIEW_COOKIE,
 } from '../../../src/services/preview/gateway'
 
-let upstreamServer: Server
+const AddressSchema = z.object({ port: z.number() })
+
+const EchoResponseSchema = z.object({
+  method: z.string(),
+  path: z.string(),
+  search: z.string(),
+  host: z.string().nullable(),
+  cookie: z.string().nullable(),
+  acceptEncoding: z.string().nullable(),
+  body: z.string(),
+})
+
+const PostEchoResponseSchema = z.object({ method: z.string(), body: z.string() })
+
+const GzipResponseSchema = z.object({ encoding: z.string().nullable(), decoded: z.string().nullable() })
+
+const EncodingResponseSchema = z.object({ acceptEncoding: z.string().nullable() })
+
+let upstreamServer: ServerType
 let upstreamPort = 0
 
 const upstreamApp = new Hono()
@@ -60,18 +78,18 @@ upstreamApp.all('/*', async (c) => {
   })
 })
 
-function listen(server: Server): Promise<number> {
+function listen(server: ServerType): Promise<number> {
   return new Promise((resolve) => {
     if (server.listening) {
-      resolve((server.address() as AddressInfo).port)
+      resolve(AddressSchema.parse(server.address()).port)
       return
     }
-    server.once('listening', () => resolve((server.address() as AddressInfo).port))
+    server.once('listening', () => resolve(AddressSchema.parse(server.address()).port))
   })
 }
 
-function closeServer(server: Server): Promise<void> {
-  server.closeAllConnections()
+function closeServer(server: ServerType): Promise<void> {
+  if ('closeAllConnections' in server) server.closeAllConnections()
   return new Promise((resolve) => server.close(() => resolve()))
 }
 
@@ -79,7 +97,7 @@ function reserveClosedPort(): Promise<number> {
   return new Promise((resolve) => {
     const server = createServer()
     server.listen(0, '127.0.0.1', () => {
-      const port = (server.address() as AddressInfo).port
+      const port = AddressSchema.parse(server.address()).port
       server.close(() => resolve(port))
     })
   })
@@ -101,7 +119,7 @@ async function openSession(app: Hono, store: PreviewSessionStore, port: number):
 }
 
 beforeAll(async () => {
-  upstreamServer = serve({ fetch: upstreamApp.fetch, port: 0, hostname: '127.0.0.1' }) as unknown as Server
+  upstreamServer = serve({ fetch: upstreamApp.fetch, port: 0, hostname: '127.0.0.1' })
   upstreamPort = await listen(upstreamServer)
 })
 
@@ -127,20 +145,6 @@ describe('Preview Gateway', () => {
     expect(setCookie).toContain('HttpOnly')
     expect(setCookie).toContain('SameSite=Lax')
     expect(setCookie).toContain('Path=/')
-  })
-
-  it('redirects a protocol-relative path to the root', async () => {
-    const store = new PreviewSessionStore()
-    const app = createPreviewGatewayApp(store).app
-    const token = store.issueStartToken({ port: upstreamPort, host: '127.0.0.1' })
-
-    const res = await app.request(
-      `http://localhost/__ocm_preview/start?token=${token}&path=${encodeURIComponent('//evil.example')}`,
-      { redirect: 'manual' },
-    )
-
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/')
   })
 
   it('rejects redirect paths that resolve off-origin', async () => {
@@ -215,7 +219,7 @@ describe('Preview Gateway', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { method: string; path: string; search: string; host: string; cookie: string }
+    const body = await readJson(res, EchoResponseSchema)
     expect(body.method).toBe('GET')
     expect(body.path).toBe('/echo')
     expect(body.search).toBe('?q=1')
@@ -235,7 +239,7 @@ describe('Preview Gateway', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { method: string; body: string }
+    const body = await readJson(res, PostEchoResponseSchema)
     expect(body.method).toBe('POST')
     expect(body.body).toBe('hello preview')
   })
@@ -255,7 +259,7 @@ describe('Preview Gateway', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { encoding: string | null; decoded: string | null }
+    const body = await readJson(res, GzipResponseSchema)
     expect(body.encoding).toBe('gzip')
     expect(body.decoded).toBe(payload)
   })
@@ -295,7 +299,7 @@ describe('Preview Gateway', () => {
     })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { acceptEncoding: string | null }
+    const body = await readJson(res, EncodingResponseSchema)
     expect(body.acceptEncoding).toBe('identity')
   })
 

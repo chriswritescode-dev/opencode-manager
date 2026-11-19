@@ -1,130 +1,61 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useScheduleTarget } from '../useScheduleTarget'
-import type { AssistantModeStatus, Repo } from '@opencode-manager/shared/types'
+import { renderHookWithProviders } from '@/test/render'
+import { makeAssistantModeStatus, makeRepo } from '@/test/fixtures/api'
 
-const mocks = vi.hoisted(() => ({
-  getRepo: vi.fn(),
-  getAssistantModeStatus: vi.fn(),
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepo: mocks.getRepo,
-  getAssistantModeStatus: mocks.getAssistantModeStatus,
-}))
-
-const createWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) =>
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-}
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
 describe('useScheduleTarget', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('returns the assistant schedule target for the assistant repo', async () => {
+    const status = makeAssistantModeStatus({ directory: '/abs/assistant', relativePath: 'repos/assistant' })
+    const { result, fetchFake } = renderHookWithProviders(() => useScheduleTarget(0), {
+      ...hookProviders,
+      fetchRoutes: [{ method: 'GET', path: '/api/repos/0/assistant-mode', respond: () => ({ json: status }) }],
+    })
+
+    await waitFor(() => expect(result.current.scheduleTarget).toBeDefined())
+
+    expect(result.current.scheduleTarget).toMatchObject({
+      repoId: 0,
+      kind: 'assistant',
+      subtitle: 'Built-in assistant',
+      fullPath: '/abs/assistant',
+      backHref: '/assistant',
+    })
+    expect(result.current.isLoading).toBe(false)
+    expect(result.current.isError).toBe(false)
+    expect(fetchFake.requests.map((request) => request.path)).toEqual(['/api/repos/0/assistant-mode'])
   })
 
-  describe('repoId === 0 (assistant)', () => {
-    it('returns assistant schedule target with correct properties', async () => {
-      const mockStatus: AssistantModeStatus = {
-        repoId: 0,
-        directory: '/abs/assistant',
-        relativePath: 'repos/assistant',
-        files: {
-          agentsMd: { path: '', exists: false, created: false },
-          opencodeJson: { path: '', exists: false, created: false },
-        },
-        schedulesSkill: { path: '', exists: false, created: false },
-      }
-
-      mocks.getAssistantModeStatus.mockResolvedValue(mockStatus)
-
-      const { result } = renderHook(() => useScheduleTarget(0), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        expect(result.current.scheduleTarget).toBeDefined()
-      })
-
-      expect(result.current.scheduleTarget?.kind).toBe('assistant')
-      expect(result.current.isLoading).toBe(false)
-      expect(result.current.isError).toBe(false)
+  it('returns the repo schedule target for a repo id', async () => {
+    const repo = makeRepo({ id: 5, localPath: 'repos/my-repo', fullPath: '/abs/repos/my-repo' })
+    const { result, fetchFake } = renderHookWithProviders(() => useScheduleTarget(5), {
+      ...hookProviders,
+      fetchRoutes: [{ method: 'GET', path: '/api/repos/5', respond: () => ({ json: repo }) }],
     })
 
-    it('does not call getRepo for assistant', async () => {
-      mocks.getAssistantModeStatus.mockResolvedValue({
-        directory: '/abs/assistant',
-        relativePath: 'repos/assistant',
-        files: { agentsMd: { path: '', exists: false, created: false }, opencodeJson: { path: '', exists: false, created: false } },
-        schedulesSkill: { path: '', exists: false, created: false },
-        repoId: 0,
-      })
+    await waitFor(() => expect(result.current.scheduleTarget).toBeDefined())
 
-      renderHook(() => useScheduleTarget(0), { wrapper: createWrapper() })
-
-      await vi.waitFor(() => {
-        expect(mocks.getRepo).not.toHaveBeenCalled()
-      })
+    expect(result.current.scheduleTarget).toMatchObject({
+      repoId: 5,
+      kind: 'repo',
+      fullPath: '/abs/repos/my-repo',
+      backHref: '/repos/5',
     })
+    expect(fetchFake.requests.map((request) => request.path)).toEqual(['/api/repos/5'])
   })
 
-  describe('repoId === 5 (real repo)', () => {
-    it('returns repo schedule target with correct properties', async () => {
-      const mockRepo: Repo = {
-        id: 5,
-        repoUrl: 'https://x/my-repo',
-        localPath: 'repos/my-repo',
-        fullPath: '/abs/repos/my-repo',
-        sourcePath: undefined,
-        defaultBranch: 'main',
-        cloneStatus: 'ready',
-        clonedAt: 0,
-      }
+  it('returns no target and fetches nothing without a repo id', () => {
+    const { result, fetchFake } = renderHookWithProviders(() => useScheduleTarget(undefined), hookProviders)
 
-      mocks.getRepo.mockResolvedValue(mockRepo)
-
-      const { result } = renderHook(() => useScheduleTarget(5), { wrapper: createWrapper() })
-
-      await waitFor(() => {
-        expect(result.current.scheduleTarget).toBeDefined()
-      })
-
-      expect(result.current.scheduleTarget?.kind).toBe('repo')
-    })
-
-    it('does not call getAssistantModeStatus for repo', async () => {
-      const mockRepo: Repo = {
-        id: 5,
-        repoUrl: 'https://x/my-repo',
-        localPath: 'repos/my-repo',
-        fullPath: '/abs/repos/my-repo',
-        sourcePath: undefined,
-        defaultBranch: 'main',
-        cloneStatus: 'ready',
-        clonedAt: 0,
-      }
-
-      mocks.getRepo.mockResolvedValue(mockRepo)
-
-      renderHook(() => useScheduleTarget(5), { wrapper: createWrapper() })
-
-      await vi.waitFor(() => {
-        expect(mocks.getAssistantModeStatus).not.toHaveBeenCalled()
-      })
-    })
-  })
-
-  describe('repoId === undefined', () => {
-    it('returns undefined schedule target', () => {
-      const { result } = renderHook(() => useScheduleTarget(undefined), { wrapper: createWrapper() })
-
-      expect(result.current.scheduleTarget).toBeUndefined()
-      expect(result.current.isLoading).toBe(false)
-    })
+    expect(result.current.scheduleTarget).toBeUndefined()
+    expect(result.current.isLoading).toBe(false)
+    expect(fetchFake.requests).toHaveLength(0)
   })
 })

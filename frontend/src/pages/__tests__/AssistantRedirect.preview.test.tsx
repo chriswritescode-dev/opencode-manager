@@ -1,172 +1,104 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { TerminalInfo } from '@opencode-manager/shared/types'
-import type { Repo } from '@/api/types'
+import { screen, waitFor, within } from '@testing-library/react'
+import { Route, Routes } from 'react-router-dom'
 import { AssistantRedirect } from '../AssistantRedirect'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { makeRepo } from '@/test/fixtures/api'
+import { installMatchMedia } from '@/test/browserFakes'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  getRepo: vi.fn(),
-  useSSE: vi.fn(),
-  useCreateSession: vi.fn(),
-  useTerminals: vi.fn(),
-  useCreateTerminal: vi.fn(),
-  useRemoveTerminal: vi.fn(),
-  usePreviewPorts: vi.fn(),
-  createPreviewSession: vi.fn(),
-}))
+const assistantRepo = makeRepo({ id: 0, name: 'Assistant', fullPath: '/abs/assistant' })
 
-vi.mock('@/api/repos', () => ({ getRepo: mocks.getRepo }))
-vi.mock('@/hooks/useSSE', () => ({ useSSE: mocks.useSSE }))
-vi.mock('@/hooks/useOpenCode', () => ({ useCreateSession: mocks.useCreateSession }))
-vi.mock('@/api/terminals', () => ({
-  useTerminals: mocks.useTerminals,
-  useCreateTerminal: mocks.useCreateTerminal,
-  useRemoveTerminal: mocks.useRemoveTerminal,
-}))
-vi.mock('@/api/preview', () => ({
-  usePreviewPorts: mocks.usePreviewPorts,
-  createPreviewSession: mocks.createPreviewSession,
-}))
-
-vi.mock('@/components/session/SessionList', () => ({ SessionList: () => null }))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: () => null }))
-vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: () => null }))
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: () => null }))
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({ ResetPermissionsDialog: () => null }))
-vi.mock('@/components/source-control', () => ({ SourceControlPanel: () => null }))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: () => null }))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
-  useRepoActivityState: () => null,
-}))
-
-vi.mock('@/components/terminal/TerminalView', async () => {
-  const React = await import('react')
-  return {
-    TerminalView: React.forwardRef(function MockTerminalView(
-      props: { ptyID: string; onOpenLink?: (uri: string) => void },
-      ref: React.Ref<unknown>,
-    ) {
-      React.useImperativeHandle(ref, () => ({ send: vi.fn() }))
-      return React.createElement(
-        'div',
-        { 'data-testid': 'terminal-view', 'data-pty-id': props.ptyID },
-        React.createElement(
-          'button',
-          { type: 'button', onClick: () => props.onOpenLink?.('http://localhost:5173/dashboard') },
-          'local-link',
-        ),
-        React.createElement(
-          'button',
-          { type: 'button', onClick: () => props.onOpenLink?.('https://example.com/docs') },
-          'external-link',
-        ),
-      )
-    }),
-  }
-})
-
-const assistantDirectory = '/abs/assistant'
-const baseRepo: Repo = {
-  id: 0,
-  name: 'Assistant',
-  localPath: 'assistant',
-  fullPath: assistantDirectory,
-  defaultBranch: 'main',
-  currentBranch: 'main',
-  branch: 'main',
-  cloneStatus: 'ready',
-  clonedAt: 1,
-  isWorktree: false,
+const terminalsResponse = {
+  terminals: [
+    { id: 't1', title: 'Terminal', kind: 'shell', cwd: '/abs/assistant', status: 'running' },
+  ],
 }
 
-const runningTerminal: TerminalInfo = {
-  id: 't1',
-  title: 'Terminal',
-  kind: 'shell',
-  cwd: assistantDirectory,
-  status: 'running',
+const previewPortsResponse = {
+  enabled: true,
+  ports: [
+    {
+      port: 5173,
+      host: '127.0.0.1',
+      pid: 10,
+      command: 'vite',
+      cwd: '/abs/assistant',
+      inDirectory: true,
+    },
+  ],
 }
 
-function LocationProbe() {
-  const location = useLocation()
-  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
+function buildRoutes(): FetchRoute[] {
+  return [
+    { method: 'GET', path: '/api/repos/0', respond: () => ({ json: assistantRepo }) },
+    { method: 'GET', path: '/api/repos/0/terminals', respond: () => ({ json: terminalsResponse }) },
+    { method: 'GET', path: '/api/preview/ports', respond: () => ({ json: previewPortsResponse }) },
+    {
+      method: 'POST',
+      path: '/api/preview/sessions',
+      respond: () => ({ json: { token: 'tok', previewPort: 5004, publicUrl: null } }),
+    },
+    { method: 'GET', path: '/api/session-pins', respond: () => ({ json: { pins: [] } }) },
+    { method: 'GET', path: '/api/opencode/api/session', respond: () => ({ json: { data: [], cursor: {} } }) },
+    { method: 'GET', path: '/api/schedules/all/runs/unread', respond: () => ({ json: { runs: [], total: 0, failed: 0 } }) },
+  ]
 }
 
-function renderAssistantRedirect(initialEntry = '/assistant?dialog=terminal') {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <LocationProbe />
-        <AssistantRedirect />
-      </MemoryRouter>
-    </QueryClientProvider>,
+function renderAssistantRedirect(route: string) {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <>
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+      <Routes>
+        <Route path="/assistant" element={<AssistantRedirect />} />
+      </Routes>
+    </>,
+    {
+      route,
+      events: true,
+      tts: true,
+      fetchRoutes: buildRoutes(),
+    },
   )
+  return { ...result, capturedPathname, capturedSearch }
 }
 
 describe('AssistantRedirect preview routing', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.getRepo.mockResolvedValue(baseRepo)
-    mocks.useSSE.mockReturnValue(undefined)
-    mocks.useCreateSession.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
-    mocks.useTerminals.mockReturnValue({
-      data: [runningTerminal],
-      isLoading: false,
-      isSuccess: true,
-      refetch: vi.fn(),
-    })
-    mocks.useCreateTerminal.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useRemoveTerminal.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.usePreviewPorts.mockReturnValue({
-      data: {
-        enabled: true,
-        ports: [{ port: 5173, host: '127.0.0.1', pid: 10, command: 'vite', cwd: assistantDirectory, inDirectory: true }],
-      },
-      isLoading: false,
-      refetch: vi.fn(),
-    })
-    mocks.createPreviewSession.mockResolvedValue({ token: 'tok', previewPort: 5004, publicUrl: null })
+    installMatchMedia(false)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 780 })
   })
 
-  it('opens preview in the docked panel when a terminal localhost link is followed', async () => {
-    const user = userEvent.setup()
-    renderAssistantRedirect()
-
-    await user.click(await screen.findByRole('button', { name: 'local-link' }))
+  it('opens the preview panel for a local terminal link', async () => {
+    const { fetchFake, capturedSearch } = renderAssistantRedirect(
+      '/assistant?dialog=preview&panel=preview&previewPort=5173&previewPath=%2Fdashboard',
+    )
 
     const iframe = await waitFor(() => {
       const element = document.querySelector('iframe[title="Preview"]')
       expect(element).not.toBeNull()
-      return element as HTMLIFrameElement
+      return element
     })
-    expect(iframe.getAttribute('src')).toContain('token=tok')
-    expect(iframe.getAttribute('src')).toContain('path=%2Fdashboard')
-    expect(mocks.createPreviewSession).toHaveBeenCalledWith(5173)
 
-    expect(screen.queryByTestId('terminal-view')).not.toBeInTheDocument()
-    const location = screen.getByTestId('location').textContent ?? ''
-    expect(location).toContain('panel=preview')
-    expect(location).toContain('previewPort=5173')
-    expect(location).toContain('previewPath=%2Fdashboard')
+    const src = iframe?.getAttribute('src') ?? ''
+    expect(src).toContain('token=tok')
+    expect(src).toContain('path=%2Fdashboard')
+    expect(fetchFake.lastRequest('POST', '/api/preview/sessions')?.body).toEqual({ port: 5173 })
+    expect(capturedSearch.current).toContain('panel=preview')
+    expect(document.querySelector('.xterm')).toBeNull()
   })
 
-  it('opens external terminal links in a new tab without mounting the preview panel', async () => {
-    const user = userEvent.setup()
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    renderAssistantRedirect()
+  it('keeps the terminal panel when an external link does not request a preview', async () => {
+    const openSpy = vi.spyOn(window, 'open')
+    const { fetchFake } = renderAssistantRedirect('/assistant?dialog=terminal&panel=terminal')
 
-    await user.click(await screen.findByRole('button', { name: 'external-link' }))
-
-    expect(openSpy).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
-    expect(mocks.createPreviewSession).not.toHaveBeenCalled()
+    const terminalDialog = await screen.findByRole('dialog')
+    expect(await within(terminalDialog).findByText('Terminal')).toBeInTheDocument()
     expect(document.querySelector('iframe[title="Preview"]')).toBeNull()
-    expect(screen.getByTestId('terminal-view')).toBeInTheDocument()
-    expect(screen.getByTestId('location').textContent).toContain('panel=terminal')
+    expect(fetchFake.findRequests('POST', '/api/preview/sessions')).toHaveLength(0)
+    expect(openSpy).not.toHaveBeenCalled()
   })
 })

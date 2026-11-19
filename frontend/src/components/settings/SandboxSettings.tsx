@@ -14,7 +14,8 @@ import {
   DEFAULT_SANDBOX_IDLE_STOP_MINUTES,
   DEFAULT_SANDBOX_MAX_RUNNING_VMS,
   SandboxPreferencesSchema,
-  SessionSandboxResourcesSchema,
+  SessionSandboxCpusSchema,
+  SessionSandboxMemoryMibSchema,
   type SandboxPreferences,
 } from '@opencode-manager/shared/schemas'
 import {
@@ -24,15 +25,15 @@ import {
   SANDBOX_MEMORY_GIB_MIN,
 } from '@/lib/sandboxResources'
 
-const cpusSchema = SessionSandboxResourcesSchema.shape.cpus
-const memoryMibSchema = SessionSandboxResourcesSchema.shape.memoryMib
-const idleStopSchema = SandboxPreferencesSchema.shape.idleStopMinutes.unwrap()
-const maxRunningVmsSchema = SandboxPreferencesSchema.shape.maxRunningVms.unwrap()
+const cpusSchema = SessionSandboxCpusSchema
+const memoryMibSchema = SessionSandboxMemoryMibSchema
+const idleStopSchema = SandboxPreferencesSchema.pick({ idleStopMinutes: true })
+const maxRunningVmsSchema = SandboxPreferencesSchema.pick({ maxRunningVms: true })
 
-const SANDBOX_IDLE_MINUTES_MIN = idleStopSchema.minValue ?? 1
-const SANDBOX_IDLE_MINUTES_MAX = idleStopSchema.maxValue ?? 1440
-const SANDBOX_MAX_VMS_MIN = maxRunningVmsSchema.minValue ?? 1
-const SANDBOX_MAX_VMS_MAX = maxRunningVmsSchema.maxValue ?? 32
+const SANDBOX_IDLE_MINUTES_MIN = 1
+const SANDBOX_IDLE_MINUTES_MAX = 1440
+const SANDBOX_MAX_VMS_MIN = 1
+const SANDBOX_MAX_VMS_MAX = 32
 
 interface SandboxDraft {
   cpus: string
@@ -140,7 +141,7 @@ export function SandboxSettings() {
 
   const commitIdleStopMinutes = () => {
     const value = Number(draft.idleStopMinutes.trim())
-    if (!Number.isInteger(value) || !idleStopSchema.safeParse(value).success) {
+    if (!Number.isInteger(value) || !idleStopSchema.safeParse({ idleStopMinutes: value }).success) {
       showToast.error(
         `Idle stop must be a whole number from ${SANDBOX_IDLE_MINUTES_MIN} to ${SANDBOX_IDLE_MINUTES_MAX} minutes`,
       )
@@ -156,7 +157,7 @@ export function SandboxSettings() {
 
   const commitMaxRunningVms = () => {
     const value = Number(draft.maxRunningVms.trim())
-    if (!Number.isInteger(value) || !maxRunningVmsSchema.safeParse(value).success) {
+    if (!Number.isInteger(value) || !maxRunningVmsSchema.safeParse({ maxRunningVms: value }).success) {
       showToast.error(
         `Max running sandbox VMs must be a whole number from ${SANDBOX_MAX_VMS_MIN} to ${SANDBOX_MAX_VMS_MAX}`,
       )
@@ -172,7 +173,7 @@ export function SandboxSettings() {
 
   const parsedMaxRunningVms = Number(draft.maxRunningVms.trim())
   const helperMaxRunningVms =
-    Number.isInteger(parsedMaxRunningVms) && maxRunningVmsSchema.safeParse(parsedMaxRunningVms).success
+    Number.isInteger(parsedMaxRunningVms) && maxRunningVmsSchema.safeParse({ maxRunningVms: parsedMaxRunningVms }).success
       ? parsedMaxRunningVms
       : DEFAULT_SANDBOX_MAX_RUNNING_VMS
 

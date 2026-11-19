@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { z } from 'zod'
 import { CalendarClock, ChevronRight, Columns3, Layers, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
@@ -8,6 +9,8 @@ import type { MultiRun } from '@opencode-manager/shared/schemas'
 import type { RepoWorktreeSource } from '@opencode-manager/shared/utils'
 
 type OwnerFilter = 'all' | RepoWorktreeSource
+
+const collapsedKeysSchema = z.array(z.string())
 
 interface WorktreeSessionGroupsProps {
   repoId: number
@@ -43,19 +46,14 @@ const OWNER_FILTERS: Array<{ value: OwnerFilter; label: string }> = [
   { value: 'git', label: 'Git' },
 ]
 
-const OWNER_BADGE_CLASS: Record<RepoWorktreeSource, string> = {
+const OWNER_BADGE_CLASS = {
   opencode: 'border-primary/40 bg-primary/15 text-primary',
   schedule: 'border-highlight/40 bg-highlight/15 text-highlight',
   git: 'border-border bg-muted text-muted-foreground',
-}
+} satisfies Record<RepoWorktreeSource, string>
 
 const WORKTREE_REMOVAL_NOTE = 'OpenCode worktrees are removed with their sessions. Schedule worktrees have pending changes committed to their branch first. Other git worktrees are only removed when they have no uncommitted changes.'
 
-/**
- * The Worktrees tab body: every worktree of the repo as a collapsible section of its sessions,
- * with a schedule's worktrees nested under that schedule and a multi-run's worktrees nested under
- * that multi-run, so kept runs stay visible as they pile up.
- */
 export function WorktreeSessionGroups({
   repoId,
   worktrees,
@@ -88,7 +86,7 @@ export function WorktreeSessionGroups({
   }, [expandedSchedule, scheduleWorktreeDirectories, onExpandedScheduleDirectoriesChange])
 
   const ownerCounts = useMemo(() => {
-    const counts: Record<OwnerFilter, number> = { all: worktrees.length, opencode: 0, schedule: 0, git: 0 }
+    const counts = { all: worktrees.length, opencode: 0, schedule: 0, git: 0 } satisfies Record<OwnerFilter, number>
     worktrees.forEach((worktree) => {
       if (worktree.worktreeSource) counts[worktree.worktreeSource] += 1
     })
@@ -443,18 +441,17 @@ function buildGroupEntries(
     })
   })
 
-  const groups = worktrees
-    .filter((worktree) => ownerFilter === 'all' || worktree.worktreeSource === ownerFilter)
-    .map((worktree): WorktreeGroup => {
-      const groupSessions = sessionsByDirectory.get(worktree.fullPath) ?? []
-      return {
-        worktree,
-        directory: worktree.fullPath,
-        sessions: groupSessions,
-        lastActive: groupSessions[0]?.time.updated ?? 0,
-      }
-    })
-    .filter((group) => !hideEmpty || group.sessions.length > 0)
+  const groups = worktrees.flatMap((worktree): WorktreeGroup[] => {
+    if (ownerFilter !== 'all' && worktree.worktreeSource !== ownerFilter) return []
+    const groupSessions = sessionsByDirectory.get(worktree.fullPath) ?? []
+    const group: WorktreeGroup = {
+      worktree,
+      directory: worktree.fullPath,
+      sessions: groupSessions,
+      lastActive: groupSessions[0]?.time.updated ?? 0,
+    }
+    return !hideEmpty || groupSessions.length > 0 ? [group] : []
+  })
 
   const scheduleEntries = new Map<number, Extract<GroupEntry, { kind: 'schedule' }>>()
   const multiRunEntries = new Map<number, Extract<GroupEntry, { kind: 'multiRun' }>>()
@@ -525,8 +522,8 @@ function useCollapsedGroups(repoId: number) {
 
 function readCollapsed(storageKey: string): Set<string> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
-    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [])
+    const parsed = collapsedKeysSchema.safeParse(JSON.parse(localStorage.getItem(storageKey) ?? '[]'))
+    return new Set(parsed.success ? parsed.data : [])
   } catch {
     return new Set()
   }

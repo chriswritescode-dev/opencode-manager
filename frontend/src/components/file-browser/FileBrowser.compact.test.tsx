@@ -1,23 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import '@testing-library/jest-dom'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { FileBrowser } from './FileBrowser'
+import { renderWithProviders } from '@/test/render'
 import type { FileInfo } from '@/types/files'
-import * as useMobile from '../../hooks/useMobile'
-
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
+import type { FetchRoute } from '@/test/fetchFake'
 
 const fileInfo: FileInfo = {
   name: 'notes.txt',
@@ -47,80 +33,56 @@ const directoryInfo: FileInfo = {
   ],
 }
 
-function jsonResponse(payload: unknown) {
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
+const fileRoutes: FetchRoute[] = [
+  {
+    method: 'GET',
+    path: '/api/files',
+    respond: (request) => ({
+      json: request.searchParams.get('path') === 'repo/notes.txt' ? fileInfo : directoryInfo,
+    }),
+  },
+]
 
-function stubFileFetch() {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const path = new URL(String(input), 'http://localhost').searchParams.get('path')
-    if (path === 'repo/notes.txt') {
-      return jsonResponse(fileInfo)
-    }
-    return jsonResponse(directoryInfo)
+function renderBrowser(props: { compact?: boolean } = {}) {
+  return renderWithProviders(<FileBrowser basePath="repo" embedded {...props} />, {
+    auth: false,
+    theme: false,
+    toaster: false,
+    fetchRoutes: fileRoutes,
   })
-  vi.stubGlobal('fetch', fetchMock)
-  return fetchMock
 }
 
 describe('FileBrowser compact', () => {
   it('renders a single full-width column without the desktop preview pane', async () => {
-    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(false)
-    stubFileFetch()
+    renderBrowser({ compact: true })
 
-    try {
-      render(<FileBrowser basePath="repo" embedded compact />, { wrapper: createWrapper() })
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument()
+    expect(screen.queryByText('Select a file to preview')).not.toBeInTheDocument()
 
-      expect(await screen.findByText('notes.txt')).toBeInTheDocument()
-      expect(screen.queryByText('Select a file to preview')).not.toBeInTheDocument()
-
-      const column = screen.getByPlaceholderText('Search').closest('.border-r')
-      expect(column).toHaveClass('w-full')
-      expect(column).not.toHaveClass('w-[30%]')
-    } finally {
-      mobileSpy.mockRestore()
-      vi.unstubAllGlobals()
-    }
+    const column = screen.getByPlaceholderText('Search').closest('.border-r')
+    expect(column).toHaveClass('w-full')
+    expect(column).not.toHaveClass('w-[30%]')
   })
 
   it('shows the inline preview when a file is opened and returns to the list on close', async () => {
-    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(false)
-    stubFileFetch()
+    renderBrowser({ compact: true })
 
-    try {
-      render(<FileBrowser basePath="repo" embedded compact />, { wrapper: createWrapper() })
+    fireEvent.click(await screen.findByText('notes.txt'))
 
-      fireEvent.click(await screen.findByText('notes.txt'))
+    await waitFor(() => expect(screen.queryByPlaceholderText('Search')).not.toBeInTheDocument())
+    expect(screen.getByText('hello world')).toBeInTheDocument()
+    expect(screen.getByTitle('Close preview')).toBeInTheDocument()
 
-      await waitFor(() => expect(screen.queryByPlaceholderText('Search')).not.toBeInTheDocument())
-      expect(screen.getByText('hello world')).toBeInTheDocument()
-      expect(screen.getByTitle('Close preview')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Close preview'))
 
-      fireEvent.click(screen.getByTitle('Close preview'))
-
-      await waitFor(() => expect(screen.getByPlaceholderText('Search')).toBeInTheDocument())
-      expect(screen.queryByText('hello world')).not.toBeInTheDocument()
-    } finally {
-      mobileSpy.mockRestore()
-      vi.unstubAllGlobals()
-    }
+    await waitFor(() => expect(screen.getByPlaceholderText('Search')).toBeInTheDocument())
+    expect(screen.queryByText('hello world')).not.toBeInTheDocument()
   })
 
   it('keeps the split desktop layout when compact is not set', async () => {
-    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(false)
-    stubFileFetch()
+    renderBrowser()
 
-    try {
-      render(<FileBrowser basePath="repo" embedded />, { wrapper: createWrapper() })
-
-      expect(await screen.findByText('notes.txt')).toBeInTheDocument()
-      expect(screen.getByText('Select a file to preview')).toBeInTheDocument()
-    } finally {
-      mobileSpy.mockRestore()
-      vi.unstubAllGlobals()
-    }
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument()
+    expect(screen.getByText('Select a file to preview')).toBeInTheDocument()
   })
 })

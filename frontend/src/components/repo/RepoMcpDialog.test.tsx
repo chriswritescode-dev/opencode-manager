@@ -1,78 +1,93 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import { RepoMcpContent } from './RepoMcpDialog'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { renderWithProviders } from '@/test/render'
+import type { JsonObject } from '@opencode-manager/shared/utils'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  getStatus: vi.fn(),
-  connect: vi.fn(),
-  disconnect: vi.fn(),
-  removeAuth: vi.fn(),
-  startAuth: vi.fn(),
-}))
+const directory = '/home/me/app'
 
-vi.mock('@/api/mcp', () => ({ mcpApi: mocks }))
+function mcpStatusRoute(path: string, servers: Array<{ name: string; status: string; integrationID?: string }>): FetchRoute {
+  return {
+    method: 'GET',
+    path,
+    respond: () => ({
+      json: {
+        location: { directory },
+        data: servers.map((server) => {
+          const info: JsonObject = { name: server.name, status: { status: server.status } }
+          if (server.integrationID) info.integrationID = server.integrationID
+          return info
+        }),
+      },
+    }),
+  }
+}
 
-vi.mock('@/components/settings/McpOAuthDialog', () => ({
-  McpOAuthDialog: () => <div data-testid="mcp-oauth-dialog" />,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-}))
-
-function renderContent(serverId: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider>
-    </QueryClientProvider>
-  )
-  return render(<RepoMcpContent open directory="/home/me/app" />, { wrapper })
+function renderContent(serverId: string, routes: FetchRoute[]) {
+  return renderWithProviders(<RepoMcpContent open directory={directory} />, {
+    auth: false,
+    theme: false,
+    serverId,
+    fetchRoutes: routes,
+  })
 }
 
 describe('RepoMcpContent', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('reads MCP status from the linked server for the session directory', async () => {
-    mocks.getStatus.mockResolvedValue({
-      server: { status: 'connected', integrationID: 'int_1' },
-    })
+    const { fetchFake } = renderContent('srv_kitchen', [
+      mcpStatusRoute('/api/opencode/servers/srv_kitchen/api/mcp', [
+        { name: 'server', status: 'connected', integrationID: 'int_1' },
+      ]),
+    ])
 
-    renderContent('srv_kitchen')
-
-    await waitFor(() => {
-      expect(mocks.getStatus).toHaveBeenCalledWith('/home/me/app', 'srv_kitchen')
-    })
+    expect(await screen.findByText('Connected')).toBeInTheDocument()
+    expect(
+      fetchFake.lastRequest('GET', '/api/opencode/servers/srv_kitchen/api/mcp')?.searchParams.get('location[directory]'),
+    ).toBe(directory)
   })
 
-  it('connects and disconnects MCP servers against the linked server', async () => {
-    mocks.getStatus.mockResolvedValue({ server: { status: 'connected' } })
-    mocks.disconnect.mockResolvedValue(undefined)
+  it('disconnects MCP servers against the linked server', async () => {
     const user = userEvent.setup()
+    const { fetchFake } = renderContent('srv_kitchen', [
+      mcpStatusRoute('/api/opencode/servers/srv_kitchen/api/mcp', [{ name: 'server', status: 'connected' }]),
+      { method: 'POST', path: '/api/opencode/servers/srv_kitchen/api/experimental/mcp/:server/disconnect', respond: () => ({ status: 204 }) },
+    ])
 
-    renderContent('srv_kitchen')
+    await user.click(await screen.findByRole('switch'))
 
-    const toggle = await screen.findByRole('switch')
-    await user.click(toggle)
+    await waitFor(() =>
+      expect(
+        fetchFake.lastRequest('POST', '/api/opencode/servers/srv_kitchen/api/experimental/mcp/server/disconnect')?.searchParams.get('location[directory]'),
+      ).toBe(directory),
+    )
+    expect(await screen.findByText('MCP server updated for this location')).toBeInTheDocument()
+  })
 
-    await waitFor(() => {
-      expect(mocks.disconnect).toHaveBeenCalledWith('server', '/home/me/app', 'srv_kitchen')
-    })
+  it('connects MCP servers against the linked server', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderContent('srv_kitchen', [
+      mcpStatusRoute('/api/opencode/servers/srv_kitchen/api/mcp', [{ name: 'server', status: 'disabled' }]),
+      { method: 'POST', path: '/api/opencode/servers/srv_kitchen/api/experimental/mcp/:server/connect', respond: () => ({ status: 204 }) },
+    ])
+
+    await user.click(await screen.findByRole('switch'))
+
+    await waitFor(() =>
+      expect(
+        fetchFake.lastRequest('POST', '/api/opencode/servers/srv_kitchen/api/experimental/mcp/server/connect')?.searchParams.get('location[directory]'),
+      ).toBe(directory),
+    )
   })
 
   it('hides every Manager OAuth action for a linked server', async () => {
-    mocks.getStatus.mockResolvedValue({
-      server: { status: 'connected', integrationID: 'int_1' },
-      authServer: { status: 'needs_auth', error: 'auth required', integrationID: 'int_2' },
-    })
-
-    renderContent('srv_kitchen')
+    renderContent('srv_kitchen', [
+      mcpStatusRoute('/api/opencode/servers/srv_kitchen/api/mcp', [
+        { name: 'server', status: 'connected', integrationID: 'int_1' },
+        { name: 'authServer', status: 'needs_auth', integrationID: 'int_2' },
+      ]),
+    ])
 
     await screen.findByText('Auth Required')
 
@@ -80,20 +95,15 @@ describe('RepoMcpContent', () => {
     expect(screen.queryByRole('button', { name: 'Auth' })).not.toBeInTheDocument()
     expect(screen.queryByText('Re-authenticate')).not.toBeInTheDocument()
     expect(screen.queryByText('Remove Auth')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('mcp-oauth-dialog')).not.toBeInTheDocument()
-    expect(mocks.removeAuth).not.toHaveBeenCalled()
-    expect(mocks.startAuth).not.toHaveBeenCalled()
   })
 
   it('keeps the Manager OAuth actions for the local server', async () => {
-    mocks.getStatus.mockResolvedValue({
-      server: { status: 'connected', integrationID: 'int_1' },
-    })
     const user = userEvent.setup()
+    renderContent('local', [
+      mcpStatusRoute('/api/opencode/api/mcp', [{ name: 'server', status: 'connected', integrationID: 'int_1' }]),
+    ])
 
-    renderContent('local')
-
-    expect(await screen.findByTestId('mcp-oauth-dialog')).toBeInTheDocument()
+    expect(await screen.findByText('Connected')).toBeInTheDocument()
 
     await user.click(screen.getByTitle('Click for options'))
 

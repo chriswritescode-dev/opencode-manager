@@ -31,7 +31,7 @@ function goalEvent(sessionID: string, goalState: GoalState | null): SSEEvent {
     type: GOAL_CHANGED_EVENT_TYPE,
     location: { directory: EVENT_DIRECTORY },
     data: { sessionID, goal: goalState },
-  } as SSEEvent
+  }
 }
 
 function sessionDeletedEvent(sessionID: string): SSEEvent {
@@ -39,8 +39,9 @@ function sessionDeletedEvent(sessionID: string): SSEEvent {
     id: 'evt_deleted',
     created: 1700000000000,
     type: 'session.deleted',
+    durable: { aggregateID: sessionID, seq: 1, version: 2 },
     data: { sessionID },
-  } as SSEEvent
+  }
 }
 
 describe('GoalOutcomeTracker', () => {
@@ -155,19 +156,19 @@ describe('GoalOutcomeTracker', () => {
 
   it('ignores non-goal events and goal changes without a session id', () => {
     const tracker = new GoalOutcomeTracker()
-    const idleEvent = {
+    const idleEvent: SSEEvent = {
       id: 'evt_idle',
       created: 1700000000000,
       type: 'session.idle',
       data: { sessionID: SESSION_ID },
-    } as SSEEvent
-    const missingSessionId = {
+    }
+    const missingSessionId: SSEEvent = {
       id: 'evt_goal',
       created: 1700000000000,
       type: GOAL_CHANGED_EVENT_TYPE,
       location: { directory: EVENT_DIRECTORY },
       data: { goal: goal({ status: 'complete' }) },
-    } as SSEEvent
+    }
 
     expect(tracker.observe(SERVER_ID, null, idleEvent)).toBeNull()
     expect(tracker.observe(SERVER_ID, null, missingSessionId)).toBeNull()

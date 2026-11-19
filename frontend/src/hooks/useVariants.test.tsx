@@ -1,34 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, waitFor } from '@testing-library/react'
+import { z } from 'zod'
+import type { ModelInfo, ModelRef } from '@opencode-manager/shared/opencode'
+import type { OpenCodeModelState } from '@/api/providers'
 import { useVariants } from './useVariants'
-import { useModelStore } from '@/stores/modelStore'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
 import { modelStateQueryKey, useModelSelection, type ModelSelectionSession } from './useModelSelection'
-import * as providersApi from '@/api/providers'
-import type { Provider } from '@/api/providers'
-import type { ModelInfo } from '@opencode-manager/shared/opencode'
-
-vi.mock('@/api/providers', async () => {
-  const actual = await vi.importActual('@/api/providers')
-  return {
-    ...actual,
-    getProviders: vi.fn(),
-    getOpenCodeConfiguredModel: vi.fn(),
-    getOpenCodeModelState: vi.fn(),
-    saveOpenCodeModelVariant: vi.fn(),
-    addOpenCodeRecentModel: vi.fn(),
-    removeOpenCodeRecentModel: vi.fn(),
-    toggleOpenCodeFavoriteModel: vi.fn(),
-  }
-})
-
-const mockGetProviders = vi.mocked(providersApi.getProviders)
-const mockGetOpenCodeConfiguredModel = vi.mocked(providersApi.getOpenCodeConfiguredModel)
-const mockGetOpenCodeModelState = vi.mocked(providersApi.getOpenCodeModelState)
-const mockSaveOpenCodeModelVariant = vi.mocked(providersApi.saveOpenCodeModelVariant)
-const mockAddOpenCodeRecentModel = vi.mocked(providersApi.addOpenCodeRecentModel)
+import { useModelStore } from '@/stores/modelStore'
+import { renderHookWithProviders } from '@/test/render'
+import { makeCatalogModel, makeCatalogProvider } from '@/test/fixtures/api'
+import type { FetchFake, FetchRoute } from '@/test/fetchFake'
 
 const PROVIDER_ID = 'anthropic'
 const MODEL_ID = 'claude-sonnet-4'
@@ -36,88 +16,158 @@ const MODEL_KEY = `${PROVIDER_ID}/${MODEL_ID}`
 const DIRECTORY = '/test'
 const AGENT_ID = 'build'
 
-const modelInfo = (variants: string[]): ModelInfo => ({
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
+
+const modelInfo: ModelInfo = makeCatalogModel({
   providerID: PROVIDER_ID,
   id: MODEL_ID,
   modelID: MODEL_ID,
   name: MODEL_ID,
-  enabled: true,
-  status: 'active',
-  variants: variants.map((id) => ({ id })),
-  time: { released: 0 },
-  cost: [],
-  limit: { context: 0, output: 0 },
-} as unknown as ModelInfo)
-
-const provider = (): Provider => ({
-  id: PROVIDER_ID,
-  name: 'Anthropic',
-  models: [{ id: MODEL_ID, modelID: MODEL_ID, name: MODEL_ID, released: 0, free: false }],
+  variants: [{ id: 'default' }, { id: 'high' }, { id: 'low' }],
 })
 
-const emptyState = () => ({ recent: [], favorite: [], variant: {} })
-
-const createQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-  },
+const saveBodySchema = z.object({
+  variant: z
+    .object({
+      model: z.object({ providerID: z.string(), modelID: z.string() }),
+      value: z.string().nullable(),
+    })
+    .optional(),
 })
 
-const createWrapper = (queryClient: QueryClient) =>
-  ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+interface ModelServer {
+  routes: FetchRoute[]
+  setState: (state: OpenCodeModelState) => void
+  setConfiguredModel: (model: string | null) => void
+  failSaves: () => void
+  deferSaves: () => () => void
+}
 
-const renderUseVariants = (queryClient: QueryClient, session?: ModelSelectionSession) =>
-  renderHook(() => useVariants(DIRECTORY, session), { wrapper: createWrapper(queryClient) })
+function modelServer(initial: OpenCodeModelState = { recent: [], favorite: [], variant: {} }): ModelServer {
+  let state = initial
+  let configuredModel: string | null = null
+  let savesFail = false
+  let pendingSave: Promise<void> | null = null
 
-const selectAgentModel = (variant?: string) => {
-  useModelStore.getState().setActiveAgent({
-    id: AGENT_ID,
-    model: { providerID: PROVIDER_ID, id: MODEL_ID, ...(variant ? { variant } : {}) },
+  return {
+    setState: (next) => {
+      state = next
+    },
+    setConfiguredModel: (model) => {
+      configuredModel = model
+    },
+    failSaves: () => {
+      savesFail = true
+    },
+    deferSaves: () => {
+      let release = () => {}
+      pendingSave = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return () => {
+        pendingSave = null
+        release()
+      }
+    },
+    routes: [
+      {
+        method: 'GET',
+        path: '/api/opencode/api/provider',
+        respond: () => ({ json: { data: [makeCatalogProvider({ id: PROVIDER_ID, name: 'Anthropic' })] } }),
+      },
+      {
+        method: 'GET',
+        path: '/api/opencode/api/model',
+        respond: () => ({ json: { data: [modelInfo] } }),
+      },
+      {
+        method: 'GET',
+        path: '/api/opencode/api/config',
+        respond: () => ({
+          json: configuredModel === null ? [] : [{ type: 'document', info: { model: configuredModel } }],
+        }),
+      },
+      {
+        method: 'GET',
+        path: '/api/providers/model-state',
+        respond: () => ({ json: state }),
+      },
+      {
+        method: 'POST',
+        path: '/api/providers/model-state',
+        respond: async (request) => {
+          if (pendingSave) await pendingSave
+          if (savesFail) return { status: 500, json: { error: 'save failed' } }
+          const body = saveBodySchema.safeParse(request.body)
+          if (!body.success) return { status: 400, json: { error: 'bad body' } }
+          const variant = body.data.variant
+          if (variant) {
+            const { providerID, modelID } = variant.model
+            state = {
+              ...state,
+              variant: { ...state.variant, [`${providerID}/${modelID}`]: variant.value ?? undefined },
+            }
+          }
+          return { json: state }
+        },
+      },
+    ],
+  }
+}
+
+function selectAgentModel(variant?: string): void {
+  const model: ModelRef = { providerID: PROVIDER_ID, id: MODEL_ID }
+  if (variant !== undefined) model.variant = variant
+  useModelStore.getState().setActiveAgent({ id: AGENT_ID, model })
+}
+
+function renderVariants(server: ModelServer, session?: ModelSelectionSession) {
+  return renderHookWithProviders(() => useVariants(DIRECTORY, session), {
+    ...hookProviders,
+    fetchRoutes: server.routes,
   })
 }
 
-describe('useVariants', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useModelStore.setState({ newSessionPicks: {}, sessionPicks: {}, activeAgent: null })
+function renderSectionVariants(server: ModelServer, session: ModelSelectionSession) {
+  return renderHookWithProviders(
+    () => ({ variants: useVariants(DIRECTORY, session), selection: useModelSelection(DIRECTORY, session) }),
+    { ...hookProviders, fetchRoutes: server.routes },
+  )
+}
 
-    mockGetProviders.mockResolvedValue({
-      providers: [provider()],
-      models: [modelInfo(['default', 'high', 'low'])],
-    })
-    mockGetOpenCodeConfiguredModel.mockResolvedValue(null)
-    mockGetOpenCodeModelState.mockResolvedValue(emptyState())
-    mockSaveOpenCodeModelVariant.mockImplementation(async (model, value) => ({
-      recent: [],
-      favorite: [],
-      variant: { [`${model.providerID}/${model.modelID}`]: value ?? 'default' },
-    }))
+function savedVariant(fetchFake: FetchFake): string | null | undefined {
+  const parsed = saveBodySchema.safeParse(fetchFake.lastRequest('POST', '/api/providers/model-state')?.body)
+  if (!parsed.success) return undefined
+  return parsed.data.variant?.value ?? null
+}
+
+describe('useVariants', () => {
+  let server: ModelServer
+
+  beforeEach(() => {
+    useModelStore.setState({ newSessionPicks: {}, sessionPicks: {}, activeAgent: null })
+    server = modelServer()
   })
 
   it('uses the saved model.json variant when the selection has no variant', async () => {
     selectAgentModel()
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: { [MODEL_KEY]: 'high' },
-    })
+    server.setState({ recent: [], favorite: [], variant: { [MODEL_KEY]: 'high' } })
 
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.currentVariant).toBe('high'))
   })
 
   it('treats a saved default as no variant, beating the agent variant', async () => {
     selectAgentModel('high')
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: { [MODEL_KEY]: 'default' },
-    })
+    server.setState({ recent: [], favorite: [], variant: { [MODEL_KEY]: 'default' } })
 
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.hasVariants).toBe(true))
     expect(result.current.currentVariant).toBeUndefined()
@@ -126,16 +176,16 @@ describe('useVariants', () => {
   it('falls back to the agent variant when nothing is saved', async () => {
     selectAgentModel('high')
 
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.currentVariant).toBe('high'))
   })
 
   it('falls back to the configured variant when the agent has none', async () => {
     selectAgentModel()
-    mockGetOpenCodeConfiguredModel.mockResolvedValue(`${MODEL_KEY}#low`)
+    server.setConfiguredModel(`${MODEL_KEY}#low`)
 
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.currentVariant).toBe('low'))
   })
@@ -143,7 +193,7 @@ describe('useVariants', () => {
   it('ignores a variant that is not in the model variants', async () => {
     selectAgentModel('turbo')
 
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.hasVariants).toBe(true))
     expect(result.current.currentVariant).toBeUndefined()
@@ -151,13 +201,9 @@ describe('useVariants', () => {
 
   it('uses the durable session variant over the saved preference', async () => {
     selectAgentModel()
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: { [MODEL_KEY]: 'low' },
-    })
+    server.setState({ recent: [], favorite: [], variant: { [MODEL_KEY]: 'low' } })
 
-    const { result } = renderUseVariants(createQueryClient(), {
+    const { result } = renderVariants(server, {
       id: 's1',
       agent: AGENT_ID,
       model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' },
@@ -168,7 +214,7 @@ describe('useVariants', () => {
 
   it('stores a session variant on the session pick and persists it', async () => {
     selectAgentModel()
-    const { result } = renderUseVariants(createQueryClient(), {
+    const { result, fetchFake } = renderVariants(server, {
       id: 's1',
       agent: AGENT_ID,
       model: { providerID: PROVIDER_ID, id: MODEL_ID },
@@ -181,30 +227,19 @@ describe('useVariants', () => {
     })
 
     expect(useModelStore.getState().sessionPicks.s1[AGENT_ID].variant).toBe('high')
-    await waitFor(() => {
-      expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
-        { providerID: PROVIDER_ID, modelID: MODEL_ID },
-        'high',
-      )
-    })
+    await waitFor(() => expect(savedVariant(fetchFake)).toBe('high'))
 
     act(() => {
       result.current.clearVariant()
     })
 
     expect(useModelStore.getState().sessionPicks.s1[AGENT_ID].variant).toBeUndefined()
-    await waitFor(() => {
-      expect(mockSaveOpenCodeModelVariant).toHaveBeenLastCalledWith(
-        { providerID: PROVIDER_ID, modelID: MODEL_ID },
-        undefined,
-      )
-    })
+    await waitFor(() => expect(savedVariant(fetchFake)).toBeNull())
   })
 
   it('persists the variant outside a session and drives the selection from the preference', async () => {
     selectAgentModel()
-    const queryClient = createQueryClient()
-    const { result } = renderUseVariants(queryClient)
+    const { result, fetchFake } = renderVariants(server)
 
     await waitFor(() => expect(result.current.hasVariants).toBe(true))
 
@@ -214,12 +249,7 @@ describe('useVariants', () => {
 
     await waitFor(() => expect(result.current.currentVariant).toBe('high'))
     expect(useModelStore.getState().newSessionPicks).toEqual({})
-    await waitFor(() => {
-      expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
-        { providerID: PROVIDER_ID, modelID: MODEL_ID },
-        'high',
-      )
-    })
+    await waitFor(() => expect(savedVariant(fetchFake)).toBe('high'))
 
     act(() => {
       result.current.clearVariant()
@@ -230,7 +260,7 @@ describe('useVariants', () => {
 
   it('cycles through named variants and wraps back to none', async () => {
     selectAgentModel()
-    const { result } = renderUseVariants(createQueryClient())
+    const { result } = renderVariants(server)
 
     await waitFor(() => expect(result.current.hasVariants).toBe(true))
 
@@ -253,64 +283,48 @@ describe('useVariants', () => {
   it('rolls back the optimistic variant when the save fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     selectAgentModel()
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: { [MODEL_KEY]: 'low' },
-    })
-
-    let rejectSave: (error: Error) => void = () => {}
-    mockSaveOpenCodeModelVariant.mockImplementation(() => new Promise((_, reject) => {
-      rejectSave = reject
-    }))
-
-    const queryClient = createQueryClient()
-    const { result } = renderUseVariants(queryClient)
+    server.setState({ recent: [], favorite: [], variant: { [MODEL_KEY]: 'low' } })
+    const { result, queryClient } = renderVariants(server)
 
     await waitFor(() => expect(result.current.currentVariant).toBe('low'))
 
+    server.failSaves()
+    const release = server.deferSaves()
     act(() => {
       result.current.setVariant('high')
     })
 
     await waitFor(() => {
-      expect(queryClient.getQueryData<{ variant: Record<string, string> }>(modelStateQueryKey())?.variant)
-        .toEqual({ [MODEL_KEY]: 'high' })
+      expect(queryClient.getQueryData<OpenCodeModelState>(modelStateQueryKey())?.variant).toEqual({
+        [MODEL_KEY]: 'high',
+      })
     })
 
-    act(() => {
-      rejectSave(new Error('save failed'))
+    await act(async () => {
+      release()
+      await Promise.resolve()
     })
 
     await waitFor(() => {
-      expect(queryClient.getQueryData<{ variant: Record<string, string> }>(modelStateQueryKey())?.variant)
-        .toEqual({ [MODEL_KEY]: 'low' })
+      expect(queryClient.getQueryData<OpenCodeModelState>(modelStateQueryKey())?.variant).toEqual({
+        [MODEL_KEY]: 'low',
+      })
     })
   })
 
   it('keeps the durable session variant after setModel records the same model as a recent', async () => {
     selectAgentModel()
-    mockGetOpenCodeModelState.mockResolvedValue({
-      recent: [],
-      favorite: [],
-      variant: { [MODEL_KEY]: 'low' },
-    })
-    mockAddOpenCodeRecentModel.mockResolvedValue({
+    server.setState({
       recent: [{ providerID: PROVIDER_ID, modelID: MODEL_ID }],
       favorite: [],
       variant: { [MODEL_KEY]: 'low' },
     })
 
-    const session: ModelSelectionSession = {
+    const { result } = renderSectionVariants(server, {
       id: 's1',
       agent: AGENT_ID,
       model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' },
-    }
-
-    const { result } = renderHook(
-      () => ({ variants: useVariants(DIRECTORY, session), selection: useModelSelection(DIRECTORY, session) }),
-      { wrapper: createWrapper(createQueryClient()) },
-    )
+    })
 
     await waitFor(() => expect(result.current.variants.currentVariant).toBe('high'))
 
@@ -324,22 +338,27 @@ describe('useVariants', () => {
 
   describe('remote server', () => {
     const REMOTE_SERVER_ID = 'srv_remote'
+    const REMOTE_PREFIX = `/api/opencode/servers/${REMOTE_SERVER_ID}`
 
-    const renderRemoteVariants = (queryClient: QueryClient, session?: ModelSelectionSession) =>
-      renderHook(() => useVariants(DIRECTORY, session), {
-        wrapper: ({ children }) => (
-          <QueryClientProvider client={queryClient}>
-            <OpenCodeServerProvider serverId={REMOTE_SERVER_ID}>{children}</OpenCodeServerProvider>
-          </QueryClientProvider>
-        ),
+    function renderRemoteVariants(options: { server: ModelServer; session?: ModelSelectionSession }) {
+      const remoteRoutes = options.server.routes.map((route): FetchRoute => {
+        if (route.path === '/api/opencode/api/provider' || route.path === '/api/opencode/api/model' || route.path === '/api/opencode/api/config') {
+          return { ...route, path: `${REMOTE_PREFIX}${route.path.replace('/api/opencode', '')}` }
+        }
+        return route
       })
+      return renderHookWithProviders(() => useVariants(DIRECTORY, options.session), {
+        ...hookProviders,
+        serverId: REMOTE_SERVER_ID,
+        fetchRoutes: remoteRoutes,
+      })
+    }
 
     it('persists a remote session variant in the session pick and via saveOpenCodeModelVariant', async () => {
       selectAgentModel()
-      const { result } = renderRemoteVariants(createQueryClient(), {
-        id: 's1',
-        agent: AGENT_ID,
-        model: { providerID: PROVIDER_ID, id: MODEL_ID },
+      const { result, fetchFake } = renderRemoteVariants({
+        server,
+        session: { id: 's1', agent: AGENT_ID, model: { providerID: PROVIDER_ID, id: MODEL_ID } },
       })
 
       await waitFor(() => expect(result.current.hasVariants).toBe(true))
@@ -350,17 +369,12 @@ describe('useVariants', () => {
 
       expect(useModelStore.getState().sessionPicks.s1[AGENT_ID].variant).toBe('high')
       await waitFor(() => expect(result.current.currentVariant).toBe('high'))
-      await waitFor(() => {
-        expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
-          { providerID: PROVIDER_ID, modelID: MODEL_ID },
-          'high',
-        )
-      })
+      await waitFor(() => expect(savedVariant(fetchFake)).toBe('high'))
     })
 
     it('persists a remote variant outside a session and drives the selection from the preference', async () => {
       selectAgentModel()
-      const { result } = renderRemoteVariants(createQueryClient())
+      const { result, fetchFake } = renderRemoteVariants({ server })
 
       await waitFor(() => expect(result.current.hasVariants).toBe(true))
 
@@ -370,12 +384,7 @@ describe('useVariants', () => {
 
       await waitFor(() => expect(result.current.currentVariant).toBe('high'))
       expect(useModelStore.getState().newSessionPicks).toEqual({})
-      await waitFor(() => {
-        expect(mockSaveOpenCodeModelVariant).toHaveBeenCalledWith(
-          { providerID: PROVIDER_ID, modelID: MODEL_ID },
-          'high',
-        )
-      })
+      await waitFor(() => expect(savedVariant(fetchFake)).toBe('high'))
     })
   })
 })

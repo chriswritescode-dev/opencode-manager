@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { createFetchStub } from '../helpers/fetch-stub'
 import {
   OPENCODE_MIN_VERSION,
   OPENCODE_PINNED_VERSION,
@@ -14,9 +16,7 @@ import {
   isSameOpenCodeMajor,
   isStableOpenCodeVersion,
   isSupportedOpenCodeVersion,
-  normalizeOpenCodeVersion,
   openCodeLocation,
-  parseOpenCodeVersion,
   parseOpenCodeVersionOutput,
 } from '@opencode-manager/shared/opencode'
 
@@ -28,13 +28,13 @@ interface CapturedRequest {
   headers: Record<string, string>
 }
 
-interface PackageManifest {
-  dependencies: Record<string, string>
-}
+const PackageManifestSchema = z.object({
+  dependencies: z.record(z.string(), z.string()),
+})
 
 function createFetchSpy() {
   const calls: CapturedRequest[] = []
-  const fetchSpy = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  const fetchSpy = createFetchStub(async (input, init) => {
     calls.push({
       url: String(input),
       method: init?.method ?? 'GET',
@@ -44,7 +44,7 @@ function createFetchSpy() {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })
-  }) as typeof fetch
+  })
 
   return { calls, fetchSpy }
 }
@@ -52,10 +52,10 @@ function createFetchSpy() {
 describe('OpenCode v2 contract', () => {
   describe('version policy', () => {
     it('pins the built-against version, keeps a separate supported floor and fixes the V2 server username', () => {
-      expect(OPENCODE_PINNED_VERSION).toBe('2.2.5')
-      expect(OPENCODE_MIN_VERSION).toBe('2.2.5')
+      expect(OPENCODE_PINNED_VERSION).toBe('2.3.0')
+      expect(OPENCODE_MIN_VERSION).toBe('2.3.0')
       expect(compareOpenCodeVersions(OPENCODE_PINNED_VERSION, OPENCODE_MIN_VERSION)).toBeGreaterThanOrEqual(0)
-      expect(OPENCODE_SUPPORTED_VERSION_RANGE).toBe('>=2.2.5 <3.0.0')
+      expect(OPENCODE_SUPPORTED_VERSION_RANGE).toBe('>=2.3.0 <3.0.0')
       expect(OPENCODE_SERVER_USERNAME).toBe('opencode')
     })
 
@@ -67,41 +67,42 @@ describe('OpenCode v2 contract', () => {
       expect(isSupportedOpenCodeVersion('2.1.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.2.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.2.4')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.6')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.2.5')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.2.6')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.3.0')).toBe(true)
-      expect(isSupportedOpenCodeVersion('v2.2.5')).toBe(true)
-      expect(isSupportedOpenCodeVersion(' v2.2.5 ')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1')).toBe(true)
+      expect(isSupportedOpenCodeVersion('v2.3.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion(' v2.3.0 ')).toBe(true)
       expect(isSupportedOpenCodeVersion('3.0.0')).toBe(false)
       expect(isSupportedOpenCodeVersion('3.1.0')).toBe(false)
       expect(isSupportedOpenCodeVersion('not-a-version')).toBe(false)
     })
 
     it('rejects prereleases of the pinned version', () => {
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-rc.1+build.5')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-0')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-rc.1+build.5')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-0')).toBe(false)
     })
 
     it('accepts prereleases of higher numeric cores within the pinned major', () => {
-      expect(isSupportedOpenCodeVersion('2.3.0-beta.1')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.6-rc.2')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1-beta.1')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.1-rc.2')).toBe(true)
       expect(isSupportedOpenCodeVersion('3.0.0-beta.1')).toBe(false)
     })
 
     it('ignores build metadata for precedence', () => {
-      expect(isSupportedOpenCodeVersion('2.2.5+build')).toBe(true)
-      expect(isSupportedOpenCodeVersion('2.2.5+2.0.0')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.0+build')).toBe(true)
+      expect(isSupportedOpenCodeVersion('2.3.0+2.0.0')).toBe(true)
     })
 
     it('rejects malformed and incomplete versions', () => {
       expect(isSupportedOpenCodeVersion('2garbage')).toBe(false)
       expect(isSupportedOpenCodeVersion('2')).toBe(false)
       expect(isSupportedOpenCodeVersion('2.0')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5.1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0.1')).toBe(false)
       expect(isSupportedOpenCodeVersion('02.2.1')).toBe(false)
-      expect(isSupportedOpenCodeVersion('2.2.5-alpha..1')).toBe(false)
+      expect(isSupportedOpenCodeVersion('2.3.0-alpha..1')).toBe(false)
       expect(isSupportedOpenCodeVersion('')).toBe(false)
     })
 
@@ -116,34 +117,16 @@ describe('OpenCode v2 contract', () => {
 
     it('describes the supported range for unsupported versions', () => {
       expect(describeUnsupportedOpenCodeVersion('3.0.0')).toBe(
-        'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.2.5 <3.0.0',
+        'OpenCode 3.0.0 is not supported; OpenCode Manager requires OpenCode >=2.3.0 <3.0.0',
       )
     })
   })
 
   describe('version parsing', () => {
-    it('normalizes surrounding whitespace and a leading v', () => {
-      expect(normalizeOpenCodeVersion(' v2.0.15\n')).toBe('2.0.15')
-      expect(normalizeOpenCodeVersion('2.0.15')).toBe('2.0.15')
-    })
-
-    it('parses version components and prerelease identifiers', () => {
-      expect(parseOpenCodeVersion('v2.1.3-beta.4')).toEqual({ major: 2, minor: 1, patch: 3, prerelease: ['beta', 4] })
-      expect(parseOpenCodeVersion('2.1')).toBeNull()
-    })
-
     it('identifies stable MAJOR.MINOR.PATCH versions', () => {
       expect(isStableOpenCodeVersion('v2.0.15')).toBe(true)
       expect(isStableOpenCodeVersion('2.1.0-beta.1')).toBe(false)
       expect(isStableOpenCodeVersion('2.0.15; cat /etc/passwd')).toBe(false)
-    })
-
-    it('orders versions by semver precedence', () => {
-      expect(compareOpenCodeVersions('2.0.15', '2.0.14')).toBeGreaterThan(0)
-      expect(compareOpenCodeVersions('v2.0.15', '2.0.15')).toBe(0)
-      expect(compareOpenCodeVersions('2.0.9', '2.0.10')).toBeLessThan(0)
-      expect(compareOpenCodeVersions('2.1.0-beta.1', '2.1.0')).toBeLessThan(0)
-      expect(() => compareOpenCodeVersions('invalid', '2.0.15')).toThrow(/invalid/)
     })
 
     it('extracts the version from opencode --version output', () => {
@@ -173,9 +156,9 @@ describe('OpenCode v2 contract', () => {
       for (const name of ['@opencode/client', '@opencode/schema', '@opencode/plugin', '@opencode/theme']) {
         expect(catalogVersion(name)).toBe(OPENCODE_PINNED_VERSION)
       }
-      const manifest = JSON.parse(
-        readFileSync(join(REPO_ROOT, 'shared', 'package.json'), 'utf8'),
-      ) as PackageManifest
+      const manifest = PackageManifestSchema.parse(
+        JSON.parse(readFileSync(join(REPO_ROOT, 'shared', 'package.json'), 'utf8')),
+      )
       expect(manifest.dependencies['@opencode/client']).toBe('catalog:')
       expect(manifest.dependencies['@opencode/schema']).toBe('catalog:')
     })

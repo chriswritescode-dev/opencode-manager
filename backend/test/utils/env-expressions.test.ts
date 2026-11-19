@@ -58,11 +58,11 @@ describe('parseEnvExpressionReferences', () => {
 
 describe('interpolateEnvExpressions', () => {
   const lookup = (reference: { context: string; name: string }): string | undefined => {
-    const values: Record<string, string> = {
-      'secrets.TOKEN': 'super-secret',
-      'vars.HOST': 'example.com',
-    }
-    return values[`${reference.context}.${reference.name}`]
+    const values = new Map<string, string>([
+      ['secrets.TOKEN', 'super-secret'],
+      ['vars.HOST', 'example.com'],
+    ])
+    return values.get(`${reference.context}.${reference.name}`)
   }
 
   it('replaces references and interpolates inside a larger string', () => {

@@ -1,16 +1,12 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-}
 
 const migration: Migration = {
   id: '002-repos-nullable-url',
   legacy: { version: 2, name: 'repos-nullable-url' },
 
   up(db) {
-    const tableInfo = db.prepare('PRAGMA table_info(repos)').all() as ColumnInfo[]
+    const tableInfo = selectTableColumns(db, 'repos')
     const repoUrlColumn = tableInfo.find(col => col.name === 'repo_url')
     if (!repoUrlColumn || repoUrlColumn.notnull !== 1) return
 
@@ -47,7 +43,7 @@ const migration: Migration = {
   },
 
   down(db) {
-    const tableInfo = db.prepare('PRAGMA table_info(repos)').all() as ColumnInfo[]
+    const tableInfo = selectTableColumns(db, 'repos')
     const existingColumns = tableInfo.map(col => col.name)
 
     db.run(`

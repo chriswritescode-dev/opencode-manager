@@ -5,16 +5,13 @@ import {
   type OpenCodeApi,
   type OpenCodeConfigInfo,
 } from '@opencode-manager/shared/opencode'
+import type { JsonObject } from '@opencode-manager/shared/utils'
 import { mergeOpenCodeConfigValues } from './opencode-config-file'
 
 interface ManagedConfigSource {
   path: string
 }
 
-/**
- * Reads the configuration documents OpenCode has loaded for a directory,
- * keyed by each document's resolved file path.
- */
 export async function readOpenCodeConfigDocuments(
   api: OpenCodeApi,
   directory: string,
@@ -30,21 +27,14 @@ export async function readOpenCodeConfigDocuments(
   return infoByPath
 }
 
-/**
- * Merges the OpenCode config documents the server reports for the workspace, keeping only the given
- * managed sources. Documents OpenCode did not load are skipped, so the result reflects only values
- * the server actually resolved.
- */
 export async function readManagedOpenCodeConfig(
   api: OpenCodeApi,
   sources: ReadonlyArray<ManagedConfigSource>,
-): Promise<OpenCodeConfigInfo> {
+): Promise<JsonObject> {
   const infoByPath = await readOpenCodeConfigDocuments(api, getWorkspacePath())
 
-  const merged = sources.reduce<Record<string, unknown>>((current, source) => {
+  return sources.reduce<JsonObject>((current, source) => {
     const info = infoByPath.get(path.resolve(source.path))
-    return info ? mergeOpenCodeConfigValues(current, info as Record<string, unknown>) : current
+    return info ? mergeOpenCodeConfigValues(current, info) : current
   }, {})
-
-  return merged as OpenCodeConfigInfo
 }

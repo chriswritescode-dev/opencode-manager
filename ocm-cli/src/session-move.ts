@@ -1,4 +1,6 @@
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { z } from 'zod'
+import { isJsonContainer, type JsonContainer, type JsonValue } from '@opencode-manager/shared/utils'
 import type { SessionTransferData } from '@opencode-manager/shared/opencode'
 
 export type RewriteContext = { localRoot: string; remoteRoot: string }
@@ -10,15 +12,18 @@ export function rewriteTransferForRemote(data: SessionTransferData, ctx: Rewrite
   return cloned
 }
 
-function relocateUris(value: unknown, ctx: RewriteContext): void {
+function relocateUris(value: JsonValue, ctx: RewriteContext): void {
   if (Array.isArray(value)) {
     for (const item of value) relocateUris(item, ctx)
     return
   }
-  if (!value || typeof value !== 'object') return
-  const record = value as Record<string, unknown>
-  if (typeof record.uri === 'string') record.uri = relocateUri(record.uri, ctx)
-  for (const child of Object.values(record)) relocateUris(child, ctx)
+  if (!isJsonContainer(value)) return
+  const container: JsonContainer = value
+  const uri = z.string().safeParse(container['uri'])
+  if (uri.success) container['uri'] = relocateUri(uri.data, ctx)
+  for (const child of Object.values(container)) {
+    if (child !== undefined) relocateUris(child, ctx)
+  }
 }
 
 function relocateUri(uri: string, ctx: RewriteContext): string {

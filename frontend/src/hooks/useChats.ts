@@ -23,8 +23,8 @@ import { partitionSessions } from '@/components/session/session-partition'
 import { showToast } from '@/lib/toast'
 
 const EMPTY_CHATS: Chat[] = []
+const INITIAL_CHAT_CURSOR: string | undefined = undefined
 
-/** A session of a loaded chat folder, ready to render in the chat list. */
 export interface ChatSessionRow {
   key: string
   session: Session
@@ -33,12 +33,11 @@ export interface ChatSessionRow {
   isPinned: boolean
 }
 
-/** Paginated chat folders, newest first. */
 export function useChatFolders(pageSize = 10) {
   const query = useInfiniteQuery({
     queryKey: ['chats', pageSize],
     queryFn: ({ pageParam }) => listChats({ limit: pageSize, cursor: pageParam }),
-    initialPageParam: undefined as string | undefined,
+    initialPageParam: INITIAL_CHAT_CURSOR,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   })
 
@@ -58,7 +57,6 @@ export function useChatFolders(pageSize = 10) {
   }
 }
 
-/** Root sessions of loaded chat folders, ordered and partitioned for the chat list. */
 export function useChatSessions(pageSize = 10) {
   const folders = useChatFolders(pageSize)
   const chats = folders.chats
@@ -115,7 +113,6 @@ export function useChatSessions(pageSize = 10) {
   }
 }
 
-/** Creates a chat folder and navigates to its first session through `onCreated`. */
 export function useCreateChat(onCreated?: (path: string) => void) {
   const queryClient = useQueryClient()
 
@@ -136,7 +133,6 @@ export function useCreateChat(onCreated?: (path: string) => void) {
   })
 }
 
-/** Deletes one session from a chat folder and removes it from list and pin caches. */
 export function useDeleteChatSession() {
   const queryClient = useQueryClient()
 
@@ -162,7 +158,6 @@ export function useDeleteChatSession() {
   })
 }
 
-/** Reads one chat folder, resolving a missing chat to `null`. */
 export function useChat(chatId?: string) {
   return useQuery({
     queryKey: ['chats', 'item', chatId],

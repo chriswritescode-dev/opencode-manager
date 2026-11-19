@@ -3,7 +3,7 @@ import { unwrapSandboxExecCommand } from '@opencode-manager/shared/utils'
 import { toolContentText, type SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
 import { useChildLifecycleForSession } from '@/stores/sessionStatusStore'
-import { useToolCallPermission } from '@/contexts/EventContext'
+import { useToolCallPermission } from '@/contexts/event-context'
 import { useChildSessionReconciliation } from '@/hooks/useOpenCode'
 import { useShell } from '@/hooks/useSessionShells'
 import { useMobile } from '@/hooks/useMobile'
@@ -13,6 +13,8 @@ import { ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
+import { JsonObjectSchema, type JsonObject } from '@opencode-manager/shared/utils'
+import { readJsonNumber, readJsonString } from '@/components/jsonValue'
 import { BackgroundTaskStatusIcon } from '@/components/session/BackgroundTaskStatusIcon'
 import {
   backgroundChildSessionID,
@@ -57,9 +59,14 @@ interface ToolCallPartProps {
   onOpenWalkthrough?: (source?: WalkthroughSource) => void
 }
 
-function toolInput(part: SessionMessageAssistantTool): Record<string, unknown> | undefined {
+function toolInput(part: SessionMessageAssistantTool): JsonObject | undefined {
   if (part.state.status === 'streaming') return undefined
   return part.state.input
+}
+
+function partMetadata(part: SessionMessageAssistantTool): JsonObject {
+  const parsed = JsonObjectSchema.safeParse(toolMetadata(part))
+  return parsed.success ? parsed.data : {}
 }
 
 function toolOutputText(part: SessionMessageAssistantTool): string {
@@ -104,29 +111,25 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
   const outputRef = useRef<HTMLDivElement>(null)
   const userOpenedDetailsRef = useRef(false)
   const input = toolInput(part)
+  const metadata = partMetadata(part)
   const openWalkthrough = readOpenWalkthroughCall(part)
-  const rawCommand = part.name === 'shell' && typeof input?.command === 'string'
-    ? input.command
-    : undefined
+  const rawCommand = part.name === 'shell' ? readJsonString(input?.command) : undefined
   const displayCommand = useMemo(
     () => (rawCommand === undefined ? undefined : unwrapSandboxExecCommand(rawCommand)),
     [rawCommand]
   )
   const isSandboxedCommand =
     part.state.status === 'completed' &&
-    (toolMetadata(part).sandbox === true ||
+    (metadata.sandbox === true ||
       (rawCommand !== undefined && displayCommand !== rawCommand))
-  const sandboxProvider = (() => {
-    const provider = toolMetadata(part).sandboxProvider
-    return typeof provider === 'string' ? provider : undefined
-  })()
+  const sandboxProvider = readJsonString(metadata.sandboxProvider)
   const sandboxProviderLabel = sandboxProvider !== undefined && sandboxProvider !== 'ocm' ? sandboxProvider : undefined
   const foregroundShellExit =
     part.name === 'shell' && !isBackgroundShell && part.state.status === 'completed'
-      ? toolMetadata(part).exit
+      ? readJsonNumber(metadata.exit)
       : undefined
   const failedShellExit =
-    typeof foregroundShellExit === 'number' && foregroundShellExit !== 0 ? foregroundShellExit : undefined
+    foregroundShellExit !== undefined && foregroundShellExit !== 0 ? foregroundShellExit : undefined
   const [detailsOpen, setDetailsOpen] = useToolDetailsState(preferences?.expandToolCalls ?? false)
 
   useEffect(() => {
@@ -186,13 +189,13 @@ export const ToolCallPart = memo(function ToolCallPart({ part, messageID, direct
         return displayCommand || null
       case 'glob':
       case 'grep':
-        return (input.pattern as string) || null
+        return readJsonString(input.pattern) || null
       case 'subagent':
-        return (input.description as string) || null
+        return readJsonString(input.description) || null
       case 'webfetch':
-        return (input.url as string) || null
+        return readJsonString(input.url) || null
       case 'websearch':
-        return (input.query as string) || null
+        return readJsonString(input.query) || null
       default:
         return null
     }

@@ -2,7 +2,7 @@ import { memo, useState } from 'react'
 import { ChevronRight, Loader2 } from 'lucide-react'
 import type { SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { useSettings } from '@/hooks/useSettings'
-import { useToolCallPermission } from '@/contexts/EventContext'
+import { useToolCallPermission } from '@/contexts/event-context'
 import { explorationFailureCount, explorationLabel, isExplorationComplete } from '@/lib/explorationGroups'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 import { MessagePart } from './MessagePart'
@@ -26,7 +26,6 @@ function PermissionBlockedMember(props: MemberProps) {
   return <MessagePart {...props} />
 }
 
-/** Collapsed summary of consecutive read, search, and fetch tool calls, expandable to the individual calls. */
 export const ExplorationGroup = memo(function ExplorationGroup({ parts, ...memberProps }: ExplorationGroupProps) {
   const { preferences } = useSettings()
   const [expanded, setExpanded] = useState(preferences?.expandToolCalls ?? false)

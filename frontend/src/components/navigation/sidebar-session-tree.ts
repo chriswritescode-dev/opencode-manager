@@ -15,11 +15,9 @@ import type { ActiveWorktree } from '@/lib/activeWork'
 export const SIDEBAR_SESSIONS_PER_REPO = 10
 export const SIDEBAR_CHATS_PER_PAGE = 3
 
-/** Collects the loaded session from each query result, dropping unresolved queries. */
 export const combineQuerySessions = (results: Array<{ data?: Session }>): Session[] =>
   results.flatMap((result) => (result.data ? [result.data] : []))
 
-/** Appends extra sessions after the base list, deduplicating by id within both lists. */
 export function mergeExtraSessions(sessions: Session[], extraSessions: Session[]): Session[] {
   if (extraSessions.length === 0) return sessions
   const seen = new Set(sessions.map((session) => session.id))
@@ -35,15 +33,11 @@ export function mergeExtraSessions(sessions: Session[], extraSessions: Session[]
 export interface SidebarSessionItem {
   key: string
   session: Session
-  /** The repository owning the session; absent for chat and linked-server sessions. */
   repoId?: number
-  /** The chat folder owning the session; absent for repo and linked-server sessions. */
   chatId?: string
-  /** The linked server owning the session; absent for local repo and chat sessions. */
   serverId?: string
   repoLabel: string
   branchLabel: string | null
-  /** Branch of the worktree the session runs in, when it runs in a worktree of the group's repo. */
   worktreeBranch?: string | null
   isWorktree: boolean
   isPinned: boolean

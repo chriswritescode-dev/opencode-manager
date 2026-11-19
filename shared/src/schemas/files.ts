@@ -1,24 +1,17 @@
 import { z } from 'zod'
 
-export const FileInfoSchema: z.ZodType<{
-  name: string
-  path: string
-  isDirectory: boolean
-  size: number
-  mimeType?: string
-  content?: string
-  children?: Array<any>
-  lastModified: Date
-  totalLines?: number
-}> = z.object({
+export const FileInfoSchema = z.object({
   name: z.string(),
   path: z.string(),
   isDirectory: z.boolean(),
   size: z.number(),
   mimeType: z.string().optional(),
   content: z.string().optional(),
-  children: z.lazy(() => z.array(FileInfoSchema)).optional(),
-  lastModified: z.date(),
+  get children() {
+    return z.array(FileInfoSchema).optional()
+  },
+  lastModified: z.coerce.date(),
+  workspaceRoot: z.string().optional(),
   totalLines: z.number().optional(),
 })
 
@@ -49,7 +42,7 @@ export const ChunkedFileInfoSchema = z.object({
   startLine: z.number(),
   endLine: z.number(),
   hasMore: z.boolean(),
-  lastModified: z.date(),
+  lastModified: z.coerce.date(),
 })
 
 export const FileRangeRequestSchema = z.object({
@@ -67,5 +60,4 @@ export const PatchOperationSchema = z.object({
 export const FilePatchRequestSchema = z.object({
   patches: z.array(PatchOperationSchema),
 })
-
 

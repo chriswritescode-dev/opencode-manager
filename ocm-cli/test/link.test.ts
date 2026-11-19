@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir, type NetworkInterfaceInfo } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
+import { z } from 'zod'
+import { parseJsonText, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 import {
   buildOpenCodeBasicAuth,
   createOpenCodePairingNonce,
@@ -21,6 +23,8 @@ import type { PairingServerOptions } from '../src/link'
 import { buildOpenCodeServerLink, parseOpenCodeServerLink } from '@opencode-manager/shared/schemas'
 
 const CODE = 'test-pairing-code-0123456789abcdef'
+
+const PairingPayloadSchema = z.object({ iv: z.string(), ciphertext: z.string() })
 const CREDENTIALS = { username: 'opencode', password: 'secret-password' }
 
 const LAN_INTERFACES: NodeJS.Dict<NetworkInterfaceInfo[]> = {
@@ -70,34 +74,30 @@ function discover(paths: ServiceHome, interfaces: NodeJS.Dict<NetworkInterfaceIn
   })
 }
 
-async function discoverOnPlatform(
+function discoverOnPlatform(
   platform: NodeJS.Platform,
   paths: ServiceHome,
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = LAN_INTERFACES,
 ) {
-  const originalPlatform = process.platform
-  Object.defineProperty(process, 'platform', { value: platform })
-  try {
-    vi.resetModules()
-    const { discoverOpenCodeService: discoverService } = await import('../src/link')
-    return discoverService({
-      env: { XDG_STATE_HOME: paths.state, XDG_CONFIG_HOME: paths.config },
-      home: paths.home,
-      interfaces,
-    })
-  } finally {
-    Object.defineProperty(process, 'platform', { value: originalPlatform })
-  }
+  return discoverOpenCodeService({
+    env: { XDG_STATE_HOME: paths.state, XDG_CONFIG_HOME: paths.config },
+    home: paths.home,
+    interfaces,
+    platform,
+  })
 }
 
-function writeRegistration(paths: ServiceHome, content: unknown): void {
-  const file = join(paths.state, 'opencode', 'service.json')
-  writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content))
+function writeServiceFile(file: string, content: JsonValue): void {
+  const raw = z.string().safeParse(content)
+  writeFileSync(file, raw.success ? raw.data : JSON.stringify(content))
 }
 
-function writeServiceConfig(paths: ServiceHome, content: unknown): void {
-  const file = join(paths.config, 'opencode', 'service.json')
-  writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content))
+function writeRegistration(paths: ServiceHome, content: JsonValue): void {
+  writeServiceFile(join(paths.state, 'opencode', 'service.json'), content)
+}
+
+function writeServiceConfig(paths: ServiceHome, content: JsonValue): void {
+  writeServiceFile(join(paths.config, 'opencode', 'service.json'), content)
 }
 
 function startPairing(overrides: Partial<PairingServerOptions> = {}) {
@@ -112,7 +112,7 @@ function startPairing(overrides: Partial<PairingServerOptions> = {}) {
   })
 }
 
-function redeem(url: string, body: unknown, init: RequestInit = {}): Promise<Response> {
+function redeem(url: string, body: JsonObject, init: RequestInit = {}): Promise<Response> {
   return fetch(url, { method: 'POST', body: JSON.stringify(body), ...init })
 }
 
@@ -139,7 +139,8 @@ async function startProbeServer(
     server.listen(0, '127.0.0.1', resolve)
   })
   const address = server.address()
-  const port = typeof address === 'object' && address !== null ? address.port : 0
+  const bound = z.object({ port: z.number() }).safeParse(address)
+  const port = bound.success ? bound.data.port : 0
   const handle: ProbeServer = {
     baseUrl: `http://127.0.0.1:${port}`,
     requests,
@@ -312,23 +313,19 @@ describe('discoverOpenCodeService', () => {
     })
   })
 
-  it('uses the platform default service port when the config omits one', async () => {
-    const cases: Array<{ platform: NodeJS.Platform; port: number }> = [
-      { platform: 'linux', port: 49374 },
-      { platform: 'win32', port: 45278 },
-    ]
+  it.each([
+    ['linux', 49374],
+    ['win32', 45278],
+  ] as const)('uses the %s default service port when the config omits one', (platform, port) => {
+    const paths = createServiceHome()
+    writeServiceConfig(paths, { password: 'config-secret' })
 
-    for (const { platform, port } of cases) {
-      const paths = createServiceHome()
-      writeServiceConfig(paths, { password: 'config-secret' })
-
-      expect(await discoverOnPlatform(platform, paths), platform).toEqual({
-        baseUrl: `http://127.0.0.1:${port}`,
-        password: 'config-secret',
-        source: 'config',
-        loopbackOnly: true,
-      })
-    }
+    expect(discoverOnPlatform(platform, paths)).toEqual({
+      baseUrl: `http://127.0.0.1:${port}`,
+      password: 'config-secret',
+      source: 'config',
+      loopbackOnly: true,
+    })
   })
 })
 
@@ -351,10 +348,14 @@ describe('probeOpenCodeServer', () => {
     ])
   })
 
-  it('reports unauthorized when the server rejects the credentials', async () => {
+  it.each([
+    ['a JSON error body', 'application/json', JSON.stringify({ _tag: 'UnauthorizedError', message: 'unauthorized' })],
+    ['an empty body', 'text/plain', ''],
+    ['a plain text body', 'text/plain', 'unauthorized'],
+  ])('reports unauthorized when the server rejects the credentials with %s', async (_label, contentType, body) => {
     const server = await startProbeServer((_request, response) => {
-      response.writeHead(401, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ _tag: 'UnauthorizedError', message: 'unauthorized' }))
+      response.writeHead(401, { 'content-type': contentType })
+      response.end(body)
     })
 
     await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
@@ -362,44 +363,13 @@ describe('probeOpenCodeServer', () => {
     })
   })
 
-  it('reports unauthorized when the server rejects the credentials with an empty body', async () => {
+  it.each([
+    ['a JSON body', 'application/json', JSON.stringify({ error: 'boom' })],
+    ['a plain text body', 'text/plain', 'boom'],
+  ])('reports unreachable with the HTTP status for an unexpected %s', async (_label, contentType, body) => {
     const server = await startProbeServer((_request, response) => {
-      response.writeHead(401, { 'content-type': 'text/plain' })
-      response.end()
-    })
-
-    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
-      status: 'unauthorized',
-    })
-  })
-
-  it('reports unauthorized when the server rejects the credentials with a plain text body', async () => {
-    const server = await startProbeServer((_request, response) => {
-      response.writeHead(401, { 'content-type': 'text/plain' })
-      response.end('unauthorized')
-    })
-
-    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
-      status: 'unauthorized',
-    })
-  })
-
-  it('reports unreachable with the HTTP status for an unexpected response', async () => {
-    const server = await startProbeServer((_request, response) => {
-      response.writeHead(500, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ error: 'boom' }))
-    })
-
-    await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
-      status: 'unreachable',
-      message: 'HTTP 500',
-    })
-  })
-
-  it('reports unreachable with the HTTP status for an unexpected plain text response', async () => {
-    const server = await startProbeServer((_request, response) => {
-      response.writeHead(500, { 'content-type': 'text/plain' })
-      response.end('boom')
+      response.writeHead(500, { 'content-type': contentType })
+      response.end(body)
     })
 
     await expect(probeOpenCodeServer(server.baseUrl, CREDENTIALS, 1000)).resolves.toEqual({
@@ -432,7 +402,7 @@ describe('startPairingServer', () => {
     expect(raw).not.toContain(CREDENTIALS.password)
     expect(raw).not.toContain(CODE)
 
-    const payload = JSON.parse(raw) as { iv: string; ciphertext: string }
+    const payload = PairingPayloadSchema.parse(parseJsonText(raw))
     await expect(decryptOpenCodePairingCredentials({
       code: CODE,
       nonce: challenge.nonce,
@@ -523,7 +493,7 @@ describe('startPairingServer', () => {
     const pairing = await startPairing()
     const challenge = await createChallenge()
 
-    const payload = await redeem(pairing.url, challenge).then((response) => response.json()) as { iv: string; ciphertext: string }
+    const payload = PairingPayloadSchema.parse(await redeem(pairing.url, challenge).then((response) => response.json()))
 
     await expect(decryptOpenCodePairingCredentials({
       code: `${CODE}-other`,

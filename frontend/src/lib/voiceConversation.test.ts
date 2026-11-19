@@ -33,14 +33,16 @@ function assistant(
   completed?: number,
   texts: readonly string[] = ['Done'],
 ): SessionMessageAssistant {
-  return {
+  const message: SessionMessageAssistant = {
     id,
     type: 'assistant',
     agent: 'build',
     model: { id: 'claude', providerID: 'anthropic' },
     content: texts.map((text) => ({ type: 'text' as const, text })),
-    time: { created, ...(completed === undefined ? {} : { completed }) },
+    time: { created },
   }
+  if (completed !== undefined) message.time = { ...message.time, completed }
+  return message
 }
 
 function narration(

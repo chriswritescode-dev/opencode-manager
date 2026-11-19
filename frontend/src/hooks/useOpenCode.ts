@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
+import { z } from "zod";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import {
   createSession,
@@ -21,7 +22,7 @@ import {
 } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
 import { LOCAL_OPENCODE_SERVER_ID } from "@opencode-manager/shared/schemas";
-import { useOpenCodeServerId } from "@/contexts/OpenCodeServerContext";
+import { useOpenCodeServerId } from "@/contexts/opencode-server-context";
 import { serverScopedKey } from "@/lib/serverScope";
 import type { ModelRef, SessionInfo } from "@opencode-manager/shared/opencode";
 import { isSameModelRef } from "@opencode-manager/shared/opencode";
@@ -38,6 +39,8 @@ import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
 import { admitInboxItem, type TranscriptCache } from "../lib/session-projection";
 import type { SessionPin } from "@opencode-manager/shared/schemas";
 
+const sessionListKeyOptionsSchema = z.object({ project: z.string().optional() })
+
 const SESSION_LIST_PAGE_SIZE = 25
 
 const EMPTY_SESSIONS: SessionInfo[] = []
@@ -49,7 +52,6 @@ interface UseSessionsAcrossDirectoriesOptions {
   allDirectories?: boolean
   project?: { id: string; subpath: string }
   includeChildren?: boolean
-  /** Overrides the route's server for callers that always read a specific server, such as local active work. */
   serverId?: string
 }
 
@@ -64,11 +66,6 @@ interface SessionListPage {
   nextParam?: SessionListPageParam
 }
 
-/**
- * Paginated session list merged across the given directories, or a single global stream when
- * `allDirectories` is set, returning flattened items plus infinite-scroll controls. Only the
- * unfiltered list is restored from disk, so only it keeps the extended `gcTime`.
- */
 export const useSessionsAcrossDirectories = (
   directories: string[],
   options?: UseSessionsAcrossDirectoriesOptions,
@@ -88,10 +85,6 @@ export const useSessionsAcrossDirectories = (
   const projectScoped = !allDirectories && projectId !== undefined;
   const singleCursor = allDirectories || projectScoped;
   const includeChildren = options?.includeChildren ?? false;
-  /**
-   * Only the unfiltered list is restored from disk, so only it keeps the longer `gcTime`; a search
-   * result stays at the default and is collected as soon as it goes unused.
-   */
   const persistedGcTime = normalizedSearch === undefined ? PERSISTED_CACHE_MAX_AGE_MS : undefined;
   const directoryKey = uniqueDirectories.join('|');
   const childSessionsParam = includeChildren ? {} : { parentID: null };
@@ -119,7 +112,8 @@ export const useSessionsAcrossDirectories = (
                 limit,
                 order: 'desc',
                 search: normalizedSearch,
-                ...(projectScoped ? { project: projectId, subpath: projectSubpath } : {}),
+                project: projectScoped ? projectId : undefined,
+                subpath: projectScoped ? projectSubpath : undefined,
                 ...childSessionsParam,
               }
             : { cursor, ...childSessionsParam },
@@ -179,12 +173,13 @@ export const useSessionsAcrossDirectories = (
         nextParam: Object.keys(cursors).length > 0 ? { mode: 'directories', cursors } : undefined,
       };
     },
-    initialPageParam: undefined as SessionListPageParam | undefined,
+    initialPageParam: undefined,
     placeholderData: keepPreviousResults
       ? (previousData, previousQuery) => {
           if (!previousQuery) return undefined
           const sameDirectory = previousQuery.queryKey[2] === directoryKey
-          const previousProject = (previousQuery.queryKey[3] as { project?: string } | undefined)?.project
+          const previousKeyOptions = sessionListKeyOptionsSchema.safeParse(previousQuery.queryKey[3])
+          const previousProject = previousKeyOptions.success ? previousKeyOptions.data.project : undefined
           return sameDirectory && previousProject === projectId ? previousData : undefined
         }
       : undefined,
@@ -229,8 +224,8 @@ export const sessionQueryOptions = (
   refetchOnWindowFocus: true,
   refetchOnReconnect: true,
   staleTime: 15000,
-  retry: (failureCount: number, error: unknown) =>
-    !(error instanceof FetchError && (error.statusCode === 400 || error.statusCode === 404))
+  retry: (failureCount: number, cause: unknown) =>
+    !(cause instanceof FetchError && (cause.statusCode === 400 || cause.statusCode === 404))
     && failureCount < 3,
 });
 
@@ -261,10 +256,6 @@ export const useChildSessionReconciliation = (sessionID: string | undefined) => 
   });
 };
 
-/**
- * Creates a session in `directory` on the route's server, or on `serverIdOverride` for callers rendered
- * outside the server scope that act on a linked server.
- */
 export const useCreateSession = (
   directory?: string,
   onSuccess?: (session: { id: string }) => void,
@@ -303,11 +294,14 @@ export const useCreateSession = (
 
 export type DeleteSessionTarget = string | { id: string; directory?: string };
 
+const isSessionTargetId = (target: DeleteSessionTarget): target is string =>
+  z.string().safeParse(target).success;
+
 const getDeleteSessionTargetId = (target: DeleteSessionTarget) =>
-  typeof target === 'string' ? target : target.id;
+  isSessionTargetId(target) ? target : target.id;
 
 const getDeleteSessionTargetDirectory = (target: DeleteSessionTarget, fallbackDirectory?: string) =>
-  typeof target === 'string' ? fallbackDirectory : target.directory ?? fallbackDirectory;
+  isSessionTargetId(target) ? fallbackDirectory : target.directory ?? fallbackDirectory;
 
 const getDeleteSessionTargetKey = (target: DeleteSessionTarget, fallbackDirectory?: string) =>
   buildSessionKey(getDeleteSessionTargetDirectory(target, fallbackDirectory), getDeleteSessionTargetId(target));
@@ -579,7 +573,6 @@ export const useInterruptSession = () => {
           await interruptSession(targetSessionID, serverId);
           stopRetrying();
         } catch {
-          // Will retry on next interval
         }
       };
 

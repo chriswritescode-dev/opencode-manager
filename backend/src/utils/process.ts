@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process'
+import { z } from 'zod'
 import { logger } from './logger'
 
-interface ExecuteCommandOptions {
+export interface ExecuteCommandOptions {
   cwd?: string
   silent?: boolean
   env?: Record<string, string>
@@ -19,13 +20,37 @@ export interface ExecuteCommandResult {
 
 type ExecuteCommandReturn<O> = O extends { ignoreExitCode: true } ? ExecuteCommandResult : string
 
-export async function executeCommand<O extends ExecuteCommandOptions = ExecuteCommandOptions>(
+export interface CommandExecutor {
+  (args: string[], cwdOrOptions?: string | ExecuteCommandOptions): Promise<string>
+  (args: string[], options: ExecuteCommandOptions & { ignoreExitCode: true }): Promise<ExecuteCommandResult>
+}
+
+
+const ExecuteCommandOptionsSchema = z.object({
+  cwd: z.string().optional(),
+  silent: z.boolean().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  ignoreExitCode: z.boolean().optional(),
+  timeout: z.number().optional(),
+  maxOutputChars: z.number().optional(),
+})
+
+export function executeCommand<O extends ExecuteCommandOptions>(
   args: string[],
-  cwdOrOptions?: string | O
-): Promise<ExecuteCommandReturn<O>> {
-  const options: ExecuteCommandOptions = typeof cwdOrOptions === 'string' 
-    ? { cwd: cwdOrOptions } 
-    : cwdOrOptions || {}
+  cwdOrOptions: O | undefined
+): Promise<ExecuteCommandReturn<O>>
+export function executeCommand(args: string[], cwdOrOptions?: string): Promise<string>
+export async function executeCommand(
+  args: string[],
+  cwdOrOptions?: string | ExecuteCommandOptions
+): Promise<string | ExecuteCommandResult> {
+  const parsedOptions = ExecuteCommandOptionsSchema.safeParse(cwdOrOptions)
+  const parsedCwd = z.string().safeParse(cwdOrOptions)
+  const options: ExecuteCommandOptions = parsedOptions.success
+    ? parsedOptions.data
+    : parsedCwd.success
+      ? { cwd: parsedCwd.data }
+      : {}
   
   return new Promise<string | ExecuteCommandResult>((resolve, reject) => {
     const [command, ...cmdArgs] = args
@@ -119,5 +144,5 @@ export async function executeCommand<O extends ExecuteCommandOptions = ExecuteCo
         reject(error)
       }
     })
-  }) as Promise<ExecuteCommandReturn<O>>
+  })
 }

@@ -4,12 +4,8 @@ import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { LocalRepoNewSessionButton } from '@/components/navigation/RepoSessionNav'
 import { isRepoReady } from '@/components/navigation/sidebar-session-tree'
 import { cn, getRepoBranchLabel, getRepoDisplayName } from '@/lib/utils'
-import {
-  PickerSearchBar,
-  optionId,
-  usePickerCursor,
-  usePickerKeyNav,
-} from '@/components/session/usePickerKeyboardNav'
+import { PickerSearchBar } from '@/components/session/PickerSearchBar'
+import { optionId, usePickerCursor, usePickerKeyNav } from '@/components/session/picker-cursor'
 
 interface ProjectPickerContentProps {
   open: boolean

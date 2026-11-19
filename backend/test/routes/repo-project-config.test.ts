@@ -1,87 +1,107 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import fs from 'node:fs'
-import os from 'node:os'
+import { z } from 'zod'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
-import { createRepo } from '../../src/db/queries'
+import type { Database } from 'bun:sqlite'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
+import { ProjectConfigResponseSchema, RepoProjectFileSchema, TerminalInfoSchema } from '@opencode-manager/shared/schemas'
 import { createRepoProjectConfigRoutes } from '../../src/routes/repo-project-config'
 import { ProjectConfigService } from '../../src/services/project-config'
 import { createGitService } from '../../src/services/git/GitService'
+import { TerminalService } from '../../src/services/terminal'
+import { CredentialProvider } from '../../src/services/credential-provider'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
-import { formatTerminalTitle } from '@opencode-manager/shared/utils'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { CreateTerminalInput, TerminalService } from '../../src/services/terminal'
-import type { TerminalInfo } from '@opencode-manager/shared/types'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-vi.mock('../../src/services/repo', () => ({
-  resolveRepoWorkingDirectory: vi.fn(),
-  listRepoSiblings: vi.fn(),
-}))
+type PtyInfo = Awaited<ReturnType<OpenCodeApi['pty']['list']>>['data'][number]
+type PtyCreateInput = Parameters<OpenCodeApi['pty']['create']>[0]
 
-import { resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
+const ErrorEnvelopeSchema = z.object({ error: z.string() })
+const CodedErrorSchema = z.object({
+  error: z.string(),
+  code: z.string(),
+  details: z.object({ hash: z.string().nullable() }),
+})
+const RunActionResponseSchema = z.object({
+  terminal: TerminalInfoSchema,
+  alreadyRunning: z.boolean(),
+  autoOpenUrl: z.boolean(),
+  resolvedUrl: z.string().optional(),
+})
 
-const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
-const openCodeClient = createStubOpenCodeClient()
-const terminalList = vi.fn(async (): Promise<TerminalInfo[]> => [])
-const terminalCreate = vi.fn(
-  async (directory: string, input: CreateTerminalInput): Promise<TerminalInfo> => ({
-    id: 'pty-1',
-    title: formatTerminalTitle({ kind: input.kind, name: input.name, actionId: input.actionId }),
-    kind: input.kind,
-    ...(input.actionId ? { actionId: input.actionId } : {}),
-    cwd: directory,
-    status: 'running',
-  }),
-)
-const terminalService = { list: terminalList, create: terminalCreate } as unknown as TerminalService
+type RepoProjectFileFixture = z.input<typeof RepoProjectFileSchema>
+
 const jsonHeaders = { 'Content-Type': 'application/json' }
+const UNTRUSTED_HASH = 'a'.repeat(64)
 
-function createApp(db: Database): Hono {
-  const service = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
-  const app = new Hono()
-  app.route('/', createRepoProjectConfigRoutes(db, gitAuthService, openCodeClient, service, terminalService))
-  return app
+function buildPty(id: string, cwd: string): PtyInfo {
+  return { id, title: 'Terminal', command: '/bin/sh', args: [], cwd, status: 'running', pid: 1 }
 }
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
-
-function seedRepo(db: Database): void {
-  createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
-}
-
-describe('Repo Project Config Routes', () => {
+describe('repo project config routes', () => {
+  let workspace: TempWorkspace
   let db: Database
+  let repoId = 0
+  let repoPath = ''
   let app: Hono
+  let createdTerminal: PtyCreateInput | undefined
+
+  function writeRepoProjectFile(directory: string, content: RepoProjectFileFixture): void {
+    const configDir = path.join(directory, '.ocm')
+    mkdirSync(configDir, { recursive: true })
+    writeFileSync(path.join(configDir, 'project.json'), JSON.stringify(content))
+  }
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(listRepoSiblings).mockResolvedValue([])
-    vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (repo, directory) => {
-      if (directory === undefined || directory === repo.fullPath) return repo.fullPath
-      return null
+    workspace = createTempWorkspace('ocm-project-config-routes-')
+    db = createTestDatabase()
+    const repo = seedRepo(db, { localPath: 'repo-a' })
+    repoId = repo.id
+    repoPath = repo.fullPath
+    mkdirSync(repoPath, { recursive: true })
+    createdTerminal = undefined
+
+    const gitAuthService = createGitAuthService()
+    const openCodeClient = createStubOpenCodeClient({
+      api: {
+        pty: {
+          list: async (input) => ({ location: { directory: input?.location?.directory ?? '' }, data: [] }),
+          create: vi.fn(async (input) => {
+            createdTerminal = input
+            const directory = input?.location?.directory ?? ''
+            return {
+              location: { directory },
+              data: { ...buildPty('pty-1', directory), title: input?.title ?? 'Terminal' },
+            }
+          }),
+        },
+      },
     })
-    db = createTestDb()
-    app = createApp(db)
+    const terminalService = new TerminalService(
+      { client: openCodeClient, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+      new CredentialProvider(db),
+      createStubRepoEnvService(),
+    )
+    const projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
+    app = new Hono()
+    app.route('/', createRepoProjectConfigRoutes(db, gitAuthService, openCodeClient, projectConfigService, terminalService))
   })
 
   afterEach(() => {
     db.close()
+    workspace.restore()
   })
 
   it('returns personal config for a ready repo', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config')
+    const res = await app.request(`/${repoId}/project-config`)
+    const body = await readJson(res, ProjectConfigResponseSchema)
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { actions: unknown[]; worktreeSetup: unknown[]; repoFile: unknown }
     expect(body.actions).toEqual([])
     expect(body.worktreeSetup).toEqual([])
     expect(body.repoFile).toEqual({
@@ -96,22 +116,24 @@ describe('Repo Project Config Routes', () => {
 
   it('returns 404 for an unknown repo', async () => {
     const res = await app.request('/999/project-config')
+    const body = await readJson(res, ErrorEnvelopeSchema)
 
     expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ error: 'Repo not found' })
+    expect(body.error).toBe('Repo not found')
   })
 
   it('rejects the assistant repo id when assistant access is not allowed', async () => {
     const res = await app.request('/0/project-config')
+    const body = await readJson(res, ErrorEnvelopeSchema)
 
     expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ error: 'Repo not found' })
+    expect(body.error).toBe('Repo not found')
   })
 
   it('returns 404 for a repo that is not ready', async () => {
-    createRepo(db, { localPath: 'repo-cloning', defaultBranch: 'main', cloneStatus: 'cloning', clonedAt: Date.now(), isLocal: true })
+    const cloning = seedRepo(db, { localPath: 'repo-cloning', cloneStatus: 'cloning' })
 
-    const res = await app.request('/1/project-config')
+    const res = await app.request(`/${cloning.id}/project-config`)
 
     expect(res.status).toBe(404)
   })
@@ -123,46 +145,44 @@ describe('Repo Project Config Routes', () => {
   })
 
   it('round-trips personal actions with the personal source', async () => {
-    seedRepo(db)
     const action = { id: 'serve', name: 'Serve', command: 'pnpm dev', autoOpenUrl: false }
 
-    const put = await app.request('/1/project-config/actions', {
+    const put = await app.request(`/${repoId}/project-config/actions`, {
       method: 'PUT',
       headers: jsonHeaders,
       body: JSON.stringify({ actions: [action] }),
     })
+    const putBody = await readJson(put, ProjectConfigResponseSchema)
     expect(put.status).toBe(200)
-    expect((await put.json() as { actions: unknown[] }).actions).toEqual([{ ...action, source: 'personal' }])
+    expect(putBody.actions).toEqual([{ ...action, source: 'personal' }])
 
-    const get = await app.request('/1/project-config')
+    const get = await app.request(`/${repoId}/project-config`)
+    const getBody = await readJson(get, ProjectConfigResponseSchema)
     expect(get.status).toBe(200)
-    expect((await get.json() as { actions: unknown[] }).actions).toEqual([{ ...action, source: 'personal' }])
+    expect(getBody.actions).toEqual([{ ...action, source: 'personal' }])
   })
 
   it('round-trips personal worktree setup commands', async () => {
-    seedRepo(db)
+    const expected = [
+      { command: 'pnpm install', source: 'personal' },
+      { command: 'pnpm build', source: 'personal' },
+    ]
 
-    const put = await app.request('/1/project-config/worktree-setup', {
+    const put = await app.request(`/${repoId}/project-config/worktree-setup`, {
       method: 'PUT',
       headers: jsonHeaders,
       body: JSON.stringify({ commands: ['pnpm install', 'pnpm build'] }),
     })
+    const putBody = await readJson(put, ProjectConfigResponseSchema)
     expect(put.status).toBe(200)
-    expect((await put.json() as { worktreeSetup: unknown[] }).worktreeSetup).toEqual([
-      { command: 'pnpm install', source: 'personal' },
-      { command: 'pnpm build', source: 'personal' },
-    ])
+    expect(putBody.worktreeSetup).toEqual(expected)
 
-    const get = await app.request('/1/project-config')
-    expect((await get.json() as { worktreeSetup: unknown[] }).worktreeSetup).toEqual([
-      { command: 'pnpm install', source: 'personal' },
-      { command: 'pnpm build', source: 'personal' },
-    ])
+    const get = await app.request(`/${repoId}/project-config`)
+    const getBody = await readJson(get, ProjectConfigResponseSchema)
+    expect(getBody.worktreeSetup).toEqual(expected)
   })
 
   it('returns 400 for schema violations on actions', async () => {
-    seedRepo(db)
-
     const bodies = [
       '{}',
       JSON.stringify({ actions: 'nope' }),
@@ -172,35 +192,30 @@ describe('Repo Project Config Routes', () => {
     ]
 
     for (const body of bodies) {
-      const res = await app.request('/1/project-config/actions', { method: 'PUT', headers: jsonHeaders, body })
+      const res = await app.request(`/${repoId}/project-config/actions`, { method: 'PUT', headers: jsonHeaders, body })
       expect(res.status).toBe(400)
     }
   })
 
   it('returns 400 for schema violations on worktree setup', async () => {
-    seedRepo(db)
-
     const bodies = ['{}', JSON.stringify({ commands: 'nope' }), JSON.stringify({ commands: [''] })]
 
     for (const body of bodies) {
-      const res = await app.request('/1/project-config/worktree-setup', { method: 'PUT', headers: jsonHeaders, body })
+      const res = await app.request(`/${repoId}/project-config/worktree-setup`, { method: 'PUT', headers: jsonHeaders, body })
       expect(res.status).toBe(400)
     }
   })
 
   it('returns 400 for a foreign directory', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config?directory=/tmp/other')
+    const res = await app.request(`/${repoId}/project-config?directory=/tmp/other`)
+    const body = await readJson(res, ErrorEnvelopeSchema)
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'Directory is not part of this repository' })
+    expect(body.error).toBe('Directory is not part of this repository')
   })
 
   it('returns 400 for an invalid trust request', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config/trust', {
+    const res = await app.request(`/${repoId}/project-config/trust`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ hash: 'not-a-hash' }),
@@ -210,49 +225,37 @@ describe('Repo Project Config Routes', () => {
   })
 
   it('returns 409 when trusting a stale hash', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config/trust', {
+    const res = await app.request(`/${repoId}/project-config/trust`, {
       method: 'POST',
       headers: jsonHeaders,
-      body: JSON.stringify({ hash: 'a'.repeat(64) }),
+      body: JSON.stringify({ hash: UNTRUSTED_HASH }),
     })
 
     expect(res.status).toBe(409)
-    expect((await res.json() as { code: string }).code).toBe('REPO_CONFIG_CHANGED')
+    const body = await readJson(res, z.object({ code: z.string() }))
+    expect(body.code).toBe('REPO_CONFIG_CHANGED')
   })
 
   it('returns the error code and details for an untrusted repository action', async () => {
-    seedRepo(db)
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-route-untrusted-'))
-    vi.mocked(resolveRepoWorkingDirectory).mockResolvedValue(directory)
-    const repoFileDir = path.join(directory, '.ocm')
-    fs.mkdirSync(repoFileDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(repoFileDir, 'project.json'),
-      JSON.stringify({ version: 1, projectActions: [{ id: 'repo-serve', name: 'Serve', command: 'pnpm dev' }] }),
-    )
+    writeRepoProjectFile(repoPath, {
+      version: 1,
+      projectActions: [{ id: 'repo-serve', name: 'Serve', command: 'pnpm dev' }],
+    })
 
-    try {
-      const res = await app.request('/1/project-config/actions/repo-serve/run', {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify({}),
-      })
+    const res = await app.request(`/${repoId}/project-config/actions/repo-serve/run`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({}),
+    })
 
-      expect(res.status).toBe(409)
-      const body = await res.json() as { code: string; details: { hash: string } }
-      expect(body.code).toBe('REPO_CONFIG_UNTRUSTED')
-      expect(body.details.hash).toMatch(/^[a-f0-9]{64}$/)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
+    expect(res.status).toBe(409)
+    const body = await readJson(res, CodedErrorSchema)
+    expect(body.code).toBe('REPO_CONFIG_UNTRUSTED')
+    expect(body.details.hash).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('returns 400 for an invalid move request', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config/move', {
+    const res = await app.request(`/${repoId}/project-config/move`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ kind: 'action', id: 'serve', to: 'nowhere' }),
@@ -262,9 +265,7 @@ describe('Repo Project Config Routes', () => {
   })
 
   it('returns 404 when moving an unknown item', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config/move', {
+    const res = await app.request(`/${repoId}/project-config/move`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ kind: 'action', id: 'missing', to: 'repo' }),
@@ -274,111 +275,84 @@ describe('Repo Project Config Routes', () => {
   })
 
   it('moves a personal action into the repo file and returns it as trusted', async () => {
-    seedRepo(db)
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-route-move-'))
-    vi.mocked(resolveRepoWorkingDirectory).mockResolvedValue(directory)
     const action = { id: 'serve', name: 'Serve', command: 'pnpm dev', autoOpenUrl: false }
 
-    try {
-      await app.request('/1/project-config/actions', {
-        method: 'PUT',
-        headers: jsonHeaders,
-        body: JSON.stringify({ actions: [action] }),
-      })
-
-      const res = await app.request('/1/project-config/move', {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify({ kind: 'action', id: 'serve', to: 'repo' }),
-      })
-
-      expect(res.status).toBe(200)
-      const body = await res.json() as { actions: unknown[]; repoFile: { exists: boolean; trusted: boolean } }
-      expect(body.repoFile.exists).toBe(true)
-      expect(body.repoFile.trusted).toBe(true)
-      expect(body.actions).toEqual([{ ...action, source: 'repo' }])
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('returns 409 when moving a setup command into a repository already at capacity', async () => {
-    seedRepo(db)
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-route-move-'))
-    vi.mocked(resolveRepoWorkingDirectory).mockResolvedValue(directory)
-
-    try {
-      await app.request('/1/project-config/worktree-setup', {
-        method: 'PUT',
-        headers: jsonHeaders,
-        body: JSON.stringify({ commands: ['personal-cmd'] }),
-      })
-      const repoFileDir = path.join(directory, '.ocm')
-      fs.mkdirSync(repoFileDir, { recursive: true })
-      fs.writeFileSync(
-        path.join(repoFileDir, 'project.json'),
-        JSON.stringify({ version: 1, setupWorktree: Array.from({ length: 20 }, (_, index) => `repo-${index}`) }),
-      )
-
-      const res = await app.request('/1/project-config/move', {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify({ kind: 'setup', command: 'personal-cmd', to: 'repo' }),
-      })
-
-      expect(res.status).toBe(409)
-      expect((await res.json() as { code: string }).code).toBe('PROJECT_CONFIG_LIMIT_EXCEEDED')
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('runs a personal action and returns the response shape', async () => {
-    seedRepo(db)
-    const action = { id: 'serve', name: 'Serve', command: 'pnpm dev', autoOpenUrl: false }
-
-    await app.request('/1/project-config/actions', {
+    await app.request(`/${repoId}/project-config/actions`, {
       method: 'PUT',
       headers: jsonHeaders,
       body: JSON.stringify({ actions: [action] }),
     })
 
-    const res = await app.request('/1/project-config/actions/serve/run', {
+    const res = await app.request(`/${repoId}/project-config/move`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ kind: 'action', id: 'serve', to: 'repo' }),
+    })
+    const body = await readJson(res, ProjectConfigResponseSchema)
+
+    expect(res.status).toBe(200)
+    expect(body.repoFile.exists).toBe(true)
+    expect(body.repoFile.trusted).toBe(true)
+    expect(body.actions).toEqual([{ ...action, source: 'repo' }])
+  })
+
+  it('returns 409 when moving a setup command into a repository already at capacity', async () => {
+    await app.request(`/${repoId}/project-config/worktree-setup`, {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: JSON.stringify({ commands: ['personal-cmd'] }),
+    })
+    writeRepoProjectFile(repoPath, {
+      version: 1,
+      setupWorktree: Array.from({ length: 20 }, (_, index) => `repo-${index}`),
+    })
+
+    const res = await app.request(`/${repoId}/project-config/move`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ kind: 'setup', command: 'personal-cmd', to: 'repo' }),
+    })
+    const body = await readJson(res, z.object({ code: z.string() }))
+
+    expect(res.status).toBe(409)
+    expect(body.code).toBe('PROJECT_CONFIG_LIMIT_EXCEEDED')
+  })
+
+  it('runs a personal action and returns the response shape', async () => {
+    const action = { id: 'serve', name: 'Serve', command: 'pnpm dev', autoOpenUrl: false }
+
+    await app.request(`/${repoId}/project-config/actions`, {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: JSON.stringify({ actions: [action] }),
+    })
+
+    const res = await app.request(`/${repoId}/project-config/actions/serve/run`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({}),
     })
+    const body = await readJson(res, RunActionResponseSchema)
 
     expect(res.status).toBe(200)
-    const body = await res.json() as {
-      terminal: unknown
-      alreadyRunning: boolean
-      autoOpenUrl: boolean
-      resolvedUrl?: string
-    }
     expect(body.alreadyRunning).toBe(false)
     expect(body.autoOpenUrl).toBe(false)
     expect(body.resolvedUrl).toBeUndefined()
     expect(body.terminal).toMatchObject({
       id: 'pty-1',
-      title: 'ocm:action:serve:Serve',
+      title: 'Serve',
       kind: 'action',
       actionId: 'serve',
       status: 'running',
     })
-    expect(terminalCreate).toHaveBeenCalledWith(expect.any(String), {
-      kind: 'action',
-      actionId: 'serve',
-      name: 'Serve',
-      command: '/bin/sh',
-      args: ['-c', 'pnpm dev'],
-    })
+    expect(createdTerminal?.location?.directory).toBe(repoPath)
+    expect(createdTerminal?.title).toBe('ocm:action:serve:Serve')
+    expect(createdTerminal?.command).toBe('/bin/sh')
+    expect(createdTerminal?.args?.slice(-2)).toEqual(['-c', 'pnpm dev'])
   })
 
   it('returns 404 when running an unknown action', async () => {
-    seedRepo(db)
-
-    const res = await app.request('/1/project-config/actions/missing/run', {
+    const res = await app.request(`/${repoId}/project-config/actions/missing/run`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({}),

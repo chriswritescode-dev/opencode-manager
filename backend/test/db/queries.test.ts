@@ -1,296 +1,230 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import * as db from '../../src/db/queries'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import {
+  createRepo,
+  deleteRepo,
+  ensureAssistantRepo,
+  getRepoById,
+  listRepos,
+  setRepoSetting,
+  updateLastAccessed,
+  updateLastPulled,
+  updateRepoStatus,
+} from '../../src/db/queries'
+import { createMultiRunWithEntries, insertMultiRunFusion } from '../../src/db/multi-runs'
+import { createScheduleRun } from '../../src/db/schedules'
+import { SecretsService } from '../../src/services/secrets'
+import { selectRow } from '../../src/db/rows'
+import { createTestDatabase, seedRepo, seedScheduleJob } from '../helpers/test-database'
 
-const mockDb = {
-  prepare: vi.fn(),
-  exec: vi.fn(),
-  close: vi.fn(),
-  transaction: vi.fn()
-} as any
+const RowCountSchema = z.object({ count: z.number() })
 
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(() => mockDb)
-}))
+function countRows(database: Database, sql: string, ...params: Array<string | number>): number {
+  return selectRow(database, RowCountSchema, sql, ...params)?.count ?? 0
+}
 
 describe('Database Queries', () => {
+  let database: Database
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockDb.prepare.mockReset()
+    database = createTestDatabase()
+  })
+
+  afterEach(() => {
+    database.close()
   })
 
   describe('createRepo', () => {
     it('should insert new repo record', () => {
       const clonedAt = Date.now()
-      const repo = {
+      const repo = createRepo(database, {
         repoUrl: 'https://github.com/test/repo',
         localPath: 'repos/test-repo',
-        sourcePath: '/Users/test/repos/test-repo',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt,
-        isWorktree: false,
-        isLocal: true,
-      }
-
-      const existingCheckSourceStmt = {
-        get: vi.fn().mockReturnValue(undefined)
-      }
-
-      const existingCheckLocalStmt = {
-        get: vi.fn().mockReturnValue(undefined)
-      }
-
-      const insertStmt = {
-        run: vi.fn().mockReturnValue({ changes: 1, lastInsertRowid: 1 })
-      }
-      
-      const selectStmt = {
-        get: vi.fn().mockReturnValue({
-          id: 1,
-          repo_url: repo.repoUrl,
-          local_path: repo.localPath,
-          source_path: repo.sourcePath,
-          branch: repo.branch,
-          default_branch: repo.defaultBranch,
-          clone_status: repo.cloneStatus,
-          cloned_at: repo.clonedAt,
-          last_accessed_at: clonedAt,
-          is_worktree: 0
-        })
-      }
-      
-      mockDb.prepare
-        .mockReturnValueOnce(existingCheckSourceStmt)
-        .mockReturnValueOnce(existingCheckLocalStmt)
-        .mockReturnValueOnce(insertStmt)
-        .mockReturnValueOnce(selectStmt)
-
-      const result = db.createRepo(mockDb, repo)
-
-      expect(mockDb.prepare).toHaveBeenCalled()
-      expect(insertStmt.run).toHaveBeenCalledWith(
-        repo.repoUrl,
-        repo.localPath,
-        repo.sourcePath,
-        repo.branch || null,
-        repo.defaultBranch,
-        repo.cloneStatus,
-        repo.clonedAt,
-        clonedAt,
-        repo.isWorktree ? 1 : 0,
-        1
-      )
-      expect(result.id).toBe(1)
-    })
-  })
-
-  describe('getRepoById', () => {
-    it('should retrieve repo by ID', () => {
-      const clonedAt = Date.now()
-      const lastAccessedAt = Date.now()
-      const repoRow = {
-        id: 1,
-        repo_url: 'https://github.com/test/repo',
-        local_path: 'repos/test-repo',
-        source_path: '/Users/test/repos/test-repo',
-        branch: 'main',
-        default_branch: 'main',
-        clone_status: 'ready',
-        cloned_at: clonedAt,
-        last_pulled: null,
-        last_accessed_at: lastAccessedAt,
-        is_worktree: 0,
-        is_local: 0
-      }
-
-      const stmt = {
-        get: vi.fn().mockReturnValue(repoRow)
-      }
-      mockDb.prepare.mockReturnValue(stmt)
-
-      const result = db.getRepoById(mockDb, 1)
-
-      expect(result).toEqual({
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/Users/test/repos/test-repo',
         sourcePath: '/Users/test/repos/test-repo',
         branch: 'main',
         defaultBranch: 'main',
         cloneStatus: 'ready',
-        clonedAt: clonedAt,
-        lastPulled: null,
-        lastAccessedAt: lastAccessedAt,
-        isWorktree: undefined,
-        isLocal: undefined
+        clonedAt,
+        isWorktree: false,
+        isLocal: true,
       })
+
+      expect(repo.id).toBeGreaterThan(0)
+      expect(repo.repoUrl).toBe('https://github.com/test/repo')
+      expect(repo.localPath).toBe('repos/test-repo')
+      expect(repo.fullPath).toBe('/Users/test/repos/test-repo')
+      expect(repo.sourcePath).toBe('/Users/test/repos/test-repo')
+      expect(repo.branch).toBe('main')
+      expect(repo.defaultBranch).toBe('main')
+      expect(repo.cloneStatus).toBe('ready')
+      expect(repo.clonedAt).toBe(clonedAt)
+      expect(repo.lastAccessedAt).toBe(clonedAt)
+      expect(repo.lastPulled).toBeUndefined()
+      expect(repo.isWorktree).toBeUndefined()
+      expect(repo.isLocal).toBe(true)
+      expect(getRepoById(database, repo.id)).toEqual(repo)
     })
 
+    it('returns the existing repo when the same local path is added twice', () => {
+      const first = createRepo(database, {
+        repoUrl: 'https://github.com/test/repo',
+        localPath: 'repos/test-repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+        isLocal: true,
+      })
+      const second = createRepo(database, {
+        repoUrl: 'https://github.com/test/repo',
+        localPath: 'repos/test-repo',
+        defaultBranch: 'main',
+        cloneStatus: 'cloning',
+        clonedAt: Date.now(),
+        isLocal: true,
+      })
+
+      expect(second.id).toBe(first.id)
+      expect(listRepos(database).filter((repo) => repo.id === first.id)).toHaveLength(1)
+    })
+  })
+
+  describe('getRepoById', () => {
     it('should return null for non-existent repo', () => {
-      const stmt = {
-        get: vi.fn().mockReturnValue(undefined)
-      }
-      mockDb.prepare.mockReturnValue(stmt)
-
-      const result = db.getRepoById(mockDb, 999)
-
-      expect(result).toBeNull()
+      expect(getRepoById(database, 999)).toBeNull()
     })
   })
 
   describe('listRepos', () => {
-    it('should return all repos', () => {
-      const repoRows = [
-        {
-          id: 1,
-          repo_url: 'https://github.com/test/repo1',
-          local_path: 'repos/test-repo1',
-          branch: 'main',
-          default_branch: 'main',
-          clone_status: 'ready',
-          cloned_at: Date.now(),
-          is_worktree: 0
-        },
-        {
-          id: 2,
-          repo_url: 'https://github.com/test/repo2',
-          local_path: 'repos/test-repo2',
-          branch: 'main',
-          default_branch: 'main',
-          clone_status: 'ready',
-          cloned_at: Date.now(),
-          is_worktree: 0
-        }
-      ]
+    it('should return all repos newest cloned first', () => {
+      const older = seedRepo(database, { repoUrl: 'https://github.com/test/repo1', clonedAt: 1_000 })
+      const newer = seedRepo(database, { repoUrl: 'https://github.com/test/repo2', clonedAt: 2_000 })
 
-      const stmt = {
-        all: vi.fn().mockReturnValue(repoRows)
-      }
-      mockDb.prepare.mockReturnValue(stmt)
+      const repos = listRepos(database)
+      const ids = repos.map((repo) => repo.id)
 
-      const result = db.listRepos(mockDb)
-
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        expect.stringContaining('SELECT * FROM repos ORDER BY cloned_at DESC')
-      )
-      expect(stmt.all).toHaveBeenCalled()
-      expect(result).toHaveLength(2)
-      expect(result[0]?.repoUrl).toBe('https://github.com/test/repo1')
+      expect(ids).toContain(newer.id)
+      expect(ids).toContain(older.id)
+      expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id))
     })
   })
 
   describe('updateRepoStatus', () => {
     it('should update repo clone status', () => {
-      const stmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
-      mockDb.prepare.mockReturnValue(stmt)
+      const repo = seedRepo(database, { cloneStatus: 'cloning' })
 
-      db.updateRepoStatus(mockDb, 1, 'ready')
+      updateRepoStatus(database, repo.id, 'ready')
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        'UPDATE repos SET clone_status = ? WHERE id = ?'
-      )
-      expect(stmt.run).toHaveBeenCalledWith('ready', 1)
+      expect(getRepoById(database, repo.id)?.cloneStatus).toBe('ready')
+    })
+
+    it('should throw error when repo not found', () => {
+      expect(() => updateRepoStatus(database, 999, 'ready')).toThrow('Repository with id 999 not found')
     })
   })
 
   describe('updateLastPulled', () => {
     it('should update repo last pulled timestamp', () => {
-      const stmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
-      mockDb.prepare.mockReturnValue(stmt)
+      const repo = seedRepo(database)
+      const before = Date.now()
 
-      db.updateLastPulled(mockDb, 1)
+      updateLastPulled(database, repo.id)
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        'UPDATE repos SET last_pulled = ? WHERE id = ?'
-      )
-      expect(stmt.run).toHaveBeenCalledWith(expect.any(Number), 1)
+      const lastPulled = getRepoById(database, repo.id)?.lastPulled
+      expect(lastPulled).toBeGreaterThanOrEqual(before)
     })
   })
 
   describe('updateLastAccessed', () => {
     it('should update repo last accessed timestamp', () => {
-      const stmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
-      mockDb.prepare.mockReturnValue(stmt)
+      const repo = seedRepo(database)
+      const before = Date.now()
 
-      db.updateLastAccessed(mockDb, 1)
+      updateLastAccessed(database, repo.id)
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        'UPDATE repos SET last_accessed_at = ? WHERE id = ?'
-      )
-      expect(stmt.run).toHaveBeenCalledWith(expect.any(Number), 1)
+      const lastAccessedAt = getRepoById(database, repo.id)?.lastAccessedAt
+      expect(lastAccessedAt).toBeGreaterThanOrEqual(before)
     })
 
     it('should throw error when repo not found', () => {
-      const stmt = {
-        run: vi.fn().mockReturnValue({ changes: 0 })
-      }
-      mockDb.prepare.mockReturnValue(stmt)
-
-      expect(() => db.updateLastAccessed(mockDb, 999)).toThrow('Repository with id 999 not found')
+      expect(() => updateLastAccessed(database, 999)).toThrow('Repository with id 999 not found')
     })
   })
 
   describe('deleteRepo', () => {
     it('should delete repo-scoped rows, including multi-runs, in one transaction', () => {
-      mockDb.transaction.mockImplementation((fn: () => void) => fn)
+      const repo = seedRepo(database, { repoUrl: 'https://github.com/test/delete-me' })
+      const otherRepo = seedRepo(database, { repoUrl: 'https://github.com/test/keep-me' })
 
-      const deleteFusionsStmt = { run: vi.fn().mockReturnValue({ changes: 3 }) }
-      const deleteEntriesStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
-      const deleteMultiRunsStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
-      const deleteSecretsStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
-      const deleteRunsStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
-      const deleteJobsStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
-      const deleteSettingsStmt = { run: vi.fn().mockReturnValue({ changes: 0 }) }
-      const deleteRepoStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
-      mockDb.prepare
-        .mockReturnValueOnce(deleteFusionsStmt)
-        .mockReturnValueOnce(deleteEntriesStmt)
-        .mockReturnValueOnce(deleteMultiRunsStmt)
-        .mockReturnValueOnce(deleteSecretsStmt)
-        .mockReturnValueOnce(deleteJobsStmt)
-        .mockReturnValueOnce(deleteRunsStmt)
-        .mockReturnValueOnce(deleteSettingsStmt)
-        .mockReturnValueOnce(deleteRepoStmt)
+      const job = seedScheduleJob(database, repo.id)
+      const otherJob = seedScheduleJob(database, otherRepo.id)
+      createScheduleRun(database, {
+        jobId: job.id,
+        repoId: repo.id,
+        triggerSource: 'manual',
+        status: 'running',
+        startedAt: 1,
+        createdAt: 1,
+      })
+      createScheduleRun(database, {
+        jobId: otherJob.id,
+        repoId: otherRepo.id,
+        triggerSource: 'manual',
+        status: 'running',
+        startedAt: 1,
+        createdAt: 1,
+      })
+      setRepoSetting(database, repo.id, 'key', 'value')
+      setRepoSetting(database, otherRepo.id, 'key', 'value')
 
-      db.deleteRepo(mockDb, 1)
+      const multiRun = createMultiRunWithEntries(
+        database,
+        { repoId: repo.id, serverId: 'local', directory: null, name: 'Sweep', prompt: 'go', isolated: false, baseRef: null },
+        ['openai/a', 'openai/b'],
+      )
+      insertMultiRunFusion(database, {
+        multiRunId: multiRun.id,
+        requestId: 'req-1',
+        model: 'openai/gpt-5',
+        instructions: null,
+        isolated: false,
+        baseRef: null,
+        sources: [
+          { entryId: 1, sessionId: 'ses_a', model: 'openai/a', truncated: false },
+          { entryId: 2, sessionId: 'ses_b', model: 'openai/b', truncated: false },
+        ],
+      })
 
-      expect(mockDb.transaction).toHaveBeenCalledTimes(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(1,
-        'DELETE FROM multi_run_fusions WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)'
-      )
-      expect(deleteFusionsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(2,
-        'DELETE FROM multi_run_entries WHERE multi_run_id IN (SELECT id FROM multi_runs WHERE repo_id = ?)'
-      )
-      expect(deleteEntriesStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(3, 'DELETE FROM multi_runs WHERE repo_id = ?')
-      expect(deleteMultiRunsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(4, 'DELETE FROM secrets WHERE repo_id = ?')
-      expect(deleteSecretsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(5, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
-      expect(deleteJobsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(6, 'DELETE FROM schedule_runs WHERE repo_id = ?')
-      expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(7, 'DELETE FROM repo_settings WHERE repo_id = ?')
-      expect(deleteSettingsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(8,
-        'DELETE FROM repos WHERE id = ?'
-      )
-      expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)
+      const secrets = new SecretsService(database)
+      secrets.set('variable', repo.id, null, 'REPO_SECRET', 'value')
+      secrets.set('variable', otherRepo.id, null, 'OTHER_SECRET', 'value')
+
+      deleteRepo(database, repo.id)
+
+      expect(getRepoById(database, repo.id)).toBeNull()
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM schedule_jobs WHERE repo_id = ?', repo.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM schedule_runs WHERE repo_id = ?', repo.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM repo_settings WHERE repo_id = ?', repo.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM multi_runs WHERE repo_id = ?', repo.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM multi_run_entries WHERE multi_run_id = ?', multiRun.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM multi_run_fusions WHERE multi_run_id = ?', multiRun.id)).toBe(0)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM secrets WHERE repo_id = ?', repo.id)).toBe(0)
+
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM schedule_jobs WHERE repo_id = ?', otherRepo.id)).toBe(1)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM schedule_runs WHERE repo_id = ?', otherRepo.id)).toBe(1)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM repo_settings WHERE repo_id = ?', otherRepo.id)).toBe(1)
+      expect(countRows(database, 'SELECT COUNT(*) AS count FROM secrets WHERE repo_id = ?', otherRepo.id)).toBe(1)
+      expect(listRepos(database).map((entry) => entry.id)).toContain(otherRepo.id)
+      expect(listRepos(database).map((entry) => entry.id)).toContain(otherRepo.id)
     })
 
     it('should not delete the assistant repo', () => {
-      db.deleteRepo(mockDb, 0)
+      ensureAssistantRepo(database)
 
-      expect(mockDb.prepare).not.toHaveBeenCalled()
+      deleteRepo(database, ASSISTANT_REPO_ID)
+
+      expect(getRepoById(database, ASSISTANT_REPO_ID)).not.toBeNull()
     })
   })
 })

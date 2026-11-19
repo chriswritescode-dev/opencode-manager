@@ -1,14 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 
-type Listener = (event: unknown) => void
+interface WaitUntilEvent {
+  waitUntil: (promise: Promise<unknown>) => void
+}
 
-const listeners: Record<string, Listener[]> = {}
+interface PushEvent {
+  data: { json: () => JsonValue; text: () => string } | null
+  waitUntil: (promise: Promise<unknown>) => void
+}
 
-function makeWorkerGlobalScope() {
-  const scope = {
-    addEventListener(type: string, listener: Listener) {
-      listeners[type] = listeners[type] ?? []
-      listeners[type].push(listener)
+interface FetchEvent {
+  request: Request
+  respondWith: (response: Promise<Response>) => void
+}
+
+interface NotificationClickEvent {
+  notification: { close: () => void; data: JsonValue }
+  waitUntil: (promise: Promise<unknown>) => void
+}
+
+type WorkerEvent = WaitUntilEvent | PushEvent | FetchEvent | NotificationClickEvent
+
+type WorkerListener = (event: WorkerEvent) => void
+
+const listeners: Record<string, WorkerListener[]> = {}
+
+interface WorkerScopeFake {
+  addEventListener: (type: string, listener: WorkerListener) => void
+  skipWaiting: ReturnType<typeof vi.fn>
+  location: { origin: string }
+  registration: { showNotification: ReturnType<typeof vi.fn> }
+  clients: {
+    matchAll: ReturnType<typeof vi.fn>
+    openWindow: ReturnType<typeof vi.fn>
+    claim: ReturnType<typeof vi.fn>
+  }
+}
+
+function makeWorkerGlobalScope(): WorkerScopeFake {
+  return {
+    addEventListener(type: string, listener: WorkerListener) {
+      const existing = listeners[type] ?? []
+      existing.push(listener)
+      listeners[type] = existing
     },
     skipWaiting: vi.fn(async () => {}),
     location: { origin: 'http://localhost' },
@@ -21,27 +56,31 @@ function makeWorkerGlobalScope() {
       claim: vi.fn(async () => {}),
     },
   }
-  ;(globalThis as Record<string, unknown>).self = scope
-  ;(globalThis as Record<string, unknown>).caches = {
+}
+
+function installWorkerGlobals(scope: WorkerScopeFake): void {
+  vi.stubGlobal('self', scope)
+  vi.stubGlobal('caches', {
     open: vi.fn(async () => ({ addAll: vi.fn(async () => {}), put: vi.fn(async () => {}) })),
     keys: vi.fn(async () => []),
     match: vi.fn(async () => undefined),
     delete: vi.fn(async () => true),
-  }
-  return scope
+  })
 }
 
-function dispatch(type: string, event: unknown) {
+function dispatch(type: string, event: WorkerEvent): void {
   const typeListeners = listeners[type] ?? []
   expect(typeListeners.length).toBeGreaterThan(0)
   for (const listener of typeListeners) listener(event)
 }
 
-async function dispatchAndWait(type: string, event: unknown) {
-  const promises: Promise<void>[] = []
+async function dispatchAndWait(type: 'push', event: Pick<PushEvent, 'data'>): Promise<void>
+async function dispatchAndWait(type: 'notificationclick', event: Pick<NotificationClickEvent, 'notification'>): Promise<void>
+async function dispatchAndWait(type: string, event: Pick<PushEvent, 'data'> | Pick<NotificationClickEvent, 'notification'>): Promise<void> {
+  const promises: Promise<unknown>[] = []
   const enriched = {
     ...event,
-    waitUntil: (promise: Promise<void>) => {
+    waitUntil: (promise: Promise<unknown>) => {
       promises.push(promise)
     },
   }
@@ -60,12 +99,13 @@ function makeClient(overrides: Partial<WindowClient> & { url: string }) {
 }
 
 describe('service worker notifications', () => {
-  let scope: ReturnType<typeof makeWorkerGlobalScope>
+  let scope: WorkerScopeFake
 
   beforeEach(async () => {
     vi.resetModules()
     for (const key of Object.keys(listeners)) delete listeners[key]
     scope = makeWorkerGlobalScope()
+    installWorkerGlobals(scope)
     await import('./sw')
   })
 

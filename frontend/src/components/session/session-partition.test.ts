@@ -33,7 +33,7 @@ describe('selectRootSessions', () => {
     const sessions = [
       createSession('inside', 3000, '/a'),
       createSession('outside', 2000, '/b'),
-      { ...createSession('no-directory', 1000), location: {} as Session['location'] },
+      createSession('no-directory', 1000, ''),
     ]
 
     const result = selectRootSessions(sessions, { directories: new Set(['/a']), keyFn })

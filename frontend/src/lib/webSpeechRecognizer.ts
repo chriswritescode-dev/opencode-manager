@@ -4,18 +4,10 @@ export interface SpeechRecognitionResult {
   confidence: number;
 }
 
-/**
- * Why a capture session ended without the caller stopping it.
- */
 export type SttEndOfSpeechReason = 'pause' | 'no-speech';
 
-/**
- * Client-side endpointing budget for one capture session.
- */
 export interface SttEndpointingOptions {
-  /** Silence after speech, in milliseconds, that ends the session. */
   pauseMs: number;
-  /** Silence from capture start, in milliseconds, before any speech is heard. */
   noSpeechTimeoutMs: number;
 }
 
@@ -23,15 +15,8 @@ export interface SpeechRecognitionOptions {
   language?: string;
   interimResults?: boolean;
   maxAlternatives?: number;
-  /** Silences after a result that stop capture. Defaults to 2000. */
   inactivityTimeoutMs?: number;
-  /** Enables automatic end-of-speech reporting. Omit for tap-to-stop behavior. */
   endpointing?: SttEndpointingOptions;
-  /**
-   * Called at most once per session when the capture stops itself. The final
-   * transcript accumulated so far is passed with it so callers do not have to
-   * wait for a state update. Never called for a manual stop or abort.
-   */
   onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void;
 }
 
@@ -227,7 +212,7 @@ export class WebSpeechRecognizer {
   }
 
   constructor() {
-    if (typeof window === 'undefined') return;
+    if (!('window' in globalThis)) return;
 
     const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -370,7 +355,7 @@ export class WebSpeechRecognizer {
   }
 
   isSupported(): boolean {
-    if (typeof window === 'undefined') return false;
+    if (!('window' in globalThis)) return false;
     return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   }
 
@@ -417,7 +402,7 @@ export class WebSpeechRecognizer {
         this.recognition.lang = options.language;
       }
 
-      if (typeof options.interimResults === 'boolean') {
+      if (options.interimResults !== undefined) {
         this.recognition.interimResults = options.interimResults;
       }
 
@@ -557,12 +542,12 @@ export function getWebSpeechRecognizer(): WebSpeechRecognizer {
 }
 
 export function isWebRecognitionSupported(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (!('window' in globalThis)) return false;
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
 
 export function getAvailableLanguages(): string[] {
-  if (typeof window === 'undefined' || !isWebRecognitionSupported()) {
+  if (!('window' in globalThis) || !isWebRecognitionSupported()) {
     return ['en-US'];
   }
 

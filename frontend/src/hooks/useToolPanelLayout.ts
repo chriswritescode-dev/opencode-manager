@@ -1,4 +1,6 @@
 import { useCallback, useLayoutEffect, useState } from 'react'
+import { z } from 'zod'
+import { parseJsonText } from '@opencode-manager/shared/utils'
 import { readStoredValue, writeStoredValue } from '@/lib/persistentStorage'
 import { useMobile } from './useMobile'
 
@@ -11,7 +13,7 @@ export const MAIN_CONTENT_MIN_WIDTH = 420
 const WIDTH_STORAGE_KEY = 'oc:tool-panel:width'
 
 function viewportWidth(): number {
-  return typeof window === 'undefined' ? 0 : window.innerWidth
+  return 'window' in globalThis ? window.innerWidth : 0
 }
 
 function readAvailableWidth(): number {
@@ -19,7 +21,6 @@ function readAvailableWidth(): number {
   return measured > 0 ? measured : viewportWidth()
 }
 
-/** Width of the page area beside the navigation sidebar, which is where the tool panel docks. */
 export function useAvailableToolPanelWidth(): number {
   const [width, setWidth] = useState(readAvailableWidth)
 
@@ -28,7 +29,7 @@ export function useAvailableToolPanelWidth(): number {
     update()
     window.addEventListener('resize', update)
     const main = document.querySelector('main')
-    if (!main || typeof ResizeObserver === 'undefined') {
+    if (!main || !('ResizeObserver' in globalThis)) {
       return () => window.removeEventListener('resize', update)
     }
     const observer = new ResizeObserver(update)
@@ -52,15 +53,13 @@ export function clampToolPanelWidth(width: number, availableWidth: number): numb
   return Math.min(maximum, Math.max(TOOL_PANEL_MIN_WIDTH, Math.round(width)))
 }
 
+const widthStorageSchema = z.number()
+
 function readStoredToolPanelWidth(): number | null {
   const stored = readStoredValue(WIDTH_STORAGE_KEY)
   if (stored === null) return null
-  try {
-    const parsed: unknown = JSON.parse(stored)
-    return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
-  } catch {
-    return null
-  }
+  const parsed = widthStorageSchema.safeParse(parseJsonText(stored))
+  return parsed.success && Number.isFinite(parsed.data) ? parsed.data : null
 }
 
 export interface ToolPanelWidthState {
@@ -70,10 +69,6 @@ export interface ToolPanelWidthState {
   setWidth: (width: number) => void
 }
 
-/**
- * The docked tool panel's width, persisted under `oc:tool-panel:width` and clamped so the main
- * column keeps at least `MAIN_CONTENT_MIN_WIDTH` pixels.
- */
 export function useToolPanelWidth(preferredWidth: number = TOOL_PANEL_DEFAULT_WIDTH): ToolPanelWidthState {
   const availableWidth = useAvailableToolPanelWidth()
   const [storedWidth, setStoredWidth] = useState<number | null>(readStoredToolPanelWidth)
@@ -96,16 +91,10 @@ export function useToolPanelWidth(preferredWidth: number = TOOL_PANEL_DEFAULT_WI
 }
 
 export interface ToolPanelLayout {
-  /** The tool panel docks beside the page; otherwise its tools open as overlay sheets. */
   docked: boolean
-  /** The tool rail has room to stay on screen, also when the panel opens as an overlay. */
   showRail: boolean
 }
 
-/**
- * Layout of the route's tool rail and panel. Docking needs room for the rail, a usable panel
- * and a usable main column; below that the rail stays and the tools open as overlay sheets.
- */
 export function useToolPanelLayout(): ToolPanelLayout {
   const isMobile = useMobile()
   const availableWidth = useAvailableToolPanelWidth()

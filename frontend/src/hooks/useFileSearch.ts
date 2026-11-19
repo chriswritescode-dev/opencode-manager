@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { openCodeLocation } from '@opencode-manager/shared/opencode'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { findFiles } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { serverScopedKey } from '@/lib/serverScope'
 
 export interface FileSearchResult {
@@ -11,11 +11,6 @@ export interface FileSearchResult {
   error: Error | null
 }
 
-/**
- * Debounced, server-scoped file search returning matching paths with loading and error state.
- * Results are cached per settled query for a minute, and nothing is requested while `enabled`
- * is false or the query is still empty.
- */
 export function useFileSearch(
   query: string,
   enabled: boolean = true,
@@ -34,6 +29,6 @@ export function useFileSearch(
   return {
     files: data || [],
     isLoading,
-    error: error as Error | null
+    error
   }
 }

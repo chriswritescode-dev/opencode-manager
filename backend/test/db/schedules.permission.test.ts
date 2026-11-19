@@ -80,7 +80,6 @@ describe('schedule permission config persistence', () => {
     expect(updated).not.toBeNull()
     expect(updated!.permissionConfig).toEqual(config)
 
-    // Verify other fields are unchanged
     expect(updated!.name).toBe('Permission test job')
     expect(updated!.prompt).toBe('Run a permission test')
   })

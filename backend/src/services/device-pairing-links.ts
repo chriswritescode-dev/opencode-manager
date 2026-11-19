@@ -47,12 +47,10 @@ function unavailable(
   return { available: false, reason, message }
 }
 
-/** Normalises an address to its origin, or null when it is not an absolute http(s) URL. */
 export function normalizeDevicePairingOrigin(value: string): string | null {
   return parseHttpUrl(value)?.origin ?? null
 }
 
-/** Reports whether an origin can mint a pairing code, and why it cannot when blocked. */
 export function resolveDevicePairingAvailability(
   origin: string | undefined,
   options: DevicePairingAvailabilityOptions,
@@ -77,7 +75,6 @@ export function resolveDevicePairingAvailability(
   return { available: true, reason: null, message: null, originUrl }
 }
 
-/** Decides whether an origin can carry an app link and which warnings it raises. */
 export function resolveAppLinkPolicy(
   origin: URL,
   options: { allowPrivateNetworkHttp: boolean },
@@ -95,7 +92,6 @@ export function resolveAppLinkPolicy(
   return { blockedReason: isAllowed ? null : 'insecure-origin', warnings }
 }
 
-/** Builds the pairing link response, dropping the app link when its origin is blocked. */
 export function buildDevicePairingLinks(input: {
   origin: URL
   name: string

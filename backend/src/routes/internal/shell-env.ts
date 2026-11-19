@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { CredentialProvider } from '../../services/credential-provider'
-import type { RepoEnvService } from '../../services/repo-env'
+import type { RepoEnvResolver } from '../../services/repo-env'
 
-export function createInternalShellEnvRoutes(db: Database, repoEnvService: RepoEnvService) {
+export function createInternalShellEnvRoutes(db: Database, repoEnvService: RepoEnvResolver) {
   const app = new Hono()
 
   app.get('/', async (c) => {

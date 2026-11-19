@@ -51,7 +51,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
         type="file"
         className="hidden"
         onChange={handleFileSelect}
-        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+        {...{ webkitdirectory: '', directory: '' }}
       />
       
       {isMobile ? (

@@ -1,8 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { OpenCodeServer, OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
 import { OpenCodeServersSettings } from './OpenCodeServersSettings'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
 const testResult: OpenCodeServerTestResult = {
   ok: true,
@@ -22,93 +24,63 @@ const savedServer: OpenCodeServer = {
   updatedAt: 2,
 }
 
-const mocks = vi.hoisted(() => ({
-  servers: [] as OpenCodeServer[],
-  testAsync: vi.fn(),
-  testByIdAsync: vi.fn(),
-}))
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: () => ({
-    servers: mocks.servers,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    createAsync: vi.fn(),
-    isCreating: false,
-    updateAsync: vi.fn(),
-    isUpdating: false,
-    deleteAsync: vi.fn(),
-    isDeleting: false,
-    testAsync: mocks.testAsync,
-    testByIdAsync: mocks.testByIdAsync,
-  }),
-}))
+const fetchRoutes: FetchRoute[] = [
+  { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [savedServer] } }) },
+  { method: 'GET', path: '/api/opencode-servers/status', respond: () => ({ json: { statuses: [] } }) },
+  { method: 'POST', path: '/api/opencode-servers/test', respond: () => ({ json: testResult }) },
+  { method: 'POST', path: '/api/opencode-servers/:id/test', respond: () => ({ json: testResult }) },
+]
 
 async function openEditDialog() {
   const user = userEvent.setup()
-  render(<OpenCodeServersSettings />)
-  await user.click(screen.getByRole('button', { name: 'Edit Office' }))
-  return user
+  const result = renderWithProviders(<OpenCodeServersSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
+  })
+  await user.click(await screen.findByRole('button', { name: 'Edit Office' }))
+  return { ...result, user }
 }
 
 describe('OpenCodeServersSettings', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-    Element.prototype.scrollIntoView ??= () => {}
-  })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.servers = [savedServer]
-    mocks.testAsync.mockResolvedValue(testResult)
-    mocks.testByIdAsync.mockResolvedValue(testResult)
-  })
-
   it('tests the draft with the saved server id when the password is left blank', async () => {
-    const user = await openEditDialog()
+    const { user, fetchFake } = await openEditDialog()
 
     await user.click(screen.getByRole('button', { name: 'Test connection' }))
 
-    expect(mocks.testAsync).toHaveBeenCalledWith({
+    expect(await screen.findByText('Connected — OpenCode 2.0.15')).toBeInTheDocument()
+    expect(fetchFake.lastRequest('POST', '/api/opencode-servers/test')?.body).toEqual({
       baseUrl: 'https://office.example.com',
       username: 'opencode',
-      password: undefined,
       serverId: 'srv_1',
     })
-    expect(mocks.testByIdAsync).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('POST', '/api/opencode-servers/:id/test')).toHaveLength(0)
   })
 
   it('tests the edited address with the saved server id', async () => {
-    const user = await openEditDialog()
+    const { user, fetchFake } = await openEditDialog()
 
     await user.clear(screen.getByLabelText('URL'))
     await user.type(screen.getByLabelText('URL'), 'https://relocated.example.com')
     await user.click(screen.getByRole('button', { name: 'Test connection' }))
 
-    expect(mocks.testAsync).toHaveBeenCalledWith({
+    expect(fetchFake.lastRequest('POST', '/api/opencode-servers/test')?.body).toEqual({
       baseUrl: 'https://relocated.example.com',
       username: 'opencode',
-      password: undefined,
       serverId: 'srv_1',
     })
-    expect(mocks.testByIdAsync).not.toHaveBeenCalled()
   })
 
   it('tests the edited address without the saved server id when the stored password is being cleared', async () => {
-    const user = await openEditDialog()
+    const { user, fetchFake } = await openEditDialog()
 
     await user.click(screen.getByLabelText('Clear stored password'))
     await user.click(screen.getByRole('button', { name: 'Test connection' }))
 
-    expect(mocks.testAsync).toHaveBeenCalledWith({
+    expect(fetchFake.lastRequest('POST', '/api/opencode-servers/test')?.body).toEqual({
       baseUrl: 'https://office.example.com',
       username: 'opencode',
-      password: undefined,
-      serverId: undefined,
     })
-    expect(mocks.testByIdAsync).not.toHaveBeenCalled()
   })
 })

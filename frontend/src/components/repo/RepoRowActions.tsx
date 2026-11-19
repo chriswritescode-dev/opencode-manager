@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { SourceControlPanel } from '@/components/source-control/SourceControlPanel'
+import { readFailureMessage } from '@/components/jsonValue'
 import { DownloadDialog } from '@/components/ui/download-dialog'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
 import { RenameRepoDialog } from '@/components/repo/RenameRepoDialog'
@@ -71,8 +72,8 @@ export function RepoRowActions({
       queryClient.invalidateQueries({ queryKey: ['repo-schedules', repo.id] })
       showToast.success('Repository renamed')
     },
-    onError: (error: unknown) => {
-      showToast.error(error instanceof Error ? error.message : 'Rename failed')
+    onError: (cause: unknown) => {
+      showToast.error(readFailureMessage(cause) ?? 'Rename failed')
     },
   })
 

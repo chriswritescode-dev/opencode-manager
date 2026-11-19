@@ -1,74 +1,72 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
 import { ScheduleReportsBell } from './ScheduleReportsBell'
+import { UNREAD_SCHEDULE_RUNS_QUERY_KEY } from '@/hooks/useSchedules'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { UnreadScheduleRunsResponse } from '@/api/schedules'
 
-const mocks = vi.hoisted(() => ({
-  useUnreadScheduleRuns: vi.fn(),
-  useMarkAllScheduleRunsViewed: vi.fn(),
-}))
+function makeUnreadRuns(overrides: Partial<UnreadScheduleRunsResponse> = {}): UnreadScheduleRunsResponse {
+  return { runs: [], total: 0, failed: 0, ...overrides }
+}
 
-vi.mock('@/hooks/useSchedules', () => ({
-  useUnreadScheduleRuns: mocks.useUnreadScheduleRuns,
-  useMarkAllScheduleRunsViewed: mocks.useMarkAllScheduleRunsViewed,
-}))
-
-function renderBell() {
-  return render(
-    <MemoryRouter>
-      <ScheduleReportsBell />
-    </MemoryRouter>,
-  )
+function unreadRoutes(response: UnreadScheduleRunsResponse): FetchRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/api/schedules/all/runs/unread',
+      respond: () => ({ json: response }),
+    },
+  ]
 }
 
 describe('ScheduleReportsBell', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-    Element.prototype.scrollIntoView ??= () => {}
+  it('renders the unread count badge', async () => {
+    renderWithProviders(<ScheduleReportsBell />, { fetchRoutes: unreadRoutes(makeUnreadRuns({ total: 3 })) })
+
+    expect(await screen.findByText('3')).toBeInTheDocument()
   })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useMarkAllScheduleRunsViewed.mockReturnValue({ mutate: vi.fn(), isPending: false })
+  it('uses destructive styling when a run failed', async () => {
+    renderWithProviders(<ScheduleReportsBell />, {
+      fetchRoutes: unreadRoutes(makeUnreadRuns({ total: 3, failed: 1 })),
+    })
+
+    expect(await screen.findByText('3')).toHaveClass('bg-destructive')
   })
 
-  it('renders the unread count badge', () => {
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 3, failed: 0 } })
-    renderBell()
+  it('renders nothing when there are no unread runs', async () => {
+    renderWithProviders(<ScheduleReportsBell />, { fetchRoutes: unreadRoutes(makeUnreadRuns()) })
 
-    expect(screen.getByText('3')).toBeInTheDocument()
-  })
-
-  it('uses destructive styling when a run failed', () => {
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 3, failed: 1 } })
-    renderBell()
-
-    expect(screen.getByText('3')).toHaveClass('bg-destructive')
-  })
-
-  it('renders nothing when there are no unread runs', () => {
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
-    renderBell()
-
-    expect(screen.queryByRole('button', { name: /Reports/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Reports/ })).not.toBeInTheDocument())
   })
 
   it('stays open with the all-caught-up state after the last unread run is cleared', async () => {
     const user = userEvent.setup()
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 1, failed: 0 } })
-    const { rerender } = renderBell()
+    const { queryClient } = renderWithProviders(<ScheduleReportsBell />, {
+      fetchRoutes: unreadRoutes(makeUnreadRuns({ total: 1 })),
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Reports, 1 unread' }))
-    mocks.useUnreadScheduleRuns.mockReturnValue({ data: { runs: [], total: 0, failed: 0 } })
-    rerender(
-      <MemoryRouter>
-        <ScheduleReportsBell />
-      </MemoryRouter>,
-    )
+    await user.click(await screen.findByRole('button', { name: 'Reports, 1 unread' }))
+    queryClient.setQueryData(UNREAD_SCHEDULE_RUNS_QUERY_KEY, makeUnreadRuns())
 
     expect(await screen.findByText('All caught up')).toBeInTheDocument()
+    expect(screen.getByText('0 unread')).toBeInTheDocument()
+  })
+
+  it('marks all unread runs read when Mark all read is clicked', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderWithProviders(<ScheduleReportsBell />, {
+      fetchRoutes: [
+        ...unreadRoutes(makeUnreadRuns({ total: 2 })),
+        { method: 'POST', path: '/api/schedules/all/runs/viewed', respond: () => ({ json: { updated: 2 } }) },
+      ],
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Reports, 2 unread' }))
+    await user.click(await screen.findByRole('button', { name: 'Mark all read' }))
+
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/schedules/all/runs/viewed')).toBeDefined())
   })
 })

@@ -1,95 +1,92 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { archiveBrokenOpenCodeConfigFile, writeHealthWatchArtifact, restoreOpenCodeConfigSnapshot, OPENCODE_CONFIG_SEED } from '../../src/services/opencode-config-file'
-import { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
+import { afterAll, beforeEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { getOpenCodeConfigFilePath, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
+import { OPENCODE_CONFIG_SEED, readOpenCodeConfigFile } from '../../src/services/opencode-config-file'
+import { OpenCodeSupervisor, type OpenCodeSupervisorManager } from '../../src/services/opencode-supervisor'
+import { SettingsService } from '../../src/services/settings'
+import { createTestDatabase } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}))
+const LAST_KNOWN_GOOD = JSON.stringify({ $schema: 'https://opencode.ai/config.json', theme: 'tokyo' })
+const BROKEN_CONFIG = '{ "invalid": '
 
-vi.mock('../../src/services/opencode-config-file', () => {
-  const seed = '{"$schema":"https://opencode.ai/config.json"}'
-  return {
-    archiveBrokenOpenCodeConfigFile: vi.fn(),
-    writeHealthWatchArtifact: vi.fn(),
-    restoreOpenCodeConfigSnapshot: vi.fn(async () => ({ isValid: true })),
-    serializeOpenCodeConfigSnapshot: vi.fn(() => seed),
-    buildOpenCodeConfigSeedSnapshot: vi.fn(() => seed),
-    withOpenCodeConfigLock: (fn: () => Promise<unknown>) => fn(),
-    OPENCODE_CONFIG_SEED: seed,
-  }
-})
-
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: {
-    clearStartupError: vi.fn(),
-  },
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  TIMEOUTS: {},
-  ENV: {
-    OPENCODE: {
-      HEALTH_POLL_MS: 200,
-      HEALTH_FAILURE_THRESHOLD: 2,
-      HEALTH_WATCH_ENABLED: true,
-    },
-  },
-}))
-
-interface FakeManager {
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
-  isOperationInProgress: ReturnType<typeof vi.fn>
-  checkHealth: ReturnType<typeof vi.fn>
-  restart: ReturnType<typeof vi.fn>
-  clearStartupError: ReturnType<typeof vi.fn>
-  getLastStartupError: ReturnType<typeof vi.fn>
-  isLastStartupErrorNonRecoverable: ReturnType<typeof vi.fn>
-  setLifecycleInitialized: ReturnType<typeof vi.fn>
-  getPort: ReturnType<typeof vi.fn>
-  getVersion: ReturnType<typeof vi.fn>
-  getMinVersion: ReturnType<typeof vi.fn>
-  isVersionSupported: ReturnType<typeof vi.fn>
+function writeBrokenConfigFile(): void {
+  fs.mkdirSync(path.dirname(getOpenCodeConfigFilePath()), { recursive: true })
+  fs.writeFileSync(getOpenCodeConfigFilePath(), BROKEN_CONFIG, 'utf-8')
 }
 
-interface FakeSettingsService {
-  getLastKnownGoodConfig: ReturnType<typeof vi.fn>
+function readConfigText(): string | null {
+  try {
+    return fs.readFileSync(getOpenCodeConfigFilePath(), 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+async function readConfigContent() {
+  const config = await readOpenCodeConfigFile()
+  return config?.content ?? null
+}
+
+function healthArtifacts(prefix: string): string[] {
+  try {
+    return fs.readdirSync(getOpenCodeHealthWatchPath()).filter((name) => name.startsWith(prefix))
+  } catch {
+    return []
+  }
+}
+
+function createManager() {
+  return {
+    start: vi.fn<OpenCodeSupervisorManager['start']>(async () => undefined),
+    stop: vi.fn<OpenCodeSupervisorManager['stop']>(async () => undefined),
+    isOperationInProgress: vi.fn<OpenCodeSupervisorManager['isOperationInProgress']>(() => false),
+    checkHealth: vi.fn<OpenCodeSupervisorManager['checkHealth']>(async () => true),
+    restart: vi.fn<OpenCodeSupervisorManager['restart']>(async () => undefined),
+    clearStartupError: vi.fn<OpenCodeSupervisorManager['clearStartupError']>(() => undefined),
+    getLastStartupError: vi.fn<OpenCodeSupervisorManager['getLastStartupError']>(() => null),
+    isLastStartupErrorNonRecoverable: vi.fn<OpenCodeSupervisorManager['isLastStartupErrorNonRecoverable']>(() => false),
+    setLifecycleInitialized: vi.fn<OpenCodeSupervisorManager['setLifecycleInitialized']>(() => undefined),
+    getPort: vi.fn<OpenCodeSupervisorManager['getPort']>(() => 5551),
+    getVersion: vi.fn<OpenCodeSupervisorManager['getVersion']>(() => '2.0.15'),
+    getMinVersion: vi.fn<OpenCodeSupervisorManager['getMinVersion']>(() => '2.0.15'),
+    isVersionSupported: vi.fn<OpenCodeSupervisorManager['isVersionSupported']>(() => true),
+  }
 }
 
 describe('OpenCodeSupervisor', () => {
+  let workspace: TempWorkspace
+  let previousLogLevel: string | undefined
+  let settings: SettingsService
+
+  beforeAll(() => {
+    workspace = createTempWorkspace('ocm-opencode-supervisor-')
+    previousLogLevel = process.env.LOG_LEVEL
+    process.env.LOG_LEVEL = 'error'
+  })
+
+  afterAll(() => {
+    workspace.restore()
+    if (previousLogLevel === undefined) delete process.env.LOG_LEVEL
+    else process.env.LOG_LEVEL = previousLogLevel
+  })
+
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  const createManager = (): FakeManager => ({
-    start: vi.fn().mockResolvedValue(undefined),
-    stop: vi.fn().mockResolvedValue(undefined),
-    isOperationInProgress: vi.fn(() => false),
-    checkHealth: vi.fn().mockResolvedValue(true),
-    restart: vi.fn().mockResolvedValue(undefined),
-    clearStartupError: vi.fn(),
-    getLastStartupError: vi.fn(() => null),
-    isLastStartupErrorNonRecoverable: vi.fn(() => false),
-    setLifecycleInitialized: vi.fn(),
-    getPort: vi.fn(() => 5551),
-    getVersion: vi.fn(() => '2.0.15'),
-    getMinVersion: vi.fn(() => '2.0.15'),
-    isVersionSupported: vi.fn(() => true),
-  })
-
-  const createSettings = (): FakeSettingsService => ({
-    getLastKnownGoodConfig: vi.fn(() => '{"$schema":"https://opencode.ai/config.json"}'),
+    const db = createTestDatabase()
+    settings = new SettingsService(db)
+    fs.rmSync(getOpenCodeHealthWatchPath(), { recursive: true, force: true })
+    fs.rmSync(path.dirname(getOpenCodeConfigFilePath()), { recursive: true, force: true })
   })
 
   it('recovers a startup failure through rollback and keeps watching', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    settings.saveLastKnownGoodConfig(LAST_KNOWN_GOOD)
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
+      watchEnabled: true,
+      pollIntervalMs: 60_000,
     })
 
     manager.start.mockRejectedValueOnce(new Error('startup failed'))
@@ -103,9 +100,8 @@ describe('OpenCodeSupervisor', () => {
     expect(status.healthy).toBe(true)
     expect(status.state).toBe('healthy')
     expect(manager.restart).toHaveBeenCalledTimes(3)
-    expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
-    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(healthArtifacts('opencode-config-broken')).not.toHaveLength(0)
+    expect(await readConfigContent()).toEqual(JSON.parse(LAST_KNOWN_GOOD))
     expect(status.watching).toBe(true)
 
     await supervisor.stop()
@@ -113,8 +109,9 @@ describe('OpenCodeSupervisor', () => {
 
   it('seeds the default config when the recovery ladder reaches the seed action', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    settings.saveLastKnownGoodConfig(LAST_KNOWN_GOOD)
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -125,16 +122,15 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.start()
 
     expect(status.state).toBe('failed')
-    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith(OPENCODE_CONFIG_SEED)
+    expect(healthArtifacts('opencode-config-broken')).not.toHaveLength(0)
+    expect(await readConfigContent()).toEqual(JSON.parse(OPENCODE_CONFIG_SEED))
 
     await supervisor.stop()
   })
 
   it('opens the proxy lifecycle gate when the managed child is attested healthy', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -146,8 +142,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('keeps the proxy lifecycle gate closed when startup fails non-recoverably', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -163,8 +158,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('closes the proxy lifecycle gate when recovery is exhausted and reopens it once health returns', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -190,8 +184,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('does not recover polling failures until the threshold is reached', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 2,
       watchEnabled: false,
     })
@@ -208,8 +201,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('closes the proxy lifecycle gate on a below-threshold health failure and reopens it once health returns', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 2,
       watchEnabled: false,
     })
@@ -236,8 +228,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('captures debug state before debug recovery', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -250,14 +241,13 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.checkNow('manual')
 
     expect(status.healthy).toBe(true)
-    expect(writeHealthWatchArtifact).toHaveBeenCalled()
+    expect(healthArtifacts('opencode-health')).not.toHaveLength(0)
     expect(manager.restart).toHaveBeenCalledTimes(2)
   })
 
   it('skips checks while OpenCode manager is busy', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never)
+    const supervisor = new OpenCodeSupervisor(manager, settings)
 
     manager.isOperationInProgress.mockReturnValue(true)
 
@@ -268,8 +258,8 @@ describe('OpenCodeSupervisor', () => {
 
   it('does not run configuration recovery for a non-recoverable startup failure', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
     })
 
@@ -282,18 +272,17 @@ describe('OpenCodeSupervisor', () => {
     expect(status.healthy).toBe(false)
     expect(status.lastError).toContain('does not support sandboxed bash tool rewriting')
     expect(manager.restart).not.toHaveBeenCalled()
-    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
-    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
+    expect(healthArtifacts('opencode-config-broken')).toHaveLength(0)
+    expect(healthArtifacts('opencode-health')).toHaveLength(0)
+    expect(readConfigText()).toBe(BROKEN_CONFIG)
 
     await supervisor.stop()
   })
 
   it('does not run configuration recovery when a manual restart fails non-recoverably', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
     })
 
@@ -303,18 +292,17 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.restart('settings_restart')
 
     expect(status.state).toBe('failed')
-    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
-    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
+    expect(healthArtifacts('opencode-config-broken')).toHaveLength(0)
+    expect(healthArtifacts('opencode-health')).toHaveLength(0)
+    expect(readConfigText()).toBe(BROKEN_CONFIG)
 
     await supervisor.stop()
   })
 
   it('stops the recovery ladder when a recovery restart fails non-recoverably', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
     })
 
@@ -330,18 +318,18 @@ describe('OpenCodeSupervisor', () => {
     expect(status.state).toBe('failed')
     expect(status.lastError).toContain('Failed to install a generated OpenCode plugin')
     expect(manager.restart).toHaveBeenCalledTimes(1)
-    expect(archiveBrokenOpenCodeConfigFile).not.toHaveBeenCalled()
-    expect(settings.getLastKnownGoodConfig).not.toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).not.toHaveBeenCalled()
-    expect(writeHealthWatchArtifact).not.toHaveBeenCalled()
+    expect(healthArtifacts('opencode-config-broken')).toHaveLength(0)
+    expect(healthArtifacts('opencode-health')).toHaveLength(0)
+    expect(readConfigText()).toBe(BROKEN_CONFIG)
 
     await supervisor.stop()
   })
 
   it('still follows the normal recovery ladder for a recoverable startup failure', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    settings.saveLastKnownGoodConfig(LAST_KNOWN_GOOD)
+    writeBrokenConfigFile()
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
     })
 
@@ -354,17 +342,15 @@ describe('OpenCodeSupervisor', () => {
     const status = await supervisor.start()
 
     expect(status.state).toBe('healthy')
-    expect(archiveBrokenOpenCodeConfigFile).toHaveBeenCalled()
-    expect(settings.getLastKnownGoodConfig).toHaveBeenCalled()
-    expect(restoreOpenCodeConfigSnapshot).toHaveBeenCalledWith('{"$schema":"https://opencode.ai/config.json"}')
+    expect(healthArtifacts('opencode-config-broken')).not.toHaveLength(0)
+    expect(await readConfigContent()).toEqual(JSON.parse(LAST_KNOWN_GOOD))
 
     await supervisor.stop()
   })
 
   it('executes a restart requested during an active restart after the active restart completes', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -393,8 +379,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('closes the proxy lifecycle gate for the whole restart transition and reopens once healthy', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -421,8 +406,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('closes the proxy lifecycle gate while stopping and never reopens it', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -446,8 +430,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('closes the proxy lifecycle gate while recovering a polling failure until health returns', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -474,8 +457,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('executes a stop requested during an active restart after the restart completes', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })
@@ -503,8 +485,7 @@ describe('OpenCodeSupervisor', () => {
 
   it('drops a restart stacked behind an already queued restart but never drops a stop', async () => {
     const manager = createManager()
-    const settings = createSettings()
-    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+    const supervisor = new OpenCodeSupervisor(manager, settings, {
       failureThreshold: 1,
       watchEnabled: false,
     })

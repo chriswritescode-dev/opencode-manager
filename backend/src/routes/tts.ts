@@ -7,6 +7,8 @@ import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
 import { mkdirSafe, writeFileAtomic } from '../utils/fs-safe'
+import { toContentfulStatus } from '../utils/error-utils'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   normalizeToBaseUrl,
@@ -14,7 +16,7 @@ import {
   discoverCached,
 } from '../utils/discovery-cache'
 
-const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
+const ttsCacheDir = (): string => join(getWorkspacePath(), 'cache', 'tts')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_CACHE_SIZE_MB = 200
 const MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
@@ -23,6 +25,40 @@ const TTS_SYNTHESIS_TIMEOUT_MS = 60_000
 const TTSRequestSchema = z.object({
   text: z.string().min(1).max(4096),
 })
+
+const TtsErrorDetailsSchema = z.object({
+  detail: z.object({
+    message: z.string().optional(),
+    error: z.object({ message: z.string().optional() }).optional(),
+  }).optional(),
+  message: z.string().optional(),
+})
+
+const TtsVoiceRecordSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  voice: z.string().optional(),
+})
+
+const TtsVoiceEntrySchema = z.union([
+  z.string().transform((name) => ({ name, id: undefined, voice: undefined })),
+  TtsVoiceRecordSchema,
+])
+
+const TtsVoicesResponseSchema = z.union([
+  z.object({ data: z.array(TtsVoiceRecordSchema) }).transform((value) => ({
+    kind: 'records' as const,
+    data: value.data,
+  })),
+  z.object({ voices: z.array(z.string()) }).transform((value) => ({
+    kind: 'names' as const,
+    voices: value.voices,
+  })),
+  z.array(TtsVoiceEntrySchema).transform((items) => ({
+    kind: 'items' as const,
+    items,
+  })),
+])
 
 interface SynthesisParams {
   text: string
@@ -47,12 +83,12 @@ function generateCacheKey(params: SynthesisParams): string {
 }
 
 async function ensureCacheDir(): Promise<void> {
-  await mkdirSafe(TTS_CACHE_DIR)
+  await mkdirSafe(ttsCacheDir())
 }
 
 async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
   try {
-    const filePath = join(TTS_CACHE_DIR, `${cacheKey}.mp3`)
+    const filePath = join(ttsCacheDir(), `${cacheKey}.mp3`)
     const fileStat = await stat(filePath)
     
     if (Date.now() - fileStat.mtimeMs > CACHE_TTL_MS) {
@@ -68,13 +104,13 @@ async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
 
 async function getCacheSize(): Promise<number> {
   try {
-    const files = await readdir(TTS_CACHE_DIR)
+    const files = await readdir(ttsCacheDir())
     let totalSize = 0
     
     for (const file of files) {
       if (!file.endsWith('.mp3')) continue
       
-      const filePath = join(TTS_CACHE_DIR, file)
+      const filePath = join(ttsCacheDir(), file)
       const fileStat = await stat(filePath)
       totalSize += fileStat.size
     }
@@ -87,13 +123,13 @@ async function getCacheSize(): Promise<number> {
 
 async function cleanupOldestFiles(requiredSpace: number): Promise<void> {
   try {
-    const files = await readdir(TTS_CACHE_DIR)
+    const files = await readdir(ttsCacheDir())
     const fileInfos = []
     
     for (const file of files) {
       if (!file.endsWith('.mp3')) continue
       
-      const filePath = join(TTS_CACHE_DIR, file)
+      const filePath = join(ttsCacheDir(), file)
       const fileStat = await stat(filePath)
       fileInfos.push({ path: filePath, mtimeMs: fileStat.mtimeMs, size: fileStat.size })
     }
@@ -115,7 +151,7 @@ async function cleanupOldestFiles(requiredSpace: number): Promise<void> {
 }
 
 async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
-  const filePath = join(TTS_CACHE_DIR, `${cacheKey}.mp3`)
+  const filePath = join(ttsCacheDir(), `${cacheKey}.mp3`)
   
   await ensureCacheDir()
   const currentCacheSize = await getCacheSize()
@@ -128,10 +164,10 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
 }
 
 class TTSUpstreamError extends Error {
-  readonly status: 400 | 500
+  readonly status: ContentfulStatusCode
   readonly details: string
 
-  constructor(status: 400 | 500, details: string) {
+  constructor(status: ContentfulStatusCode, details: string) {
     super('TTS API request failed')
     this.name = 'TTSUpstreamError'
     this.status = status
@@ -143,10 +179,12 @@ const inFlightSynthesis = new Map<string, Promise<Buffer>>()
 
 function parseErrorDetails(errorText: string): string {
   try {
-    const errorJson = JSON.parse(errorText)
-    if (errorJson.detail?.error?.message) return errorJson.detail.error.message
-    if (errorJson.detail?.message) return errorJson.detail.message
-    if (errorJson.message) return errorJson.message
+    const parsed = TtsErrorDetailsSchema.safeParse(JSON.parse(errorText))
+    if (parsed.success) {
+      if (parsed.data.detail?.error?.message) return parsed.data.detail.error.message
+      if (parsed.data.detail?.message) return parsed.data.detail.message
+      if (parsed.data.message) return parsed.data.message
+    }
   } catch {
     return errorText
   }
@@ -178,7 +216,7 @@ async function fetchSynthesizedAudio(params: SynthesisParams): Promise<Buffer> {
     if (!response.ok) {
       const errorText = await response.text()
       logger.error(`TTS API error: ${response.status} - ${errorText}`)
-      const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
+      const status = response.status >= 400 && response.status < 600 ? toContentfulStatus(response.status) : 500
       throw new TTSUpstreamError(status, parseErrorDetails(errorText))
     }
     
@@ -231,24 +269,20 @@ async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<s
       })
       
       if (response.ok) {
-        type VoiceItem = { id?: string; name?: string; voice?: string }
-        const data = await response.json() as { data?: VoiceItem[]; voices?: string[] } | (string | VoiceItem)[]
-        
-        // Handle different response formats
-        if ('data' in data && Array.isArray(data.data)) {
-          // OpenAI-style format: { data: [{ name: "alloy" }, ...] }
-          return data.data
-            .filter((voice) => voice.id || voice.name)
-            .map((voice) => (voice.id || voice.name)!)
-        } else if ('voices' in data && Array.isArray(data.voices)) {
-          // Kokoro-style format: { "voices": ["af_alloy", "af_aoede", ...] }
-          return data.voices.filter((v): v is string => typeof v === 'string')
-        } else if (Array.isArray(data)) {
-          // Simple array format: ["alloy", "echo", ...] or [{ voice: "alloy" }, ...]
-          return data.map((item) => {
-            if (typeof item === 'string') return item
-            return item.name || item.voice || item.id
-          }).filter((v): v is string => typeof v === 'string')
+        const parsedVoices = TtsVoicesResponseSchema.safeParse(await response.json())
+
+        if (!parsedVoices.success) {
+          continue
+        } else if (parsedVoices.data.kind === 'records') {
+          return parsedVoices.data.data
+            .map((voice) => voice.id ?? voice.name)
+            .filter((voiceName): voiceName is string => Boolean(voiceName))
+        } else if (parsedVoices.data.kind === 'names') {
+          return parsedVoices.data.voices
+        } else {
+          return parsedVoices.data.items
+            .map((item) => item.name ?? item.voice ?? item.id)
+            .filter((voiceName): voiceName is string => Boolean(voiceName))
         }
       }
     } catch (error) {
@@ -263,13 +297,13 @@ async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<s
 export async function cleanupExpiredCache(): Promise<number> {
   try {
     await ensureCacheDir()
-    const files = await readdir(TTS_CACHE_DIR)
+    const files = await readdir(ttsCacheDir())
     let cleanedCount = 0
     
     for (const file of files) {
       if (!file.endsWith('.mp3')) continue
       
-      const filePath = join(TTS_CACHE_DIR, file)
+      const filePath = join(ttsCacheDir(), file)
       try {
         const fileStat = await stat(filePath)
         if (Date.now() - fileStat.mtimeMs > CACHE_TTL_MS) {
@@ -295,14 +329,14 @@ export async function cleanupExpiredCache(): Promise<number> {
 export async function getCacheStats(): Promise<{ count: number; sizeBytes: number; sizeMB: number }> {
   try {
     await ensureCacheDir()
-    const files = await readdir(TTS_CACHE_DIR)
+    const files = await readdir(ttsCacheDir())
     let count = 0
     let totalSize = 0
     
     for (const file of files) {
       if (!file.endsWith('.mp3')) continue
       
-      const filePath = join(TTS_CACHE_DIR, file)
+      const filePath = join(ttsCacheDir(), file)
       const fileStat = await stat(filePath)
       
       if (Date.now() - fileStat.mtimeMs <= CACHE_TTL_MS) {
@@ -324,9 +358,9 @@ export async function getCacheStats(): Promise<{ count: number; sizeBytes: numbe
 async function clearCache(): Promise<number> {
   let files: string[]
   try {
-    files = await readdir(TTS_CACHE_DIR)
+    files = await readdir(ttsCacheDir())
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return 0
     throw error
   }
 
@@ -335,10 +369,10 @@ async function clearCache(): Promise<number> {
     if (!file.endsWith('.mp3')) continue
 
     try {
-      await unlink(join(TTS_CACHE_DIR, file))
+      await unlink(join(ttsCacheDir(), file))
       cleared++
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') continue
       throw error
     }
   }
@@ -491,6 +525,7 @@ export function createTTSRoutes(db: Database) {
         apiKey: ttsConfig.apiKey,
         type: 'voices',
         forceRefresh,
+        schema: z.array(z.string()),
         fetcher: () => fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey),
       })
 

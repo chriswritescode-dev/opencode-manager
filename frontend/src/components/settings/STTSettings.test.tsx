@@ -1,97 +1,78 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { VOICE_PAUSE_STORAGE_KEY } from '@opencode-manager/shared/opencode'
+import type { STTConfig } from '@/api/types/settings'
 import { STTSettings } from './STTSettings'
-import { useSettings } from '@/hooks/useSettings'
-import { useSTT } from '@/hooks/useSTT'
-import { isWebRecognitionSupported, getAvailableLanguages } from '@/lib/webSpeechRecognizer'
-import { createUseSettingsMock } from '@/test/test-utils'
-import { DEFAULT_STT_CONFIG, DEFAULT_USER_PREFERENCES, type STTConfig, type UserPreferences } from '@/api/types/settings'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { installPointerCapture, installSpeechRecognition } from '@/test/browserFakes'
 
-vi.mock('@/hooks/useSettings')
-vi.mock('@/hooks/useSTT')
-vi.mock('@/lib/webSpeechRecognizer')
-vi.mock('@/api/stt', () => ({
-  sttApi: {
-    getModels: vi.fn().mockResolvedValue({ models: [] }),
-    transcribe: vi.fn(),
-  },
-}))
+function renderSttSettings(stt: Partial<STTConfig> = { enabled: true, provider: 'builtin' }) {
+  installPointerCapture()
+  installSpeechRecognition()
+  const settings = createSettingsServer({ stt: { ...settingsDefaults(), ...stt } })
+  const result = renderWithProviders(<STTSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: [
+      ...settings.routes,
+      { method: 'GET', path: '/api/stt/models', respond: () => ({ json: { models: ['whisper-1'], cached: false } }) },
+    ],
+  })
+  return { ...result, settings }
+}
 
-function buildPreferences(stt: Partial<STTConfig> = {}): UserPreferences {
+function settingsDefaults(): STTConfig {
   return {
-    ...DEFAULT_USER_PREFERENCES,
-    stt: { ...DEFAULT_STT_CONFIG, ...stt },
+    enabled: false,
+    provider: 'builtin',
+    endpoint: 'https://api.openai.com',
+    apiKey: '',
+    model: 'whisper-1',
+    language: 'en-US',
+    availableModels: [],
+    lastModelsFetch: 0,
   }
 }
 
-function mockHooks(preferences: UserPreferences = buildPreferences({ enabled: true, provider: 'builtin' })) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences }))
-  vi.mocked(useSTT).mockReturnValue({
-    startRecording: vi.fn(),
-    stopRecording: vi.fn(),
-    abortRecording: vi.fn(),
-    isRecording: false,
-    isProcessing: false,
-    transcript: '',
-    interimTranscript: '',
-    error: null,
-    isExternalProvider: preferences.stt?.provider === 'external',
-  } as ReturnType<typeof useSTT>)
-  vi.mocked(isWebRecognitionSupported).mockReturnValue(true)
-  vi.mocked(getAvailableLanguages).mockReturnValue(['en-US'])
-}
-
-function getPauseSelect() {
+function pauseSelect() {
   return screen.queryByRole('combobox', { name: 'Pause before sending' })
 }
 
-async function renderSettings(preferences?: UserPreferences) {
-  if (preferences) {
-    mockHooks(preferences)
-  }
-  const rendered = render(<STTSettings />)
-  await act(async () => {})
-  return rendered
-}
-
 describe('STTSettings pause before sending', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    window.localStorage.clear()
-    mockHooks()
-  })
-
   it('shows the pause select for the enabled built-in provider', async () => {
-    await renderSettings()
+    renderSttSettings()
 
-    expect(getPauseSelect()).toHaveValue('1.2 s')
+    expect(await screen.findByRole('combobox', { name: 'Pause before sending' })).toHaveValue('1.2 s')
   })
 
   it('hides the pause select for the external provider', async () => {
-    await renderSettings(buildPreferences({ enabled: true, provider: 'external' }))
+    renderSttSettings({ enabled: true, provider: 'external' })
 
-    expect(getPauseSelect()).not.toBeInTheDocument()
+    expect(await screen.findByLabelText('API Endpoint')).toBeInTheDocument()
+    expect(pauseSelect()).not.toBeInTheDocument()
   })
 
   it('hides the pause select when STT is disabled', async () => {
-    await renderSettings(buildPreferences({ enabled: false, provider: 'builtin' }))
+    renderSttSettings({ enabled: false, provider: 'builtin' })
 
-    expect(getPauseSelect()).not.toBeInTheDocument()
+    expect(await screen.findByRole('switch', { name: /Enable STT/i })).not.toBeChecked()
+    expect(pauseSelect()).not.toBeInTheDocument()
   })
 
   it('writes the selected pause to device-local storage', async () => {
     const user = userEvent.setup()
-    await renderSettings()
+    renderSttSettings()
 
-    const select = getPauseSelect()
+    const select = await screen.findByRole('combobox', { name: 'Pause before sending' })
     expect(select).toHaveValue('1.2 s')
 
-    await user.click(select as HTMLElement)
+    await user.click(select)
     await user.click(screen.getByRole('option', { name: '3.0 s' }))
 
     expect(window.localStorage.getItem(VOICE_PAUSE_STORAGE_KEY)).toBe('3000')
-    expect(getPauseSelect()).toHaveValue('3.0 s')
+    expect(pauseSelect()).toHaveValue('3.0 s')
   })
 })

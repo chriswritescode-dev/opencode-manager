@@ -76,22 +76,21 @@ export function SourceControlContent({
 
   useRefreshOnOpen(isOpen, () => { invalidateRepoGitCaches(queryClient, repoId) })
 
-  const handleGitError = (error: unknown) => {
-    if (error instanceof FetchError) {
-      setGitError({ summary: getApiErrorMessage(error), detail: error.detail })
+  const handleGitError = (cause: unknown) => {
+    if (cause instanceof FetchError) {
+      setGitError({ summary: getApiErrorMessage(cause), detail: cause.detail })
     } else {
-      setGitError({ summary: getApiErrorMessage(error) })
+      setGitError({ summary: getApiErrorMessage(cause) })
     }
   }
 
   const git = useGit(repoId, handleGitError)
 
-  const handleGitAction = async (action: () => Promise<unknown>) => {
+  const handleGitAction = async <T,>(action: () => Promise<T>) => {
     try {
       setGitError(null)
       await action()
     } catch {
-      // error already handled by useGit's onError -> handleGitError
     }
   }
 

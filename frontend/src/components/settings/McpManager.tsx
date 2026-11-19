@@ -13,20 +13,17 @@ import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import type { McpAuthStartResponse } from '@/api/mcp'
 import { mcpApi } from '@/api/mcp'
 import { mcpServersFromConfig, type McpServerConfig } from '@opencode-manager/shared/opencode'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { showToast } from '@/lib/toast'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { formatMcpServerName } from '@/lib/mcp'
 
 interface McpManagerProps {
-  mcp: unknown
+  mcp: JsonValue | undefined
   onSave: (serverId: string, config: McpServerConfig) => Promise<void>
   onDelete: (serverId: string) => Promise<void>
 }
 
-/**
- * Renders the MCP server list, unioning servers from the config with those known only to the live
- * server status, and hosts the add, delete, OAuth and remove-auth dialogs.
- */
 export function McpManager({ mcp, onSave, onDelete }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)

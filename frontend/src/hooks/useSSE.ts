@@ -20,15 +20,9 @@ import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { serverScopedKey } from '@/lib/serverScope'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 
-/**
- * Narrows a stream event to its directory, returning `undefined` when the payload carries no
- * string directory rather than coercing another type.
- */
-const getEventDirectory = (event: OpenCodeStreamEvent): string | undefined => {
-  return typeof event.directory === 'string' ? event.directory : undefined
-}
+const getEventDirectory = (event: OpenCodeStreamEvent): string | undefined => event.directory
 
 const invalidateSessionQueryIfCached = (
   queryClient: ReturnType<typeof useQueryClient>,
@@ -51,22 +45,16 @@ const patchSessionIfCached = (
   )
 }
 
-/**
- * Subscribes the view to the global event stream for one or more directories, projecting session,
- * shell, and status events into the React Query cache. Returns connection state plus the current
- * error text for reconnection UI; it also reports exposure and visibility to the backend.
- */
 export const useSSE = (directory?: string | string[], currentSessionId?: string) => {
   const serverId = useOpenCodeServerId()
-  const directoriesList = useMemo(() => {
-    if (!directory) return [] as string[]
+  const directoriesList = useMemo<string[]>(() => {
+    if (!directory) return []
     if (Array.isArray(directory)) return directory.filter(Boolean)
     return [directory]
   }, [directory])
   const directoryKey = directoriesList.join('|')
   const primaryDirectory = directoriesList[0]
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const directorySet = useMemo(() => new Set(directoriesList), [directoryKey])
+  const directorySet = useMemo(() => new Set(directoriesList), [directoriesList])
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
@@ -219,10 +207,6 @@ export const useSSE = (directory?: string | string[], currentSessionId?: string)
       }
     }
 
-    /**
-     * Drops cached session and shell data for this server and re-reads the current session after
-     * the stream reports missed events. Resyncs for a different server are ignored.
-     */
     const handleResync = (_subscribedDirectories: string[], resyncServerId?: string) => {
       if (!mountedRef.current) return
       if ((resyncServerId ?? LOCAL_OPENCODE_SERVER_ID) !== serverId) return

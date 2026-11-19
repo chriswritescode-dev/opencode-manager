@@ -1,41 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { TerminalService } from '../../src/services/terminal'
 import { ChatNotFoundError, ChatService, ChatSessionMismatchError } from '../../src/services/chats'
+import { createStubOpenCodeClient, sessionInfo } from '../helpers/stub-opencode-client'
 
 const CHAT_ID_PATTERN = /^\d{8}-\d{6}-[0-9a-f]{6}$/
 
 interface FakeClient {
   client: OpenCodeClient
   session: {
-    create: ReturnType<typeof vi.fn>
-    get: ReturnType<typeof vi.fn>
-    remove: ReturnType<typeof vi.fn>
-    list: ReturnType<typeof vi.fn>
+    create: Mock<OpenCodeApi['session']['create']>
+    get: Mock<OpenCodeApi['session']['get']>
+    remove: Mock<OpenCodeApi['session']['remove']>
+    list: Mock<OpenCodeApi['session']['list']>
   }
 }
 
 interface FakeTerminals {
-  terminals: { removeAll: ReturnType<typeof vi.fn> }
+  terminals: { removeAll: Mock<TerminalService['removeAll']> }
 }
 
 function createFakeClient(): FakeClient {
   const session = {
-    create: vi.fn(async () => ({ id: 'ses_new' })),
-    get: vi.fn(async ({ sessionID }: { sessionID: string }) => ({
-      id: sessionID,
-      location: { directory: '/tmp/other-chat' },
-    })),
-    remove: vi.fn(async () => undefined),
-    list: vi.fn(async () => ({ data: [], cursor: {} })),
+    create: vi.fn<OpenCodeApi['session']['create']>(async () => sessionInfo({ id: 'ses_new' })),
+    get: vi.fn<OpenCodeApi['session']['get']>(async ({ sessionID }) =>
+      sessionInfo({ id: sessionID, location: { directory: '/tmp/other-chat' } })),
+    remove: vi.fn<OpenCodeApi['session']['remove']>(async () => undefined),
+    list: vi.fn<OpenCodeApi['session']['list']>(async () => ({ data: [], cursor: {} })),
   }
-  return { client: { api: { session } } as unknown as OpenCodeClient, session }
+  return { client: createStubOpenCodeClient({ api: { session } }), session }
 }
 
 function createFakeTerminals(): FakeTerminals {
-  return { terminals: { removeAll: vi.fn(async () => undefined) } }
+  return { terminals: { removeAll: vi.fn<TerminalService['removeAll']>(async () => undefined) } }
 }
 
 function createChatFolder(root: string, id: string): string {
@@ -174,8 +176,8 @@ describe('ChatService', () => {
     const directory = createChatFolder(root, id)
     const fake = createFakeClient()
     const { terminals } = createFakeTerminals()
-    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
-    fake.session.list.mockResolvedValueOnce({ data: [{ id: 'ses_fork' }], cursor: {} })
+    fake.session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory } }))
+    fake.session.list.mockResolvedValueOnce({ data: [sessionInfo({ id: 'ses_fork' })], cursor: {} })
     const service = new ChatService(fake.client, terminals, () => root)
 
     const result = await service.deleteSession(id, 'ses_1')
@@ -197,7 +199,7 @@ describe('ChatService', () => {
     terminals.removeAll.mockImplementationOnce(async (target: string) => {
       folderExistedDuringRemoval = target === directory && existsSync(directory)
     })
-    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    fake.session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory } }))
     const service = new ChatService(fake.client, terminals, () => root)
 
     const result = await service.deleteSession(id, 'ses_1')
@@ -215,7 +217,7 @@ describe('ChatService', () => {
     const fake = createFakeClient()
     const { terminals } = createFakeTerminals()
     terminals.removeAll.mockRejectedValueOnce(new Error('terminal cleanup failed'))
-    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    fake.session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory } }))
     const service = new ChatService(fake.client, terminals, () => root)
 
     const result = await service.deleteSession(id, 'ses_1')
@@ -230,7 +232,7 @@ describe('ChatService', () => {
     const directory = createChatFolder(root, id)
     const fake = createFakeClient()
     const { terminals } = createFakeTerminals()
-    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    fake.session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory } }))
     fake.session.list.mockRejectedValueOnce(new Error('list failed'))
     const service = new ChatService(fake.client, terminals, () => root)
 
@@ -247,7 +249,7 @@ describe('ChatService', () => {
     const id = '20260203-040506-abcdef'
     createChatFolder(root, id)
     const fake = createFakeClient()
-    fake.session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory: '/tmp/other-chat' } })
+    fake.session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory: '/tmp/other-chat' } }))
     const service = new ChatService(fake.client, createFakeTerminals().terminals, () => root)
 
     await expect(service.deleteSession(id, 'ses_1')).rejects.toBeInstanceOf(ChatSessionMismatchError)

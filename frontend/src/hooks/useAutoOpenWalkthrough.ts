@@ -11,13 +11,6 @@ interface UseAutoOpenWalkthroughOptions {
   onOpen: (source?: WalkthroughSource) => void
 }
 
-/**
- * Opens the change walkthrough when an `open_walkthrough` tool call completes live in the viewed
- * session. Calls present at the first loaded render are treated as history and ignored, and calls in
- * messages older than that render's oldest message stay ignored when the transcript pages in older
- * history. Each call opens at most once. `enabled` gates the automatic open so a mode where the
- * walkthrough is a full-screen dialog (mobile) leaves the user to open it from the tool call row.
- */
 export function useAutoOpenWalkthrough({
   sessionId,
   messages,

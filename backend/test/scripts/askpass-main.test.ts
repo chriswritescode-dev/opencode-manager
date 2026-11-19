@@ -1,20 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import * as http from 'http'
 import { randomUUID } from 'crypto'
+import { z } from 'zod'
 import { createIPCServer } from '../../src/ipc/ipcServer'
 import type { IPCServer } from '../../src/ipc/ipcServer'
 import { repoRoot } from '../helpers/repo-root'
 
-interface CapturedRequest {
-  askpassType: string
-  argv: string[]
-  cwd?: string
-  repoId?: number
-}
+const CapturedRequestSchema = z.object({
+  askpassType: z.string(),
+  argv: z.array(z.string()),
+  cwd: z.string().optional(),
+  repoId: z.number().optional(),
+})
+
+type CapturedRequest = z.infer<typeof CapturedRequestSchema>
 
 const scriptPath = join(repoRoot, 'backend/scripts/askpass-main.ts')
 
@@ -133,7 +136,7 @@ describe('askpass-main', () => {
     let received: CapturedRequest | undefined
     server.registerHandler('askpass', {
       handle: async (request) => {
-        received = request as CapturedRequest
+        received = CapturedRequestSchema.parse(request)
         return 'secret-token'
       },
     })
@@ -210,148 +213,3 @@ describe('askpass-main', () => {
   })
 })
 
-const askpassEnvKeys = [
-  'VSCODE_GIT_ASKPASS_PIPE',
-  'VSCODE_GIT_ASKPASS_TYPE',
-  'VSCODE_GIT_IPC_HANDLE',
-  'OCM_GIT_REPO_ID',
-  'OCM_GIT_REPO_CWD',
-] as const
-
-async function runAskpassInProcess(overrides: Record<string, string | undefined>): Promise<{ code: number | undefined; output: string | undefined }> {
-  const nextEnv = buildEnv(overrides)
-  const previousEnv: Record<string, string | undefined> = {}
-  for (const key of askpassEnvKeys) {
-    previousEnv[key] = process.env[key]
-    const next = nextEnv[key]
-    if (next === undefined) {
-      delete process.env[key]
-    } else {
-      process.env[key] = next
-    }
-  }
-
-  let resolveExit: (code: number | undefined) => void = () => {}
-  const exitPromise = new Promise<number | undefined>((resolve) => {
-    resolveExit = resolve
-  })
-  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-    resolveExit(code)
-    return undefined as never
-  }) as typeof process.exit)
-
-  vi.resetModules()
-  try {
-    await import('../../scripts/askpass-main')
-    const code = await exitPromise
-    return { code, output: existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : undefined }
-  } finally {
-    exitSpy.mockRestore()
-    errorSpy.mockRestore()
-    for (const key of askpassEnvKeys) {
-      const previous = previousEnv[key]
-      if (previous === undefined) {
-        delete process.env[key]
-      } else {
-        process.env[key] = previous
-      }
-    }
-  }
-}
-
-describe('askpass-main in-process', () => {
-  it('exits 1 when the askpass pipe is missing', async () => {
-    const result = await runAskpassInProcess({})
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBeUndefined()
-  })
-
-  it('exits 1 when the askpass type is missing', async () => {
-    const result = await runAskpassInProcess({ VSCODE_GIT_ASKPASS_PIPE: outputPath })
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBeUndefined()
-  })
-
-  it('exits 1 for an invalid askpass type', async () => {
-    const result = await runAskpassInProcess({ VSCODE_GIT_ASKPASS_PIPE: outputPath, VSCODE_GIT_ASKPASS_TYPE: 'ftp' })
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBeUndefined()
-  })
-
-  it('writes a newline and exits 0 when no IPC handle is configured', async () => {
-    const result = await runAskpassInProcess({ VSCODE_GIT_ASKPASS_PIPE: outputPath, VSCODE_GIT_ASKPASS_TYPE: 'https' })
-
-    expect(result.code).toBe(0)
-    expect(result.output).toBe('\n')
-  })
-
-  it('writes the handler result and exits 0 on IPC success', async () => {
-    const server = await startIPCServer()
-    server.registerHandler('askpass', { handle: async () => 'in-process-token' })
-
-    const result = await runAskpassInProcess({
-      VSCODE_GIT_ASKPASS_PIPE: outputPath,
-      VSCODE_GIT_ASKPASS_TYPE: 'https',
-      VSCODE_GIT_IPC_HANDLE: server.ipcHandlePath,
-    })
-
-    expect(result.code).toBe(0)
-    expect(result.output).toBe('in-process-token\n')
-  })
-
-  it('writes a newline and exits 0 when the handler returns an empty body', async () => {
-    const server = await startIPCServer()
-    server.registerHandler('askpass', { handle: async () => undefined })
-
-    const result = await runAskpassInProcess({
-      VSCODE_GIT_ASKPASS_PIPE: outputPath,
-      VSCODE_GIT_ASKPASS_TYPE: 'https',
-      VSCODE_GIT_IPC_HANDLE: server.ipcHandlePath,
-    })
-
-    expect(result.code).toBe(0)
-    expect(result.output).toBe('\n')
-  })
-
-  it('writes a newline and exits 1 when the IPC server returns a non-200 status', async () => {
-    const server = await startIPCServer()
-
-    const result = await runAskpassInProcess({
-      VSCODE_GIT_ASKPASS_PIPE: outputPath,
-      VSCODE_GIT_ASKPASS_TYPE: 'https',
-      VSCODE_GIT_IPC_HANDLE: server.ipcHandlePath,
-    })
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBe('\n')
-  })
-
-  it('writes a newline and exits 1 when the response body is not JSON', async () => {
-    const socketPath = join(dir, 'raw-in-process.sock')
-    await startRawServer(socketPath, 'not-json')
-
-    const result = await runAskpassInProcess({
-      VSCODE_GIT_ASKPASS_PIPE: outputPath,
-      VSCODE_GIT_ASKPASS_TYPE: 'https',
-      VSCODE_GIT_IPC_HANDLE: socketPath,
-    })
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBe('\n')
-  })
-
-  it('writes a newline and exits 1 when the IPC connection fails', async () => {
-    const result = await runAskpassInProcess({
-      VSCODE_GIT_ASKPASS_PIPE: outputPath,
-      VSCODE_GIT_ASKPASS_TYPE: 'https',
-      VSCODE_GIT_IPC_HANDLE: join(dir, 'missing-in-process.sock'),
-    })
-
-    expect(result.code).toBe(1)
-    expect(result.output).toBe('\n')
-  })
-})

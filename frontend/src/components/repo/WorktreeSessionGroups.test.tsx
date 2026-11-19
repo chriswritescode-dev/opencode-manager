@@ -5,6 +5,7 @@ import { WorktreeSessionGroups } from './WorktreeSessionGroups'
 import type { RepoSibling } from '@/api/repos'
 import type { Session } from '@/api/types'
 import type { MultiRun } from '@opencode-manager/shared/schemas'
+import { makeSession as makeApiSession } from '@/test/fixtures/api'
 
 const makeWorktree = (overrides: Partial<RepoSibling> & Pick<RepoSibling, 'fullPath' | 'currentBranch' | 'worktreeSource'>): RepoSibling => ({
   id: -1,
@@ -94,13 +95,8 @@ const themeToggleRun: MultiRun = {
   fusions: [],
 }
 
-const makeSession = (id: string, title: string, directory: string): Session => ({
-  id,
-  title,
-  parentID: undefined,
-  location: { directory },
-  time: { created: 0, updated: 0 },
-} as unknown as Session)
+const makeSession = (id: string, title: string, directory: string): Session =>
+  makeApiSession({ id, title, location: { directory } })
 
 const featureSession = makeSession('ses_1', 'Auth work', '/w/feature')
 
@@ -249,10 +245,11 @@ describe('WorktreeSessionGroups', () => {
     expect(screen.getByText('theme-toggle-2')).toBeInTheDocument()
     expect(screen.getByText('manual')).toBeInTheDocument()
 
-    const card = header.closest('.rounded-md') as HTMLElement
+    const card = header.closest<HTMLElement>('.rounded-md')
     expect(card).not.toBeNull()
-    expect(within(card).getAllByRole('button', { expanded: true })).toHaveLength(1)
-    expect(within(card).queryAllByRole('button', { expanded: false })).toHaveLength(0)
+    const scope = card ?? header
+    expect(within(scope).getAllByRole('button', { expanded: true })).toHaveLength(1)
+    expect(within(scope).queryAllByRole('button', { expanded: false })).toHaveLength(0)
 
     expect(screen.getByText('Theme one work')).toBeInTheDocument()
     expect(screen.getByText('Theme two work')).toBeInTheDocument()
@@ -266,7 +263,7 @@ describe('WorktreeSessionGroups', () => {
     expect(screen.queryByText('theme-toggle-2')).not.toBeInTheDocument()
     expect(screen.queryByText('Theme one work')).not.toBeInTheDocument()
     expect(screen.getByText('manual')).toBeInTheDocument()
-    expect(within(card).queryAllByRole('button', { expanded: true })).toHaveLength(0)
+    expect(within(scope).queryAllByRole('button', { expanded: true })).toHaveLength(0)
   })
 
   it('hides empty worktrees while searching and renders the empty state when there are none', async () => {

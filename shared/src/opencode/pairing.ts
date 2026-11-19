@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { JsonValueSchema, type JsonValue } from '../utils/json'
+
 const PAIRING_PROTOCOL = 'ocm-pair-v2'
 const PAIRING_PROOF_PREFIX = `${PAIRING_PROTOCOL}:`
 const PAIRING_KEY_INFO = `${PAIRING_PROTOCOL} credentials`
@@ -10,10 +13,15 @@ const textDecoder = new TextDecoder()
 
 type WebCryptoKey = Awaited<ReturnType<typeof globalThis.crypto.subtle.importKey>>
 
-export interface OpenCodePairingCredentials {
+export type OpenCodePairingCredentials = {
   username: string
   password: string
 }
+
+const OpenCodePairingCredentialsSchema = z.object({
+  username: z.string().min(1),
+  password: z.string(),
+})
 
 export interface OpenCodePairingEncryptedCredentials {
   iv: string
@@ -30,33 +38,27 @@ export interface OpenCodePairingDecryptOptions extends OpenCodePairingKeyOptions
   ciphertext: string
 }
 
-/** Generates a fresh 32-byte pairing nonce encoded as base64url. */
 export function createOpenCodePairingNonce(): string {
   return base64UrlEncode(globalThis.crypto.getRandomValues(new Uint8Array(PAIRING_NONCE_BYTES)))
 }
 
-/** Reports whether a value is a base64url-encoded 32-byte pairing nonce. */
-export function isOpenCodePairingNonce(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  const bytes = base64UrlDecode(value)
+export function isOpenCodePairingNonce(value: string): boolean {
+  const nonce = z.string().safeParse(value)
+  if (!nonce.success) return false
+  const bytes = base64UrlDecode(nonce.data)
   return bytes !== null && bytes.length === PAIRING_NONCE_BYTES
 }
 
-/** Reports whether a value carries non-empty string credentials. */
-export function isOpenCodePairingCredentials(value: unknown): value is OpenCodePairingCredentials {
-  if (typeof value !== 'object' || value === null) return false
-  const { username, password } = value as { username?: unknown; password?: unknown }
-  return typeof username === 'string' && username.length > 0 && typeof password === 'string'
+export function isOpenCodePairingCredentials(value: JsonValue | undefined): value is OpenCodePairingCredentials {
+  return OpenCodePairingCredentialsSchema.safeParse(value).success
 }
 
-/** Computes the base64url HMAC-SHA256 proof that binds a pairing code to a nonce. */
 export async function createOpenCodePairingProof(code: string, nonce: string): Promise<string> {
   const key = await importHmacKey(code)
   const signature = await globalThis.crypto.subtle.sign('HMAC', key, pairingProofMessage(nonce))
   return base64UrlEncode(new Uint8Array(signature))
 }
 
-/** Verifies a pairing proof in constant time through the Web Crypto HMAC verifier. */
 export async function verifyOpenCodePairingProof(code: string, nonce: string, proof: string): Promise<boolean> {
   const signature = base64UrlDecode(proof)
   if (signature === null) return false
@@ -68,7 +70,6 @@ export async function verifyOpenCodePairingProof(code: string, nonce: string, pr
   }
 }
 
-/** Encrypts pairing credentials with AES-256-GCM under a key derived from the code and nonce. */
 export async function encryptOpenCodePairingCredentials(
   options: OpenCodePairingKeyOptions & { credentials: OpenCodePairingCredentials },
 ): Promise<OpenCodePairingEncryptedCredentials> {
@@ -89,7 +90,6 @@ export async function encryptOpenCodePairingCredentials(
   }
 }
 
-/** Decrypts pairing credentials, throwing when the payload is tampered with or malformed. */
 export async function decryptOpenCodePairingCredentials(
   options: OpenCodePairingDecryptOptions,
 ): Promise<OpenCodePairingCredentials> {
@@ -104,9 +104,9 @@ export async function decryptOpenCodePairingCredentials(
     key,
     ciphertext,
   )
-  const parsed: unknown = JSON.parse(textDecoder.decode(plaintext))
-  if (!isOpenCodePairingCredentials(parsed)) throw new Error('Invalid pairing payload')
-  return parsed
+  const parsed = JsonValueSchema.safeParse(JSON.parse(textDecoder.decode(plaintext)))
+  if (!parsed.success || !isOpenCodePairingCredentials(parsed.data)) throw new Error('Invalid pairing payload')
+  return parsed.data
 }
 
 function encodeText(value: string): Uint8Array<ArrayBuffer> {

@@ -13,13 +13,13 @@ interface RepoGitMutationConfig<TData, TVariables> {
   successMessage?: string | ((data: TData, variables: TVariables) => string)
   statusFromData?: (data: TData) => GitStatusResponse | undefined
   invalidate?: (queryClient: QueryClient, repoId: number, data: TData, variables: TVariables) => void
-  onError?: ((error: unknown) => void) | null
+  onError?: ((cause: unknown) => void) | null
 }
 
 function useRepoGitMutation<TData, TVariables>(
   repoId: number | undefined,
   queryClient: QueryClient,
-  handleError: (error: unknown) => void,
+  handleError: (cause: unknown) => void,
   { mutationFn, successMessage, statusFromData, invalidate, onError }: RepoGitMutationConfig<TData, TVariables>,
 ) {
   return useMutation({
@@ -34,21 +34,21 @@ function useRepoGitMutation<TData, TVariables>(
         invalidate?.(queryClient, repoId, data, variables)
       }
       if (successMessage) {
-        showToast.success(typeof successMessage === 'function' ? successMessage(data, variables) : successMessage)
+        showToast.success(successMessage instanceof Function ? successMessage(data, variables) : successMessage)
       }
     },
     onError: onError === null ? undefined : (onError ?? handleError),
   })
 }
 
-export function useGit(repoId: number | undefined, onError?: (error: unknown) => void) {
+export function useGit(repoId: number | undefined, onError?: (cause: unknown) => void) {
   const queryClient = useQueryClient()
 
-  const handleError = (error: unknown) => {
+  const handleError = (cause: unknown) => {
     if (onError) {
-      onError(error)
+      onError(cause)
     } else {
-      showToast.error(getApiErrorMessage(error))
+      showToast.error(getApiErrorMessage(cause))
     }
   }
 
@@ -232,14 +232,14 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
   )
 
-  const handleStashActionError = (error: unknown) => {
+  const handleStashActionError = (cause: unknown) => {
     if (repoId) {
       invalidateRepoGitCaches(queryClient, repoId, {
         invalidateRepoListStatus: true,
         invalidateStashes: true,
       })
     }
-    handleError(error)
+    handleError(cause)
   }
 
   const stashApplyMutation = useRepoGitMutation<GitStatusResponse, { index: number; hash: string; pop: boolean }>(

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import { parseJsonText } from '@opencode-manager/shared/utils'
 import packageJson from '../package.json' with { type: 'json' }
 import { delay } from './delay.js'
 import { describeCause } from './token-store.js'
@@ -41,9 +43,11 @@ export class RepoProxyUnreachableError extends Error {
   }
 }
 
+export type RepoProxyFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
 export type WarmRepoProxyOptions = {
   attempts?: number
-  fetch?: typeof fetch
+  fetch?: RepoProxyFetch
   wait?: (ms: number) => Promise<void>
 }
 
@@ -55,13 +59,11 @@ export function repoProxyUrl(managerUrl: string, repoId: number): string {
   return `${repoProxyBaseUrl(managerUrl)}/repos/${repoId}`
 }
 
+const RepoProxyErrorBodySchema = z.object({ error: z.string().optional() })
+
 function isRepoNotFoundBody(body: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(body)
-    return typeof parsed === 'object' && parsed !== null && (parsed as { error?: unknown }).error === 'Repo not found'
-  } catch {
-    return false
-  }
+  const parsed = RepoProxyErrorBodySchema.safeParse(parseJsonText(body))
+  return parsed.success && parsed.data.error === 'Repo not found'
 }
 
 export async function warmRepoProxy(managerUrl: string, token: string, repoId: number, options: WarmRepoProxyOptions = {}): Promise<void> {

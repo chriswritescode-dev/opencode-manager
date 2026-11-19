@@ -1,64 +1,50 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { installPointerCapture } from '@/test/browserFakes'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { renderWithProviders } from '@/test/render'
 import { ActivitySettings } from './ActivitySettings'
-import { useSettings } from '@/hooks/useSettings'
-import type { UserPreferences } from '@/api/types/settings'
-import { createUseSettingsMock } from '@/test/test-utils'
 
-vi.mock('@/hooks/useSettings')
-
-const basePreferences: UserPreferences = {
-  theme: 'dark',
-  mode: 'build',
-  autoScroll: true,
-  expandDiffs: true,
-  expandToolCalls: false,
-  showReasoning: false,
-  simpleChatMode: false,
-  keyboardShortcuts: {},
-  customCommands: [],
-}
-
-function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences: basePreferences, ...overrides }))
+function renderActivitySettings(settingsServer = createSettingsServer()) {
+  installPointerCapture()
+  return renderWithProviders(<ActivitySettings />, { fetchRoutes: settingsServer.routes })
 }
 
 describe('ActivitySettings', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
+  it('shows the default window when the preference is unset', async () => {
+    renderActivitySettings()
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent(
+        '30 minutes',
+      ),
+    )
   })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
+  it('shows the stored window', async () => {
+    renderActivitySettings(createSettingsServer({ activityWindowMinutes: 120 }))
 
-  it('shows the default window when the preference is unset', () => {
-    mockUseSettings()
-    render(<ActivitySettings />)
-
-    expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent('30 minutes')
-  })
-
-  it('shows the stored window', () => {
-    mockUseSettings({ preferences: { ...basePreferences, activityWindowMinutes: 120 } })
-    render(<ActivitySettings />)
-
-    expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent('2 hours')
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Recent activity window' })).toHaveTextContent(
+        '2 hours',
+      ),
+    )
   })
 
   it('saves the chosen window in minutes', async () => {
     const user = userEvent.setup()
-    const updateSettings = vi.fn()
-    mockUseSettings({ updateSettings })
-    render(<ActivitySettings />)
+    const settingsServer = createSettingsServer()
+    const { fetchFake } = renderActivitySettings(settingsServer)
 
-    await user.click(screen.getByRole('combobox', { name: 'Recent activity window' }))
+    await user.click(await screen.findByRole('combobox', { name: 'Recent activity window' }))
     await user.click(screen.getByRole('option', { name: '4 hours' }))
 
-    expect(updateSettings).toHaveBeenCalledTimes(1)
-    expect(updateSettings).toHaveBeenCalledWith({ activityWindowMinutes: 240 })
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('PATCH', '/api/settings')?.body).toMatchObject({
+        preferences: { activityWindowMinutes: 240 },
+      }),
+    )
+    expect(settingsServer.preferences().activityWindowMinutes).toBe(240)
   })
 })

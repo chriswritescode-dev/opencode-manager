@@ -9,7 +9,6 @@ interface ArtifactPartProps {
   path?: string
 }
 
-/** Renders the sandboxed HTML document produced by an `ocm` `show_artifact` call. */
 export const ArtifactPart = memo(function ArtifactPart({ title, src, path }: ArtifactPartProps) {
   const [reloadKey, setReloadKey] = useState(0)
 

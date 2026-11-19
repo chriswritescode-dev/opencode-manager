@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useAutoScroll } from './useAutoScroll'
 import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
+import { useAutoScroll } from './useAutoScroll'
+import { makeUserMessage } from '@/test/fixtures/api'
+import { createTouchEvent } from '@/test/browserFakes'
 
 function createScrollContainer() {
   const div = document.createElement('div')
@@ -70,11 +72,18 @@ describe('useAutoScroll', () => {
     vi.clearAllTimers()
   })
 
-  const createMessage = (id: string, type: 'user' | 'assistant'): SessionMessageInfo => ({
-    id,
-    type,
-    time: { created: Date.now() },
-  } as SessionMessageInfo)
+  const createMessage = (id: string, type: 'user' | 'assistant'): SessionMessageInfo => (
+    type === 'user'
+      ? makeUserMessage({ id, time: { created: Date.now() } })
+      : {
+        id,
+        type: 'assistant',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+        content: [],
+        time: { created: Date.now() },
+      }
+  )
 
   const setupHook = (
     messages: SessionMessageInfo[],
@@ -348,14 +357,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       containerHarness.setScrollTop(100)
-      containerHarness.div.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientY: 200 } as Touch],
-        bubbles: true,
-      }))
-      containerHarness.div.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientY: 260 } as Touch],
-        bubbles: true,
-      }))
+      containerHarness.div.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 0, clientY: 200 }]))
+      containerHarness.div.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 0, clientY: 260 }]))
     })
 
     expect(onScrollStateChange).toHaveBeenCalledWith(true)
@@ -424,14 +427,8 @@ describe('useAutoScroll', () => {
 
     act(() => {
       containerHarness.setScrollTop(nearBottomPosition)
-      containerHarness.div.dispatchEvent(new TouchEvent('touchstart', {
-        touches: [{ clientY: 200 } as Touch],
-        bubbles: true,
-      }))
-      containerHarness.div.dispatchEvent(new TouchEvent('touchmove', {
-        touches: [{ clientY: 260 } as Touch],
-        bubbles: true,
-      }))
+      containerHarness.div.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 0, clientY: 200 }]))
+      containerHarness.div.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 0, clientY: 260 }]))
     })
 
     expect(onScrollStateChange).not.toHaveBeenCalledWith(true)

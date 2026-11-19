@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { JsonObject } from '@opencode-manager/shared/utils'
+import { createFetchFake, type FetchFake, type FetchRoute } from '@/test/fetchFake'
+import { FetchError } from './fetchWrapper'
 import {
   activateSkill,
   addSessionContext,
@@ -36,13 +39,8 @@ import {
   switchSessionModel,
   SIDE_QUESTION_INSTRUCTIONS,
 } from './opencode'
-import { FetchError } from './fetchWrapper'
 
-const jsonResponse = (body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+const sessionUrl = '/api/opencode/api/session'
 
 const sessionInfo = (id: string, directory: string) => ({
   id,
@@ -52,28 +50,25 @@ const sessionInfo = (id: string, directory: string) => ({
   location: { directory },
 })
 
+function installRoutes(routes: FetchRoute[]): FetchFake {
+  const fetchFake = createFetchFake(routes)
+  fetchFake.install()
+  return fetchFake
+}
+
+function respondTo(method: FetchRoute['method'], path: string, json: JsonObject): FetchRoute {
+  return { method, path, respond: () => ({ json }) }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('OpenCode facade', () => {
-  const fetchMock = vi.fn()
-
-  beforeEach(() => {
-    fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    vi.restoreAllMocks()
-  })
-
-  const lastRequest = () => {
-    const [input, init] = fetchMock.mock.calls.at(-1) ?? []
-    return { url: String(input), init: init as RequestInit }
-  }
-
   it('lists root sessions for a directory through the V2 cursor API', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
-    )
+    const fetchFake = installRoutes([
+      respondTo('GET', sessionUrl, { data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
+    ])
 
     const page = await listSessionPage({
       directory: '/repo',
@@ -83,78 +78,67 @@ describe('OpenCode facade', () => {
       parentID: null,
     })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session?limit=25&order=desc&search=deploy&parentID=null&directory=%2Frepo',
+    expect(fetchFake.lastRequest('GET', sessionUrl)?.searchParams.toString()).toBe(
+      'limit=25&order=desc&search=deploy&parentID=null&directory=%2Frepo',
     )
-    expect(lastRequest().init.method).toBe('GET')
     expect(page.items).toEqual([sessionInfo('ses_1', '/repo')])
     expect(page.nextCursor).toBe('cursor_next')
   })
 
   it('passes the directory and cursor for continuation pages', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [], cursor: {} }))
+    const fetchFake = installRoutes([respondTo('GET', sessionUrl, { data: [], cursor: {} })])
 
     const page = await listSessionPage({ directory: '/repo', cursor: 'cursor_1', parentID: null })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session?parentID=null&directory=%2Frepo&cursor=cursor_1',
+    expect(fetchFake.lastRequest('GET', sessionUrl)?.searchParams.toString()).toBe(
+      'parentID=null&directory=%2Frepo&cursor=cursor_1',
     )
-    expect(lastRequest().init.method).toBe('GET')
     expect(page.items).toEqual([])
     expect(page.nextCursor).toBeUndefined()
   })
 
   it('omits the directory when listing sessions across all directories', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
-    )
+    const fetchFake = installRoutes([
+      respondTo('GET', sessionUrl, { data: [sessionInfo('ses_1', '/repo')], cursor: { next: 'cursor_next' } }),
+    ])
 
     const page = await listSessionPage({ limit: 25, order: 'desc', parentID: null })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session?limit=25&order=desc&parentID=null',
+    expect(fetchFake.lastRequest('GET', sessionUrl)?.searchParams.toString()).toBe(
+      'limit=25&order=desc&parentID=null',
     )
-    expect(lastRequest().init.method).toBe('GET')
     expect(page.items).toEqual([sessionInfo('ses_1', '/repo')])
     expect(page.nextCursor).toBe('cursor_next')
   })
 
   it('omits the directory on an all-directories continuation page', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [], cursor: {} }))
+    const fetchFake = installRoutes([respondTo('GET', sessionUrl, { data: [], cursor: {} })])
 
     await listSessionPage({ cursor: 'cursor_1', parentID: null })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session?parentID=null&cursor=cursor_1',
-    )
-    expect(lastRequest().init.method).toBe('GET')
+    expect(fetchFake.lastRequest('GET', sessionUrl)?.searchParams.toString()).toBe('parentID=null&cursor=cursor_1')
   })
 
   it('omits the parentID filter when including child sessions', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ data: [sessionInfo('ses_child', '/repo')], cursor: {} }),
-    )
+    const fetchFake = installRoutes([
+      respondTo('GET', sessionUrl, { data: [sessionInfo('ses_child', '/repo')], cursor: {} }),
+    ])
 
     await listSessionPage({ directory: '/repo', limit: 25, order: 'desc' })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session?limit=25&order=desc&directory=%2Frepo',
+    expect(fetchFake.lastRequest('GET', sessionUrl)?.searchParams.toString()).toBe(
+      'limit=25&order=desc&directory=%2Frepo',
     )
-    expect(lastRequest().init.method).toBe('GET')
   })
 
   it('reads a single session from the V2 session route', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_1', '/repo') }))
+    installRoutes([respondTo('GET', `${sessionUrl}/ses_1`, { data: sessionInfo('ses_1', '/repo') })])
 
-    const session = await getSession('ses_1')
-
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1')
-    expect(lastRequest().init.method).toBe('GET')
-    expect(session).toEqual(sessionInfo('ses_1', '/repo'))
+    await expect(getSession('ses_1')).resolves.toEqual(sessionInfo('ses_1', '/repo'))
   })
 
   it('creates a session with location and a parsed model reference', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_new', '/repo') }))
+    const fetchFake = installRoutes([respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/repo') })])
 
     const session = await createSession({
       directory: '/repo',
@@ -163,118 +147,108 @@ describe('OpenCode facade', () => {
       model: 'anthropic/claude#v1',
     })
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({
+    expect(fetchFake.lastRequest('POST', sessionUrl)?.body).toEqual({
       title: 'New session',
       agent: 'build',
       model: { providerID: 'anthropic', id: 'claude', variant: 'v1' },
       location: { directory: '/repo' },
-    }))
+    })
     expect(session.id).toBe('ses_new')
   })
 
   it('creates a session with the required location and no optional fields', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_new', '/repo') }))
+    const fetchFake = installRoutes([respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/repo') })])
 
     await createSession({ directory: '/repo' })
 
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ location: { directory: '/repo' } }))
+    expect(fetchFake.lastRequest('POST', sessionUrl)?.body).toEqual({ location: { directory: '/repo' } })
   })
 
   it('deletes a session through the V2 session route', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'DELETE', path: `${sessionUrl}/ses_1`, respond: () => ({ status: 204 }) },
+    ])
 
     await expect(deleteSession('ses_1')).resolves.toBeUndefined()
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1')
-    expect(lastRequest().init.method).toBe('DELETE')
+    expect(fetchFake.findRequests('DELETE', `${sessionUrl}/ses_1`)).toHaveLength(1)
   })
 
   it('renames a session with a title update', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'PATCH', path: `${sessionUrl}/ses_1`, respond: () => ({ status: 204 }) },
+    ])
 
     await renameSession('ses_1', 'Renamed')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1')
-    expect(lastRequest().init.method).toBe('PATCH')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ title: 'Renamed' }))
+    expect(fetchFake.lastRequest('PATCH', `${sessionUrl}/ses_1`)?.body).toEqual({ title: 'Renamed' })
   })
 
-  it('forks a session before a message', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_child', '/repo') }))
+  it.each([
+    { title: 'forks a session before a message', before: 'msg_1', expectedBody: { before: 'msg_1' } },
+    { title: 'forks a session without a boundary when none is given', before: undefined, expectedBody: {} },
+  ])('$title', async ({ before, expectedBody }) => {
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/fork`, { data: sessionInfo('ses_child', '/repo') }),
+    ])
 
-    const forked = await forkSession('ses_1', 'msg_1')
+    const forked = await forkSession('ses_1', before)
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/fork')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ before: 'msg_1' }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/fork`)?.body).toEqual(expectedBody)
     expect(forked.id).toBe('ses_child')
   })
 
-  it('forks a session without a boundary when none is given', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: sessionInfo('ses_child', '/repo') }))
-
-    await forkSession('ses_1')
-
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/fork')
-    expect(lastRequest().init.body).toBe(JSON.stringify({}))
-  })
-
   it('adds context to a session without resuming the model', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: { id: 'inb_1' } }))
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/synthetic`, { data: { id: 'inb_1' } }),
+    ])
 
     await expect(addSessionContext('ses_1', 'Run output')).resolves.toBeUndefined()
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/synthetic')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ text: 'Run output', resume: false }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/synthetic`)?.body).toEqual({
+      text: 'Run output',
+      resume: false,
+    })
   })
 
   it('creates a session in a directory and seeds it with context', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
-      .mockResolvedValueOnce(jsonResponse({ data: { id: 'inb_1' } }))
+    const fetchFake = installRoutes([
+      respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/abs/repos/my-repo') }),
+      respondTo('POST', `${sessionUrl}/ses_new/synthetic`, { data: { id: 'inb_1' } }),
+    ])
 
-    const session = await createSessionWithContext({ directory: '/abs/repos/my-repo', title: 'Run (continued)' }, 'Run output')
+    const session = await createSessionWithContext(
+      { directory: '/abs/repos/my-repo', title: 'Run (continued)' },
+      'Run output',
+    )
 
     expect(session.id).toBe('ses_new')
-    const [createUrl, createInit] = fetchMock.mock.calls[0] ?? []
-    expect(String(createUrl)).toBe('http://localhost/api/opencode/api/session')
-    expect((createInit as RequestInit).body).toBe(JSON.stringify({ title: 'Run (continued)', location: { directory: '/abs/repos/my-repo' } }))
-    const [contextUrl, contextInit] = fetchMock.mock.calls[1] ?? []
-    expect(String(contextUrl)).toBe('http://localhost/api/opencode/api/session/ses_new/synthetic')
-    expect((contextInit as RequestInit).body).toBe(JSON.stringify({ text: 'Run output', resume: false }))
+    expect(fetchFake.requests.map((request) => request.body)).toEqual([
+      { title: 'Run (continued)', location: { directory: '/abs/repos/my-repo' } },
+      { text: 'Run output', resume: false },
+    ])
   })
 
   it('deletes the new session when seeding its context fails', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
-      .mockResolvedValueOnce(new Response('nope', { status: 400 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/abs/repos/my-repo') }),
+      { method: 'POST', path: `${sessionUrl}/ses_new/synthetic`, respond: () => ({ status: 400, text: 'nope' }) },
+      { method: 'DELETE', path: `${sessionUrl}/ses_new`, respond: () => ({ status: 204 }) },
+    ])
 
-    await expect(createSessionWithContext({ directory: '/abs/repos/my-repo' }, 'Run output')).rejects.toBeInstanceOf(FetchError)
-
-    const [deleteUrl, deleteInit] = fetchMock.mock.calls[2] ?? []
-    expect(String(deleteUrl)).toBe('http://localhost/api/opencode/api/session/ses_new')
-    expect((deleteInit as RequestInit).method).toBe('DELETE')
+    await expect(createSessionWithContext({ directory: '/abs/repos/my-repo' }, 'Run output')).rejects.toBeInstanceOf(
+      FetchError,
+    )
+    expect(fetchFake.findRequests('DELETE', `${sessionUrl}/ses_new`)).toHaveLength(1)
   })
 
   it('creates a session in a directory and sends a prompt', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            id: 'msg_1',
-            sessionID: 'ses_new',
-            time: { created: 1000 },
-            type: 'user',
-            payload: { text: 'Fix conflicts' },
-          },
-        }),
-      )
+    const fetchFake = installRoutes([
+      respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/abs/repos/my-repo') }),
+      respondTo('POST', `${sessionUrl}/ses_new/prompt`, {
+        data: { id: 'msg_1', sessionID: 'ses_new', time: { created: 1000 }, type: 'user', payload: { text: 'Fix conflicts' } },
+      }),
+    ])
 
     const session = await createSessionWithPrompt(
       { directory: '/abs/repos/my-repo', title: 'Resolve merge conflicts' },
@@ -282,82 +256,60 @@ describe('OpenCode facade', () => {
     )
 
     expect(session.id).toBe('ses_new')
-    const [createUrl] = fetchMock.mock.calls[0] ?? []
-    expect(String(createUrl)).toBe('http://localhost/api/opencode/api/session')
-    const [promptUrl, promptInit] = fetchMock.mock.calls[1] ?? []
-    expect(String(promptUrl)).toBe('http://localhost/api/opencode/api/session/ses_new/prompt')
-    expect((promptInit as RequestInit).method).toBe('POST')
-    expect((promptInit as RequestInit).body).toBe(JSON.stringify({ text: 'Fix conflicts', metadata: { ocmClient: 'desktop' } }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_new/prompt`)?.body).toEqual({
+      text: 'Fix conflicts',
+      metadata: { ocmClient: 'desktop' },
+    })
   })
 
   it('deletes the new session when sending the prompt fails', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ data: sessionInfo('ses_new', '/abs/repos/my-repo') }))
-      .mockResolvedValueOnce(new Response('nope', { status: 400 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      respondTo('POST', sessionUrl, { data: sessionInfo('ses_new', '/abs/repos/my-repo') }),
+      { method: 'POST', path: `${sessionUrl}/ses_new/prompt`, respond: () => ({ status: 400, text: 'nope' }) },
+      { method: 'DELETE', path: `${sessionUrl}/ses_new`, respond: () => ({ status: 204 }) },
+    ])
 
-    await expect(createSessionWithPrompt({ directory: '/abs/repos/my-repo' }, 'Fix conflicts')).rejects.toBeInstanceOf(FetchError)
-
-    const [deleteUrl, deleteInit] = fetchMock.mock.calls[2] ?? []
-    expect(String(deleteUrl)).toBe('http://localhost/api/opencode/api/session/ses_new')
-    expect((deleteInit as RequestInit).method).toBe('DELETE')
+    await expect(createSessionWithPrompt({ directory: '/abs/repos/my-repo' }, 'Fix conflicts')).rejects.toBeInstanceOf(
+      FetchError,
+    )
+    expect(fetchFake.findRequests('DELETE', `${sessionUrl}/ses_new`)).toHaveLength(1)
   })
 
-  it('finds files through the V2 filesystem route and returns paths', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        location: { directory: '/repo' },
-        data: [
-          { path: 'src/index.ts', type: 'file' },
-          { path: 'src/app.ts', type: 'file' },
-        ],
-      }),
-    )
+  it.each([
+    {
+      title: 'finds files through the V2 filesystem route and returns paths',
+      input: { location: { directory: '/repo' }, query: 'index', limit: 20 },
+      expectedQuery: 'location%5Bdirectory%5D=%2Frepo&query=index&type=file&limit=20',
+    },
+    {
+      title: 'finds files without a limit when none is given',
+      input: { location: { directory: '/repo' }, query: 'index' },
+      expectedQuery: 'location%5Bdirectory%5D=%2Frepo&query=index&type=file',
+    },
+  ])('$title', async ({ input, expectedQuery }) => {
+    const fetchFake = installRoutes([respondTo('GET', '/api/opencode/api/fs/find', { location: { directory: '/repo' }, data: [{ path: 'src/index.ts', type: 'file' }] })])
 
-    const files = await findFiles({ location: { directory: '/repo' }, query: 'index', limit: 20 })
+    const files = await findFiles(input)
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/fs/find?location%5Bdirectory%5D=%2Frepo&query=index&type=file&limit=20',
-    )
-    expect(lastRequest().init.method).toBe('GET')
-    expect(files).toEqual(['src/index.ts', 'src/app.ts'])
-  })
-
-  it('finds files without a limit when none is given', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ location: { directory: '/repo' }, data: [] }))
-
-    await findFiles({ location: { directory: '/repo' }, query: 'index' })
-
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/fs/find?location%5Bdirectory%5D=%2Frepo&query=index&type=file',
-    )
+    expect(fetchFake.lastRequest('GET', '/api/opencode/api/fs/find')?.searchParams.toString()).toBe(expectedQuery)
+    expect(files).toEqual(['src/index.ts'])
   })
 
   it('reads a session snapshot from the message page, inbox, and active sessions', async () => {
-    const message = {
-      id: 'msg_1',
-      type: 'user' as const,
-      text: 'Run the tests',
-      time: { created: 1000 },
-    }
+    const message = { id: 'msg_1', type: 'user', text: 'Run the tests', time: { created: 1000 } }
     const inbox = {
       id: 'msg_2',
       sessionID: 'ses_1',
       time: { created: 2000 },
-      type: 'user' as const,
+      type: 'user',
       payload: { text: 'Wait for me' },
-      delivery: 'queue' as const,
+      delivery: 'queue',
     }
-    fetchMock.mockImplementation((input: unknown) => {
-      const url = String(input)
-      if (url.endsWith('/api/session/ses_1/inbox')) {
-        return Promise.resolve(jsonResponse({ data: [inbox] }))
-      }
-      if (url.endsWith('/api/session/active')) {
-        return Promise.resolve(jsonResponse({ data: { ses_1: { type: 'running' } } }))
-      }
-      return Promise.resolve(jsonResponse({ data: [message], cursor: { next: 'cursor_next' } }))
-    })
+    const fetchFake = installRoutes([
+      respondTo('GET', `${sessionUrl}/ses_1/message`, { data: [message], cursor: { next: 'cursor_next' } }),
+      respondTo('GET', `${sessionUrl}/ses_1/inbox`, { data: [inbox] }),
+      respondTo('GET', `${sessionUrl}/active`, { data: { ses_1: { type: 'running' } } }),
+    ])
 
     const snapshot = await readSessionSnapshot('ses_1')
 
@@ -367,7 +319,7 @@ describe('OpenCode facade', () => {
       pending: [inbox],
       status: 'busy',
     })
-    expect(fetchMock.mock.calls.map(([input]) => String(input)).sort()).toEqual([
+    expect(fetchFake.requests.map((request) => request.url).sort()).toEqual([
       'http://localhost/api/opencode/api/session/active',
       'http://localhost/api/opencode/api/session/ses_1/inbox',
       'http://localhost/api/opencode/api/session/ses_1/message?order=desc',
@@ -375,100 +327,101 @@ describe('OpenCode facade', () => {
   })
 
   it('requests the newest message page with descending order', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ data: [{ id: 'msg_3' }, { id: 'msg_2' }], cursor: { next: 'cursor_2' } }),
-    )
+    const fetchFake = installRoutes([
+      respondTo('GET', `${sessionUrl}/ses_1/message`, { data: [{ id: 'msg_3' }, { id: 'msg_2' }], cursor: { next: 'cursor_2' } }),
+    ])
 
     const page = await listSessionMessages('ses_1', { limit: 20 })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session/ses_1/message?limit=20&order=desc',
+    expect(fetchFake.lastRequest('GET', `${sessionUrl}/ses_1/message`)?.searchParams.toString()).toBe(
+      'limit=20&order=desc',
     )
-    expect(page.messages.map((message) => message.id)).toEqual(['msg_2', 'msg_3'])
+    expect(page.messages.map((entry) => entry.id)).toEqual(['msg_2', 'msg_3'])
     expect(page.nextCursor).toBe('cursor_2')
   })
 
   it('omits order on continuation pages so the server accepts the cursor', async () => {
-    const server = vi.fn((input: unknown) => {
-      const url = String(input)
-      if (url.includes('cursor=') && url.includes('order=')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({ _tag: 'InvalidCursorError', message: 'Cursor cannot be combined with order' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          ),
-        )
-      }
-      return Promise.resolve(
-        jsonResponse({ data: [{ id: 'msg_2' }, { id: 'msg_1' }], cursor: { next: 'cursor_2' } }),
-      )
-    })
-    fetchMock.mockImplementation(server)
+    const fetchFake = installRoutes([
+      respondTo('GET', `${sessionUrl}/ses_1/message`, { data: [{ id: 'msg_2' }, { id: 'msg_1' }], cursor: { next: 'cursor_2' } }),
+    ])
 
     const page = await listSessionMessages('ses_1', { cursor: 'cursor_1' })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session/ses_1/message?cursor=cursor_1',
-    )
-    expect(page.messages.map((message) => message.id)).toEqual(['msg_1', 'msg_2'])
+    expect(fetchFake.lastRequest('GET', `${sessionUrl}/ses_1/message`)?.searchParams.toString()).toBe('cursor=cursor_1')
+    expect(page.messages.map((entry) => entry.id)).toEqual(['msg_1', 'msg_2'])
     expect(page.nextCursor).toBe('cursor_2')
   })
 
-  it('wraps V2 client failures in a FetchError', async () => {    fetchMock.mockResolvedValue(new Response('upstream exploded', { status: 500 }))
+  it('wraps V2 client failures in a FetchError', async () => {
+    installRoutes([
+      { method: 'GET', path: `${sessionUrl}/ses_1`, respond: () => ({ status: 500, text: 'upstream exploded' }) },
+    ])
 
-    const failure = await getSession('ses_1').catch((error: unknown) => error)
+    const failure = getSession('ses_1')
 
-    expect(failure).toBeInstanceOf(FetchError)
-    expect((failure as FetchError).statusCode).toBe(500)
+    await expect(failure).rejects.toBeInstanceOf(FetchError)
+    await expect(failure).rejects.toMatchObject({ statusCode: 500 })
   })
 
   it('maps a declared V2 not-found error to 404 instead of a network failure', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ _tag: 'SessionNotFoundError', sessionID: 'ses_1', message: 'Session not found' }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+    installRoutes([
+      {
+        method: 'GET',
+        path: `${sessionUrl}/ses_1`,
+        respond: () => ({
+          status: 404,
+          json: { _tag: 'SessionNotFoundError', sessionID: 'ses_1', message: 'Session not found' },
+        }),
+      },
+    ])
 
-    const failure = await getSession('ses_1').catch((error: unknown) => error)
+    const failure = getSession('ses_1')
 
-    expect(failure).toBeInstanceOf(FetchError)
-    expect((failure as FetchError).statusCode).toBe(404)
-    expect((failure as FetchError).message).toBe('Session not found')
+    await expect(failure).rejects.toBeInstanceOf(FetchError)
+    await expect(failure).rejects.toMatchObject({ statusCode: 404, message: 'Session not found' })
   })
 
   it('preserves the declared error tag as FetchError.code', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ _tag: 'PermissionNotFoundError', sessionID: 'ses_1', requestID: 'per_1', message: 'Permission request not found' }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+    installRoutes([
+      {
+        method: 'POST',
+        path: `${sessionUrl}/ses_1/permission/per_1/reply`,
+        respond: () => ({
+          status: 404,
+          json: {
+            _tag: 'PermissionNotFoundError',
+            sessionID: 'ses_1',
+            requestID: 'per_1',
+            message: 'Permission request not found',
+          },
+        }),
+      },
+    ])
 
-    const failure = await replyPermission('ses_1', 'per_1', 'once').catch((error: unknown) => error)
+    const failure = replyPermission('ses_1', 'per_1', 'once')
 
-    expect(failure).toBeInstanceOf(FetchError)
-    expect((failure as FetchError).statusCode).toBe(404)
-    expect((failure as FetchError).code).toBe('PermissionNotFoundError')
+    await expect(failure).rejects.toBeInstanceOf(FetchError)
+    await expect(failure).rejects.toMatchObject({ statusCode: 404, code: 'PermissionNotFoundError' })
   })
 
   it('maps a declared V2 conflict error to 409', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ _tag: 'SessionBusyError', sessionID: 'ses_1', message: 'Session is busy' }),
-        { status: 409, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+    installRoutes([
+      {
+        method: 'POST',
+        path: `${sessionUrl}/ses_1/prompt`,
+        respond: () => ({ status: 409, json: { _tag: 'SessionBusyError', sessionID: 'ses_1', message: 'Session is busy' } }),
+      },
+    ])
 
-    const failure = await sendPrompt({ sessionID: 'ses_1', text: 'Hi' }).catch((error: unknown) => error)
+    const failure = sendPrompt({ sessionID: 'ses_1', text: 'Hi' })
 
-    expect(failure).toBeInstanceOf(FetchError)
-    expect((failure as FetchError).statusCode).toBe(409)
+    await expect(failure).rejects.toBeInstanceOf(FetchError)
+    await expect(failure).rejects.toMatchObject({ statusCode: 409 })
   })
 
   it('sends a prompt with files, agents, skills, and delivery', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/prompt`, {
         data: {
           id: 'msg_1',
           sessionID: 'ses_1',
@@ -478,7 +431,7 @@ describe('OpenCode facade', () => {
           delivery: 'queue',
         },
       }),
-    )
+    ])
 
     const inbox = await sendPrompt({
       sessionID: 'ses_1',
@@ -489,85 +442,62 @@ describe('OpenCode facade', () => {
       delivery: 'queue',
     })
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/prompt')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/prompt`)?.body).toEqual({
       text: 'Hello @src/a.ts',
       files: [{ uri: 'file:///repo/src/a.ts', name: 'a.ts', mention: { start: 6, end: 15, text: '@src/a.ts' } }],
       agents: [{ name: 'build', mention: { start: 6, end: 12, text: '@build' } }],
       skills: [{ id: 'review' }],
       metadata: { ocmClient: 'desktop' },
       delivery: 'queue',
-    }))
+    })
     expect(inbox.id).toBe('msg_1')
   })
 
-  it('marks a prompt as mobile when the viewport is narrow', async () => {
-    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375)
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        data: {
-          id: 'msg_1',
-          sessionID: 'ses_1',
-          time: { created: 1000 },
-          type: 'user',
-          payload: { text: 'Hi' },
-        },
+  it.each([
+    { title: 'marks a prompt as mobile when the viewport is narrow', innerWidth: 375, client: 'mobile' },
+    { title: 'marks a prompt as desktop when the viewport is wide', innerWidth: 1280, client: 'desktop' },
+  ])('$title', async ({ innerWidth, client }) => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(innerWidth)
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/prompt`, {
+        data: { id: 'msg_1', sessionID: 'ses_1', time: { created: 1000 }, type: 'user', payload: { text: 'Hi' } },
       }),
-    )
+    ])
 
     await sendPrompt({ sessionID: 'ses_1', text: 'Hi' })
 
-    expect(lastRequest().init.body).toBe(JSON.stringify({
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/prompt`)?.body).toEqual({
       text: 'Hi',
-      metadata: { ocmClient: 'mobile' },
-    }))
-  })
-
-  it('marks a prompt as desktop when the viewport is wide', async () => {
-    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280)
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        data: {
-          id: 'msg_1',
-          sessionID: 'ses_1',
-          time: { created: 1000 },
-          type: 'user',
-          payload: { text: 'Hi' },
-        },
-      }),
-    )
-
-    await sendPrompt({ sessionID: 'ses_1', text: 'Hi' })
-
-    expect(lastRequest().init.body).toBe(JSON.stringify({
-      text: 'Hi',
-      metadata: { ocmClient: 'desktop' },
-    }))
+      metadata: { ocmClient: client },
+    })
   })
 
   it('switches the session model through the V2 model route', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/model`, respond: () => ({ status: 204 }) },
+    ])
 
     await switchSessionModel('ses_1', { providerID: 'anthropic', id: 'claude', variant: 'v1' })
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/model')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ model: { providerID: 'anthropic', id: 'claude', variant: 'v1' } }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/model`)?.body).toEqual({
+      model: { providerID: 'anthropic', id: 'claude', variant: 'v1' },
+    })
   })
 
   it('switches the session agent through the V2 agent route', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/agent`, respond: () => ({ status: 204 }) },
+    ])
 
     await switchSessionAgent('ses_1', 'build')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/agent')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ agent: 'build' }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/agent`)?.body).toEqual({ agent: 'build' })
   })
 
   it('runs a session command', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/command`, respond: () => ({ status: 204 }) },
+    ])
 
     await runCommand({
       sessionID: 'ses_1',
@@ -576,186 +506,176 @@ describe('OpenCode facade', () => {
       agents: [{ name: 'build' }],
     })
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/command')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/command`)?.body).toEqual({
       name: 'init',
       text: 'extra context',
       agents: [{ name: 'build' }],
-    }))
+    })
   })
 
   it('runs a session shell command', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/shell`, respond: () => ({ status: 204 }) },
+    ])
 
     await runShell('ses_1', 'ls -la')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/shell')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ command: 'ls -la' }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/shell`)?.body).toEqual({ command: 'ls -la' })
   })
 
   it('interrupts a session', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: { interrupted: true } }))
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/interrupt`, { data: { interrupted: true } }),
+    ])
 
     await interruptSession('ses_1')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/interrupt')
-    expect(lastRequest().init.method).toBe('POST')
+    expect(fetchFake.findRequests('POST', `${sessionUrl}/ses_1/interrupt`)).toHaveLength(1)
   })
 
   it('asks a side question through the session generate route with the shared instructions', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: { text: '  answer \n' } }))
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/generate`, { data: { text: '  answer \n' } }),
+    ])
 
     const answer = await askSideQuestion('ses_1', 'why?')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/generate')
-    expect(lastRequest().init.method).toBe('POST')
-    const body = JSON.parse(String(lastRequest().init.body))
-    expect(body.prompt).toBe(`${SIDE_QUESTION_INSTRUCTIONS}\n\nwhy?`)
-    expect(body.prompt.startsWith(SIDE_QUESTION_INSTRUCTIONS)).toBe(true)
-    expect(body.prompt.endsWith('\n\nwhy?')).toBe(true)
+    const body = fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/generate`)?.body
+    expect(body).toEqual({ prompt: `${SIDE_QUESTION_INSTRUCTIONS}\n\nwhy?` })
     expect(answer).toBe('answer')
   })
 
   it('stages, commits, and clears a session revert', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.endsWith('/interrupt')) return Promise.resolve(jsonResponse({ data: { interrupted: true } }))
-      if (url.endsWith('/wait')) return Promise.resolve(new Response(null, { status: 204 }))
-      if (url.endsWith('/revert/stage')) return Promise.resolve(jsonResponse({ data: { messageID: 'msg_1' } }))
-      return Promise.resolve(new Response(null, { status: 204 }))
-    })
+    const fetchFake = installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/interrupt`, { data: { interrupted: true } }),
+      { method: 'POST', path: '/api/opencode/api/experimental/session/ses_1/wait', respond: () => ({ status: 204 }) },
+      respondTo('POST', `${sessionUrl}/ses_1/revert/stage`, { data: { messageID: 'msg_1' } }),
+      { method: 'POST', path: `${sessionUrl}/ses_1/revert/commit`, respond: () => ({ status: 204 }) },
+      { method: 'DELETE', path: `${sessionUrl}/ses_1/revert`, respond: () => ({ status: 204 }) },
+    ])
 
     await stageRevert('ses_1', 'msg_1')
 
-    const stageRequests = fetchMock.mock.calls.map(([input, init]) => ({
-      url: String(input),
-      init: init as RequestInit,
-    }))
-    expect(stageRequests.map((request) => request.url)).toEqual([
-      'http://localhost/api/opencode/api/session/ses_1/interrupt',
-      'http://localhost/api/opencode/api/experimental/session/ses_1/wait',
-      'http://localhost/api/opencode/api/session/ses_1/revert/stage',
+    expect(fetchFake.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+      'POST /api/opencode/api/session/ses_1/interrupt',
+      'POST /api/opencode/api/experimental/session/ses_1/wait',
+      'POST /api/opencode/api/session/ses_1/revert/stage',
     ])
-    expect(stageRequests.map((request) => request.init.method)).toEqual(['POST', 'POST', 'POST'])
-    expect(stageRequests[2].init.body).toBe(JSON.stringify({ messageID: 'msg_1' }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/revert/stage`)?.body).toEqual({ messageID: 'msg_1' })
 
     await commitRevert('ses_1')
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/revert/commit')
-    expect(lastRequest().init.method).toBe('POST')
+    expect(fetchFake.findRequests('POST', `${sessionUrl}/ses_1/revert/commit`)).toHaveLength(1)
 
     await clearRevert('ses_1')
-    expect(lastRequest().url).toMatch(/\/revert$/)
-    expect(lastRequest().init.method).toBe('DELETE')
+    expect(fetchFake.findRequests('DELETE', `${sessionUrl}/ses_1/revert`)).toHaveLength(1)
   })
 
   it('compacts a session', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ data: { id: 'cmp_1', sessionID: 'ses_1', time: { created: 1000 }, type: 'compaction', delivery: 'steer' } }),
-    )
+    installRoutes([
+      respondTo('POST', `${sessionUrl}/ses_1/compact`, {
+        data: { id: 'cmp_1', sessionID: 'ses_1', time: { created: 1000 }, type: 'compaction', delivery: 'steer' },
+      }),
+    ])
 
-    const compaction = await compactSession('ses_1')
-
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/compact')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(compaction.id).toBe('cmp_1')
+    await expect(compactSession('ses_1')).resolves.toMatchObject({ id: 'cmp_1' })
   })
 
   it('activates a skill on the experimental session route', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      {
+        method: 'POST',
+        path: '/api/opencode/api/experimental/session/ses_1/skill',
+        respond: () => ({ status: 204 }),
+      },
+    ])
 
     await activateSkill('ses_1', 'review')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/experimental/session/ses_1/skill')
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ id: 'review' }))
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/experimental/session/ses_1/skill')?.body).toEqual({
+      id: 'review',
+    })
   })
 
   it('lists commands scoped to a directory', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ location: { directory: '/repo' }, data: [{ name: 'init', description: 'Init' }] }),
-    )
+    const fetchFake = installRoutes([
+      respondTo('GET', '/api/opencode/api/command', { location: { directory: '/repo' }, data: [{ name: 'init', description: 'Init' }] }),
+    ])
 
     const commands = await listCommands('/repo')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/command?location%5Bdirectory%5D=%2Frepo')
-    expect(lastRequest().init.method).toBe('GET')
+    expect(fetchFake.lastRequest('GET', '/api/opencode/api/command')?.searchParams.toString()).toBe(
+      'location%5Bdirectory%5D=%2Frepo',
+    )
     expect(commands).toEqual([{ name: 'init', description: 'Init' }])
   })
 
   it('lists pending permissions scoped to a directory', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        location: { directory: '/repo' },
-        data: [{ id: 'perm_1', sessionID: 'ses_1', action: 'shell', resources: ['ls'] }],
-      }),
-    )
+    const permissions = [{ id: 'perm_1', sessionID: 'ses_1', action: 'shell', resources: ['ls'] }]
+    const fetchFake = installRoutes([
+      respondTo('GET', '/api/opencode/api/permission/request', { location: { directory: '/repo' }, data: permissions }),
+    ])
 
-    const permissions = await listPendingPermissions('/repo')
-
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/permission/request?location%5Bdirectory%5D=%2Frepo',
+    await expect(listPendingPermissions('/repo')).resolves.toEqual(permissions)
+    expect(fetchFake.lastRequest('GET', '/api/opencode/api/permission/request')?.searchParams.toString()).toBe(
+      'location%5Bdirectory%5D=%2Frepo',
     )
-    expect(lastRequest().init.method).toBe('GET')
-    expect(permissions).toEqual([{ id: 'perm_1', sessionID: 'ses_1', action: 'shell', resources: ['ls'] }])
   })
 
-  it('replies to a permission with a decision and rejection message', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+  it.each([
+    {
+      title: 'replies to a permission with a decision and rejection message',
+      decision: 'reject',
+      message: 'not allowed',
+      expectedBody: { decision: 'reject', message: 'not allowed' },
+    },
+    {
+      title: 'replies to a permission without a message',
+      decision: 'once',
+      message: undefined,
+      expectedBody: { decision: 'once' },
+    },
+  ] as const)('$title', async ({ decision, message, expectedBody }) => {
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/permission/per_1/reply`, respond: () => ({ status: 204 }) },
+    ])
 
-    await replyPermission('ses_1', 'perm_1', 'reject', 'not allowed')
+    await replyPermission('ses_1', 'per_1', decision, message)
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session/ses_1/permission/perm_1/reply',
-    )
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ decision: 'reject', message: 'not allowed' }))
-  })
-
-  it('replies to a permission without a message', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
-
-    await replyPermission('ses_1', 'perm_1', 'once')
-
-    expect(lastRequest().init.body).toBe(JSON.stringify({ decision: 'once' }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/permission/per_1/reply`)?.body).toEqual(expectedBody)
   })
 
   it('lists pending forms scoped to a directory', async () => {
-    const form = {
-      id: 'form_1',
-      sessionID: 'ses_1',
-      title: 'Continue?',
-      fields: [{ key: 'q0', type: 'string' }],
-    }
-    fetchMock.mockResolvedValue(jsonResponse({ location: { directory: '/repo' }, data: [form] }))
+    const form = { id: 'form_1', sessionID: 'ses_1', title: 'Continue?', fields: [{ key: 'q0', type: 'string' }] }
+    const fetchFake = installRoutes([
+      respondTo('GET', '/api/opencode/api/form', { location: { directory: '/repo' }, data: [form] }),
+    ])
 
-    const forms = await listPendingForms('/repo')
-
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/form?location%5Bdirectory%5D=%2Frepo')
-    expect(lastRequest().init.method).toBe('GET')
-    expect(forms).toEqual([form])
+    await expect(listPendingForms('/repo')).resolves.toEqual([form])
+    expect(fetchFake.lastRequest('GET', '/api/opencode/api/form')?.searchParams.toString()).toBe(
+      'location%5Bdirectory%5D=%2Frepo',
+    )
   })
 
   it('replies to a form with an answer keyed by field', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'POST', path: `${sessionUrl}/ses_1/form/form_1/reply`, respond: () => ({ status: 204 }) },
+    ])
 
     await replyForm('ses_1', 'form_1', { q0: 'Yes' })
 
-    expect(lastRequest().url).toBe(
-      'http://localhost/api/opencode/api/session/ses_1/form/form_1/reply',
-    )
-    expect(lastRequest().init.method).toBe('POST')
-    expect(lastRequest().init.body).toBe(JSON.stringify({ answer: { q0: 'Yes' } }))
+    expect(fetchFake.lastRequest('POST', `${sessionUrl}/ses_1/form/form_1/reply`)?.body).toEqual({
+      answer: { q0: 'Yes' },
+    })
   })
 
   it('cancels a form', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchFake = installRoutes([
+      { method: 'DELETE', path: `${sessionUrl}/ses_1/form/form_1`, respond: () => ({ status: 204 }) },
+    ])
 
     await cancelForm('ses_1', 'form_1')
 
-    expect(lastRequest().url).toBe('http://localhost/api/opencode/api/session/ses_1/form/form_1')
-    expect(lastRequest().init.method).toBe('DELETE')
+    expect(fetchFake.findRequests('DELETE', `${sessionUrl}/ses_1/form/form_1`)).toHaveLength(1)
   })
 })
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 interface UserBashStore {
-  userBashCommands: Map<string, number> // command -> timestamp
+  userBashCommands: Map<string, number>
   addUserBashCommand: (command: string) => void
 }
 

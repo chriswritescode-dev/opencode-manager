@@ -27,6 +27,13 @@ function fetchReturning(...responses: Array<Response | Error>) {
 
 const noWait = vi.fn(async () => undefined)
 
+async function expectProbeFailure(probe: Promise<unknown>): Promise<Error> {
+  const failure = await probe.then(() => null, (cause) => cause)
+  expect(failure).toBeInstanceOf(Error)
+  if (!(failure instanceof Error)) throw new Error('expected warmRepoProxy to fail with an Error')
+  return failure
+}
+
 describe('repoProxyUrl', () => {
   it('builds the repo-scoped proxy url', () => {
     expect(repoProxyUrl(managerUrl, 42)).toBe('https://manager.example.com/api/opencode-proxy/repos/42')
@@ -58,10 +65,10 @@ describe('warmRepoProxy', () => {
   it('fails with an upgrade message when the Manager has no repo proxy route', async () => {
     const fetchMock = fetchReturning(new Response('Not Found', { status: 404 }))
 
-    const error = await warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }).catch((err: unknown) => err)
+    const error = await expectProbeFailure(warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }))
 
     expect(error).toBeInstanceOf(ManagerTooOldError)
-    expect((error as Error).message).toBe(
+    expect(error.message).toBe(
       `OpenCode Manager at ${managerUrl} is too old for ocm ${packageJson.version}; upgrade the Manager to >= ${MIN_MANAGER_VERSION}`,
     )
     expect(MIN_MANAGER_VERSION).toBe('0.19.0')
@@ -78,10 +85,10 @@ describe('warmRepoProxy', () => {
     const fetchMock = fetchReturning(new Error('ECONNRESET'), new Response('', { status: 502 }), new Response('', { status: 503 }))
     const wait = vi.fn(async () => undefined)
 
-    const error = await warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait }).catch((err: unknown) => err)
+    const error = await expectProbeFailure(warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait }))
 
     expect(error).toBeInstanceOf(RepoProxyResponseError)
-    expect((error as Error).message).toContain('HTTP 503')
+    expect(error.message).toContain('HTTP 503')
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(wait.mock.calls).toEqual([[500], [1000]])
   })
@@ -89,21 +96,21 @@ describe('warmRepoProxy', () => {
   it('reports the status and body of a non-OK response', async () => {
     const fetchMock = fetchReturning(new Response('proxy exploded', { status: 500 }))
 
-    const error = await warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait, attempts: 1 }).catch((err: unknown) => err)
+    const error = await expectProbeFailure(warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait, attempts: 1 }))
 
     expect(error).toBeInstanceOf(RepoProxyResponseError)
-    expect((error as Error).message).toContain('HTTP 500')
-    expect((error as Error).message).toContain('proxy exploded')
+    expect(error.message).toContain('HTTP 500')
+    expect(error.message).toContain('proxy exploded')
   })
 
   it('reports an invalid manager token on 401 without retrying', async () => {
     const fetchMock = fetchReturning(new Response('Unauthorized', { status: 401 }))
 
-    const error = await warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }).catch((err: unknown) => err)
+    const error = await expectProbeFailure(warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }))
 
     expect(error).toBeInstanceOf(ManagerTokenInvalidError)
-    expect((error as Error).message).toContain('Settings -> Manager Internal Token')
-    expect((error as Error).message).toContain(`ocm login ${managerUrl}`)
+    expect(error.message).toContain('Settings -> Manager Internal Token')
+    expect(error.message).toContain(`ocm login ${managerUrl}`)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -111,11 +118,12 @@ describe('warmRepoProxy', () => {
     const cause = new Error('connect ECONNREFUSED')
     const fetchMock = fetchReturning(cause, cause, cause)
 
-    const error = await warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }).catch((err: unknown) => err)
+    const error = await expectProbeFailure(warmRepoProxy(managerUrl, 'tok', 42, { fetch: fetchMock, wait: noWait }))
 
     expect(error).toBeInstanceOf(RepoProxyUnreachableError)
-    expect((error as Error).message).toContain('connect ECONNREFUSED')
-    expect((error as Error).cause).toBe(cause)
+    if (!(error instanceof RepoProxyUnreachableError)) throw new Error('expected a RepoProxyUnreachableError')
+    expect(error.message).toContain('connect ECONNREFUSED')
+    expect(error.cause).toBe(cause)
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 

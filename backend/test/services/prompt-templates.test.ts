@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import type { Database } from 'bun:sqlite'
+import type { CreatePromptTemplateRequest } from '@opencode-manager/shared/schemas'
+import { createTestDatabase } from '../helpers/test-database'
 import { PromptTemplateService, PromptTemplateServiceError } from '../../src/services/prompt-templates'
 
-function createTemplateInput(overrides: Record<string, unknown> = {}) {
+function createTemplateInput(overrides: Partial<CreatePromptTemplateRequest> = {}): CreatePromptTemplateRequest {
   return {
     title: 'Daily standup',
     category: 'standup',
@@ -17,13 +17,23 @@ function createTemplateInput(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function expectTemplateNotFound(run: () => void): void {
+  try {
+    run()
+    expect.unreachable('expected a PromptTemplateServiceError')
+  } catch (error) {
+    if (!(error instanceof PromptTemplateServiceError)) throw error
+    expect(error.statusCode).toBe(404)
+    expect(error.message).toBe('Template not found')
+  }
+}
+
 describe('PromptTemplateService', () => {
   let db: Database
   let service: PromptTemplateService
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
     service = new PromptTemplateService(db)
   })
 
@@ -39,15 +49,7 @@ describe('PromptTemplateService', () => {
   })
 
   it('throws a 404 service error when a template is missing', () => {
-    expect(() => service.getById(999)).toThrow(PromptTemplateServiceError)
-
-    try {
-      service.getById(999)
-    } catch (error) {
-      expect(error).toBeInstanceOf(PromptTemplateServiceError)
-      expect((error as PromptTemplateServiceError).statusCode).toBe(404)
-      expect((error as Error).message).toBe('Template not found')
-    }
+    expectTemplateNotFound(() => service.getById(999))
   })
 
   it('updates an existing template', () => {
@@ -60,13 +62,7 @@ describe('PromptTemplateService', () => {
   })
 
   it('throws a 404 service error when updating a missing template', () => {
-    try {
-      service.update(999, { title: 'Missing' })
-      throw new Error('expected update to throw')
-    } catch (error) {
-      expect(error).toBeInstanceOf(PromptTemplateServiceError)
-      expect((error as PromptTemplateServiceError).statusCode).toBe(404)
-    }
+    expectTemplateNotFound(() => service.update(999, { title: 'Missing' }))
   })
 
   it('deletes an existing template', () => {
@@ -78,12 +74,6 @@ describe('PromptTemplateService', () => {
   })
 
   it('throws a 404 service error when deleting a missing template', () => {
-    try {
-      service.delete(999)
-      throw new Error('expected delete to throw')
-    } catch (error) {
-      expect(error).toBeInstanceOf(PromptTemplateServiceError)
-      expect((error as PromptTemplateServiceError).statusCode).toBe(404)
-    }
+    expectTemplateNotFound(() => service.delete(999))
   })
 })

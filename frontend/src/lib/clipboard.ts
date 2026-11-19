@@ -16,7 +16,7 @@ async function copyViaExecCommand(text: string): Promise<boolean> {
   }
 }
 
-async function attemptCopy(attempt: () => Promise<unknown>): Promise<boolean> {
+async function attemptCopy(attempt: () => Promise<void>): Promise<boolean> {
   try {
     await attempt()
     return true
@@ -26,7 +26,7 @@ async function attemptCopy(attempt: () => Promise<unknown>): Promise<boolean> {
 }
 
 export async function copyTextToClipboard(content: string | Promise<string>): Promise<boolean> {
-  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+  if ('ClipboardItem' in globalThis && navigator.clipboard?.write) {
     const copied = await attemptCopy(() => {
       const item = new ClipboardItem({
         'text/plain': Promise.resolve(content).then(

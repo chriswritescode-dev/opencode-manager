@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -12,8 +13,11 @@ import { settingsApi } from '@/api/settings'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@/api/fetchWrapper'
 import { toast } from 'sonner'
+import { SkillScopeSchema } from '@opencode-manager/shared/schemas'
 import type { SkillScope } from '@opencode-manager/shared'
 import type { Repo } from '@/api/types'
+
+const skillSourceTypeSchema = z.enum(['github', 'upload'])
 
 interface SkillInstallDialogProps {
   open: boolean
@@ -130,7 +134,10 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
 
         <div className="flex-1 overflow-y-auto p-2 sm:p-4">
           <div className="space-y-4">
-            <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'github' | 'upload')}>
+            <Tabs value={sourceType} onValueChange={(v) => {
+              const parsedSource = skillSourceTypeSchema.safeParse(v)
+              if (parsedSource.success) setSourceType(parsedSource.data)
+            }}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="github">GitHub URL</TabsTrigger>
                 <TabsTrigger value="upload">Upload</TabsTrigger>
@@ -161,7 +168,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
                   <Input
                     type="file"
                     accept=".md,text/markdown"
-                    {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+                    {...{ webkitdirectory: '', directory: '' }}
                     onChange={handleFileChange}
                   />
                 </div>
@@ -171,7 +178,10 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
 
             <div className="space-y-2">
               <Label>Scope</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as SkillScope)}>
+              <Select value={scope} onValueChange={(v) => {
+                const parsedScope = SkillScopeSchema.safeParse(v)
+                if (parsedScope.success) setScope(parsedScope.data)
+              }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select scope" />
                 </SelectTrigger>

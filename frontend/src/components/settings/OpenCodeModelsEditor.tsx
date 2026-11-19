@@ -24,11 +24,6 @@ interface EditingModel {
   model: OpenCodeProviderModelConfig
 }
 
-/**
- * Renders configured provider models grouped by provider, with an empty state and dialogs for
- * creating and editing models. Submits the affected providers as a patch map so callers can apply
- * the changes in one config update.
- */
 export function OpenCodeModelsEditor({ providers, onSave }: OpenCodeModelsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<EditingModel | null>(null)
@@ -48,11 +43,6 @@ export function OpenCodeModelsEditor({ providers, onSave }: OpenCodeModelsEditor
     0
   )
 
-  /**
-   * Builds a provider patch map for the submitted model, adding any new provider
-   * and nulling the previous provider or model key when an edit moved or renamed
-   * the entry, then hands the map to `onSave` and closes the dialog state.
-   */
   const handleModelSubmit = (
     providerId: string,
     modelId: string,
@@ -63,17 +53,13 @@ export function OpenCodeModelsEditor({ providers, onSave }: OpenCodeModelsEditor
   ) => {
     const patches: Record<string, OpenCodeProviderPatch> = {}
 
-    /**
-     * Accumulates a provider patch into `patches`, starting from a copy of the existing provider
-     * config so model maps merge with prior entries instead of replacing them.
-     */
     const addProviderPatch = (id: string, patch: OpenCodeProviderPatch) => {
       const existing: OpenCodeProviderPatch = patches[id]
         ?? (providers[id] ? { ...providers[id], models: { ...providers[id].models } } : {})
       const models = existing.models || patch.models
         ? { ...existing.models, ...patch.models }
         : undefined
-      patches[id] = { ...existing, ...patch, ...(models ? { models } : {}) }
+      patches[id] = { ...existing, ...patch, models }
     }
 
     if (newProvider) {
@@ -93,21 +79,17 @@ export function OpenCodeModelsEditor({ providers, onSave }: OpenCodeModelsEditor
       addProviderPatch(originalProviderId, { models: { [originalModelId]: null } })
     }
 
-    const models: Record<string, OpenCodeProviderModelPatch | null> = { [modelId]: model }
+    const models = new Map<string, OpenCodeProviderModelPatch | null>([[modelId, model]])
     if (originalModelId && originalModelId !== modelId && originalProviderId === providerId) {
-      models[originalModelId] = null
+      models.set(originalModelId, null)
     }
-    addProviderPatch(providerId, { models })
+    addProviderPatch(providerId, { models: Object.fromEntries(models) })
 
     onSave(patches)
     setEditingModel(null)
     setIsCreateDialogOpen(false)
   }
 
-  /**
-   * Saves the provider with the model's key set to null so the entry is removed
-   * from the config; unknown providers are ignored.
-   */
   const deleteModel = (providerId: string, modelId: string) => {
     const provider = providers[providerId]
     if (!provider) return

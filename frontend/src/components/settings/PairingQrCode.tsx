@@ -3,31 +3,42 @@ import { cn } from '@/lib/utils'
 
 type RenderSvg = (typeof import('uqr'))['renderSVG']
 
+async function loadQrRenderer(): Promise<RenderSvg> {
+  const module = await import('uqr')
+  return module.renderSVG
+}
+
 interface PairingQrCodeProps {
   value: string
   label: string
   blurred?: boolean
+  loadRenderer?: () => Promise<RenderSvg>
 }
 
-export function PairingQrCode({ value, label, blurred = false }: PairingQrCodeProps) {
+export function PairingQrCode({
+  value,
+  label,
+  blurred = false,
+  loadRenderer = loadQrRenderer,
+}: PairingQrCodeProps) {
   const [renderSvg, setRenderSvg] = useState<RenderSvg | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     let active = true
-    const loadRenderer = async () => {
+    const load = async () => {
       try {
-        const module = await import('uqr')
-        if (active) setRenderSvg(() => module.renderSVG)
+        const loadedRenderer = await loadRenderer()
+        if (active) setRenderSvg(() => loadedRenderer)
       } catch {
         if (active) setLoadFailed(true)
       }
     }
-    void loadRenderer()
+    void load()
     return () => {
       active = false
     }
-  }, [])
+  }, [loadRenderer])
 
   const source = useMemo(() => {
     if (!renderSvg) return null

@@ -2,18 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { logger } from './logger'
 import { readManagerLogEntries, resetManagerLogBuffer } from './log-buffer'
 
-type ConsoleSpy = ReturnType<typeof vi.spyOn>
+function captureConsole(method: 'warn' | 'debug'): string[] {
+  const lines: string[] = []
+  vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+    lines.push(String(args[0]))
+  })
+  return lines
+}
 
 describe('logger', () => {
-  let warnSpy: ConsoleSpy
-  let debugSpy: ConsoleSpy
-
   beforeEach(() => {
     resetManagerLogBuffer()
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
   })
 
   it('info routes into the buffer with level info and source manager', () => {
@@ -39,19 +40,23 @@ describe('logger', () => {
   })
 
   it('debug records nothing and writes nothing when ENV.LOGGING.DEBUG is false', () => {
+    const debugLines = captureConsole('debug')
+
     logger.debug('quiet')
 
-    expect(debugSpy).not.toHaveBeenCalled()
+    expect(debugLines).toHaveLength(0)
     const { entries, latestSeq } = readManagerLogEntries({})
     expect(entries).toHaveLength(0)
     expect(latestSeq).toBe(0)
   })
 
-  it('warn calls console.warn exactly once with prefixed line containing the message', () => {
+  it('warn writes exactly one console line with the level prefix and message', () => {
+    const warnLines = captureConsole('warn')
+
     logger.warn('careful')
 
-    expect(warnSpy).toHaveBeenCalledTimes(1)
-    const line = warnSpy.mock.calls[0]?.[0] as string
+    expect(warnLines).toHaveLength(1)
+    const line = warnLines[0] ?? ''
     expect(line).toContain('[WARN]')
     expect(line).toContain('careful')
     expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}T.*\] \[WARN\] careful$/)

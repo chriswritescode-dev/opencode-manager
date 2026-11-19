@@ -1,19 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { secretsGlobalScopeIndexMigration } from '../../src/db/migrations/202610181410-secrets-global-scope-index'
 import { SecretsService } from '../../src/services/secrets'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { selectRow, selectRows } from '../../src/db/rows'
 
 const SECRETS_TABLE_MIGRATION_ID = '202610181400-secrets'
 const SCOPE_INDEX_MIGRATION_ID = '202610181410-secrets-global-scope-index'
 
-function scopeIndexSql(db: Database): string {
-  const row = db
-    .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_secrets_scope'")
-    .get() as { sql: string } | null
+const IndexSqlRowSchema = z.object({ sql: z.string() })
+const SecretScopeRowSchema = z.object({ repo_id: z.number().nullable(), name: z.string(), updated_at: z.number() })
+const AppliedMigrationRowSchema = z.object({ id: z.string() })
 
+function scopeIndexSql(db: Database): string {
+  const row = selectRow(db, IndexSqlRowSchema, "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_secrets_scope'")
   return row?.sql ?? ''
 }
 
@@ -60,8 +63,8 @@ describe('secrets global scope index migration', () => {
   it('applies the scope index migration on a fresh database', () => {
     migrate(db, allMigrations)
 
-    const applied = db.prepare('SELECT id FROM applied_migrations WHERE id = ?').get(SCOPE_INDEX_MIGRATION_ID)
-    expect(applied).toBeTruthy()
+    const applied = selectRow(db, AppliedMigrationRowSchema, 'SELECT id FROM applied_migrations WHERE id = ?', SCOPE_INDEX_MIGRATION_ID)
+    expect(applied).toEqual({ id: SCOPE_INDEX_MIGRATION_ID })
     expect(scopeIndexSql(db)).toContain('COALESCE(repo_id, -1)')
   })
 
@@ -84,7 +87,7 @@ describe('secrets global scope index migration', () => {
 
     expect(scopeIndexSql(db)).toContain('COALESCE(repo_id, 0)')
     expect(
-      db.prepare('SELECT repo_id, name, updated_at FROM secrets').all(),
+      selectRows(db, SecretScopeRowSchema, 'SELECT repo_id, name, updated_at FROM secrets'),
     ).toEqual([{ repo_id: ASSISTANT_REPO_ID, name: 'TOKEN', updated_at: 2_000 }])
     expect(service.resolveValues(ASSISTANT_REPO_ID, null).secrets.TOKEN).toBe('assistant-token')
   })

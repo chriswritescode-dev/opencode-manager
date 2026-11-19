@@ -26,6 +26,7 @@ import {
 interface ModelInfoInput {
   providerID: string
   id: string
+  modelID?: string
   name?: string
   enabled?: boolean
   status?: ModelInfo['status']
@@ -38,6 +39,7 @@ function modelInfo(input: ModelInfoInput): ModelInfo {
   return {
     providerID: input.providerID,
     id: input.id,
+    modelID: input.modelID ?? input.id,
     name: input.name ?? input.id,
     enabled: input.enabled ?? true,
     status: input.status ?? 'active',
@@ -48,7 +50,9 @@ function modelInfo(input: ModelInfoInput): ModelInfo {
       output: cost.input,
       cache: { read: 0, write: 0 },
     })),
-  } as ModelInfo
+    capabilities: { tools: true, input: ['text'], output: ['text'] },
+    limit: { context: 0, output: 0 },
+  }
 }
 
 describe('OpenCode model preference helpers', () => {
@@ -410,7 +414,7 @@ describe('isSameModelRef', () => {
 })
 
 describe('findModelInfo', () => {
-  const entry = { ...modelInfo({ providerID: 'openai', id: 'gpt-5' }), modelID: 'gpt-5-backing' } as ModelInfo
+  const entry = modelInfo({ providerID: 'openai', id: 'gpt-5', modelID: 'gpt-5-backing' })
 
   it('matches the OpenCode key, not the backing model id', () => {
     expect(findModelInfo([entry], { providerID: 'openai', modelID: 'gpt-5' })).toBe(entry)

@@ -3,6 +3,33 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CodeEditor } from './code-editor'
 
+function requireHtmlElement(root: ParentNode, selector: string): HTMLElement {
+  const element = root.querySelector(selector)
+  if (!(element instanceof HTMLElement)) throw new Error(`Missing element: ${selector}`)
+  return element
+}
+
+function editorTextarea(): HTMLTextAreaElement {
+  const element = screen.getByLabelText('config')
+  if (!(element instanceof HTMLTextAreaElement)) throw new Error('Expected the editor textarea')
+  return element
+}
+
+function editorMirror(container: HTMLElement): HTMLElement {
+  return requireHtmlElement(container, '[data-editor-mirror]')
+}
+
+function markRect(top: number, height: number): DOMRect {
+  return new DOMRect(0, top, 0, height)
+}
+
+function patchRect(target: Element, value: DOMRect) {
+  Object.defineProperty(target, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => value,
+  })
+}
+
 describe('CodeEditor', () => {
   it('renders a line number for every logical line', () => {
     render(<CodeEditor value={'{\n  "a": 1\n}'} onChange={vi.fn()} ariaLabel="config" />)
@@ -26,8 +53,8 @@ describe('CodeEditor', () => {
 
   it('applies identical font, wrap and tab metrics to the textarea and the mirror', () => {
     const { container } = render(<CodeEditor value={'a'} onChange={vi.fn()} ariaLabel="config" />)
-    const textarea = screen.getByLabelText('config')
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
+    const textarea = editorTextarea()
+    const mirror = editorMirror(container)
     for (const token of ['font-mono', 'text-[16px]', 'min-[769px]:text-sm', 'leading-6', '[tab-size:2]', 'whitespace-pre-wrap', '[overflow-wrap:anywhere]', 'py-2', 'pr-3', 'pl-10', '[scrollbar-gutter:stable]']) {
       expect(textarea.className).toContain(token)
       expect(mirror.className).toContain(token)
@@ -36,13 +63,13 @@ describe('CodeEditor', () => {
 
   it('keeps the mirror hidden from assistive tech', () => {
     const { container } = render(<CodeEditor value={'a'} onChange={vi.fn()} ariaLabel="config" />)
-    expect(container.querySelector('[data-editor-mirror]')).toHaveAttribute('aria-hidden', 'true')
+    expect(editorMirror(container)).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('mirrors textarea scrolling', () => {
     const { container } = render(<CodeEditor value={'a\nb\nc'} onChange={vi.fn()} ariaLabel="config" />)
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
+    const textarea = editorTextarea()
+    const mirror = editorMirror(container)
     textarea.scrollTop = 120
     textarea.dispatchEvent(new Event('scroll', { bubbles: true }))
     expect(mirror.scrollTop).toBe(120)
@@ -82,13 +109,13 @@ describe('CodeEditor', () => {
 
   it('hides the textarea glyphs only while highlights are active', () => {
     const { container, rerender } = render(<CodeEditor value={HIGHLIGHT_VALUE} onChange={vi.fn()} ariaLabel="config" />)
-    expect(screen.getByLabelText('config').className).not.toContain('text-transparent')
-    expect((container.querySelector('[data-editor-mirror]') as HTMLElement).className).toContain('text-transparent')
+    expect(editorTextarea().className).not.toContain('text-transparent')
+    expect(editorMirror(container).className).toContain('text-transparent')
 
     rerender(<CodeEditor value={HIGHLIGHT_VALUE} onChange={vi.fn()} ariaLabel="config"
       highlights={[{ startIndex: 14, endIndex: 20 }]} activeHighlightIndex={0} />)
-    expect(screen.getByLabelText('config').className).toContain('text-transparent')
-    expect((container.querySelector('[data-editor-mirror]') as HTMLElement).className).not.toContain('text-transparent')
+    expect(editorTextarea().className).toContain('text-transparent')
+    expect(editorMirror(container).className).not.toContain('text-transparent')
   })
 
   it('splits a highlight that spans a newline across both rows', () => {
@@ -127,47 +154,26 @@ describe('CodeEditor', () => {
 
   it('flags the active line number', () => {
     const { container } = render(<CodeEditor value={'a\nb\nc'} onChange={vi.fn()} ariaLabel="config" activeLine={2} />)
-    const number = container.querySelector('[data-line="2"] [data-line-number]') as HTMLElement
+    const number = requireHtmlElement(container, '[data-line="2"] [data-line-number]')
     expect(number.className).toContain('text-destructive')
   })
 
   it('scrolls the active line into view', () => {
     const longValue = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
     const { container, rerender } = render(<CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config" />)
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    const textarea = editorTextarea()
     Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 960 })
-    const row = container.querySelector('[data-line="30"]') as HTMLElement
+    const row = requireHtmlElement(container, '[data-line="30"]')
     Object.defineProperty(row, 'offsetTop', { configurable: true, value: 700 })
     Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 24 })
 
     rerender(<CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config" activeLine={30} />)
 
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
+    const mirror = editorMirror(container)
     expect(textarea.scrollTop).toBe(612)
     expect(mirror.scrollTop).toBe(612)
   })
-
-  function rect(top: number, height: number): DOMRect {
-    return {
-      top,
-      bottom: top + height,
-      left: 0,
-      right: 0,
-      width: 0,
-      height,
-      x: 0,
-      y: top,
-      toJSON: () => ({}),
-    } as DOMRect
-  }
-
-  function patchRect(target: Element, value: DOMRect) {
-    Object.defineProperty(target, 'getBoundingClientRect', {
-      configurable: true,
-      value: () => value,
-    })
-  }
 
   it('reveals the active match at the bottom of a tall wrapped line', () => {
     const startMatch = 'needleStart'
@@ -185,13 +191,13 @@ describe('CodeEditor', () => {
           { startIndex: endIdx, endIndex: endEnd },
         ]} activeHighlightIndex={1} />,
     )
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    const textarea = editorTextarea()
     Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 1600 })
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
-    patchRect(mirror, rect(0, 1600))
+    const mirror = editorMirror(container)
+    patchRect(mirror, markRect(0, 1600))
     const marks = container.querySelectorAll('mark')
-    patchRect(marks[1], rect(1500, 24))
+    patchRect(marks[1], markRect(1500, 24))
 
     rerender(
       <CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config"
@@ -220,13 +226,13 @@ describe('CodeEditor', () => {
           { startIndex: endIdx, endIndex: endEnd },
         ]} activeHighlightIndex={0} />,
     )
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    const textarea = editorTextarea()
     Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 1600 })
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
-    patchRect(mirror, rect(0, 1600))
+    const mirror = editorMirror(container)
+    patchRect(mirror, markRect(0, 1600))
     const marks = container.querySelectorAll('mark')
-    patchRect(marks[0], rect(0, 24))
+    patchRect(marks[0], markRect(0, 24))
 
     rerender(
       <CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config"
@@ -248,13 +254,13 @@ describe('CodeEditor', () => {
       <CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config"
         highlights={[{ startIndex: startIdx, endIndex: startEnd }]} activeHighlightIndex={0} />,
     )
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    const textarea = editorTextarea()
     Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 960 })
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
-    patchRect(mirror, rect(0, 0))
+    const mirror = editorMirror(container)
+    patchRect(mirror, markRect(0, 0))
     const marks = container.querySelectorAll('mark')
-    patchRect(marks[0], rect(0, 0))
+    patchRect(marks[0], markRect(0, 0))
 
     rerender(
       <CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config"
@@ -270,12 +276,12 @@ describe('CodeEditor', () => {
       <CodeEditor value={value} onChange={vi.fn()} ariaLabel="config"
         highlights={[{ startIndex: 0, endIndex: 6 }]} activeHighlightIndex={0} />,
     )
-    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    const textarea = editorTextarea()
     Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 960 })
-    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
-    patchRect(mirror, rect(0, 960))
-    patchRect(container.querySelectorAll('mark')[0], rect(0, 24))
+    const mirror = editorMirror(container)
+    patchRect(mirror, markRect(0, 960))
+    patchRect(requireHtmlElement(container, 'mark'), markRect(0, 24))
 
     textarea.scrollTop = 500
     mirror.scrollTop = 500

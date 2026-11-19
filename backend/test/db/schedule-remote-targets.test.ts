@@ -1,23 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach } from 'vitest'
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import migration from '../../src/db/migrations/202610181320-remote-schedule-targets'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-}
+import { selectRow, selectRows, selectTableColumns } from '../../src/db/rows'
+import { createTestDatabase } from '../helpers/test-database'
 
 const MIGRATION_ID = '202610181320-remote-schedule-targets'
 
-function columns(db: Database, table: string): ColumnInfo[] {
-  return db.prepare(`PRAGMA table_info(${table})`).all() as ColumnInfo[]
-}
+const ScheduleJobTargetRowSchema = z.object({
+  repo_id: z.number().nullable(),
+  server_id: z.string(),
+  directory: z.string().nullable(),
+  name: z.string(),
+  workspace_mode: z.string().nullable(),
+})
+
+const ScheduleRunTargetRowSchema = z.object({
+  repo_id: z.number().nullable(),
+  server_id: z.string(),
+  session_id: z.string().nullable(),
+  status: z.string(),
+})
+
+const RowCountSchema = z.object({ count: z.number() })
+
+const ForeignKeyViolationSchema = z.object({
+  table: z.string(),
+  rowid: z.number(),
+  parent: z.string(),
+  fkid: z.number(),
+})
 
 describe('remote schedule target migration', () => {
+  let db: Database
+
+  afterEach(() => {
+    db.close()
+  })
+
   it('preserves jobs and runs while making repo_id nullable', () => {
-    const db = new Database(':memory:')
+    db = new Database(':memory:')
     db.exec('PRAGMA foreign_keys = ON')
     migrate(db, allMigrations.filter((entry) => entry.id !== MIGRATION_ID))
 
@@ -37,17 +61,22 @@ describe('remote schedule target migration', () => {
 
     migration.up(db)
 
-    const jobColumns = columns(db, 'schedule_jobs')
+    const jobColumns = selectTableColumns(db, 'schedule_jobs')
     expect(jobColumns.find((column) => column.name === 'repo_id')?.notnull).toBe(0)
     expect(jobColumns.find((column) => column.name === 'server_id')?.notnull).toBe(1)
     expect(jobColumns.some((column) => column.name === 'directory')).toBe(true)
 
-    const runColumns = columns(db, 'schedule_runs')
+    const runColumns = selectTableColumns(db, 'schedule_runs')
     expect(runColumns.find((column) => column.name === 'repo_id')?.notnull).toBe(0)
     expect(runColumns.some((column) => column.name === 'server_id')).toBe(true)
 
-    const job = db.prepare('SELECT * FROM schedule_jobs WHERE id = 7').get() as Record<string, unknown>
-    expect(job).toMatchObject({
+    expect(
+      selectRow(
+        db,
+        ScheduleJobTargetRowSchema,
+        'SELECT repo_id, server_id, directory, name, workspace_mode FROM schedule_jobs WHERE id = 7',
+      ),
+    ).toEqual({
       repo_id: 1,
       server_id: 'local',
       directory: null,
@@ -55,8 +84,13 @@ describe('remote schedule target migration', () => {
       workspace_mode: 'shared-worktree',
     })
 
-    const run = db.prepare('SELECT * FROM schedule_runs WHERE id = 5').get() as Record<string, unknown>
-    expect(run).toMatchObject({ repo_id: 1, server_id: 'local', session_id: 'ses_local', status: 'completed' })
+    expect(
+      selectRow(
+        db,
+        ScheduleRunTargetRowSchema,
+        'SELECT repo_id, server_id, session_id, status FROM schedule_runs WHERE id = 5',
+      ),
+    ).toEqual({ repo_id: 1, server_id: 'local', session_id: 'ses_local', status: 'completed' })
 
     db.prepare(
       `INSERT INTO schedule_jobs (id, repo_id, server_id, directory, name, enabled, schedule_mode, prompt, created_at, updated_at)
@@ -67,13 +101,12 @@ describe('remote schedule target migration', () => {
        VALUES (6, 8, NULL, 'srv_kitchen', 'manual', 'running', ?, ?)`,
     ).run(now, now)
 
-    expect(db.prepare('SELECT COUNT(*) AS count FROM schedule_runs').get()).toEqual({ count: 2 })
-    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM schedule_runs')).toEqual({ count: 2 })
+    expect(selectRows(db, ForeignKeyViolationSchema, 'PRAGMA foreign_key_check')).toEqual([])
   })
 
   it('is idempotent', () => {
-    const db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
 
     const now = Date.now()
     db.prepare(
@@ -83,7 +116,7 @@ describe('remote schedule target migration', () => {
 
     migration.up(db)
 
-    expect(db.prepare('SELECT COUNT(*) AS count FROM schedule_jobs').get()).toEqual({ count: 1 })
-    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(selectRow(db, RowCountSchema, 'SELECT COUNT(*) AS count FROM schedule_jobs')).toEqual({ count: 1 })
+    expect(selectRows(db, ForeignKeyViolationSchema, 'PRAGMA foreign_key_check')).toEqual([])
   })
 })

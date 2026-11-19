@@ -1,22 +1,30 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useRightEdgeSwipe, useSwipeBack, useSwipeDismiss } from './useMobile'
-import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
+import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
+import { useSwipeNavigation } from '@/contexts/swipe-navigation-context'
+import { createTouchEvent, installWindowSize } from '@/test/browserFakes'
+
+function createElement(): HTMLDivElement {
+  const element = document.createElement('div')
+  document.body.appendChild(element)
+  return element
+}
+
+function removeElement(element: HTMLElement): void {
+  document.body.removeChild(element)
+}
 
 describe('useSwipeBack', () => {
-  const mockOnClose = vi.fn()
-  const mockOnBack = vi.fn()
-  const mockCanBack = vi.fn()
+  const onClose = vi.fn()
+  const onBack = vi.fn()
+  const canBack = vi.fn()
 
   beforeEach(() => {
-    mockOnClose.mockClear()
-    mockOnBack.mockClear()
-    mockCanBack.mockClear()
-    Object.defineProperty(window, 'innerWidth', {
-      writable: true,
-      configurable: true,
-      value: 375,
-    })
+    onClose.mockClear()
+    onBack.mockClear()
+    canBack.mockClear()
+    installWindowSize(375)
   })
 
   afterEach(() => {
@@ -24,136 +32,77 @@ describe('useSwipeBack', () => {
   })
 
   it('calls onClose when swipe completes and canBack is false', () => {
-    mockCanBack.mockReturnValue(false)
-
-    const element = document.createElement('div')
-    document.body.appendChild(element)
+    canBack.mockReturnValue(false)
+    const element = createElement()
 
     const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-        canBack: mockCanBack,
-        onBack: mockOnBack,
-        threshold: 80,
-      })
+      useSwipeBack(onClose, { enabled: true, canBack, onBack, threshold: 80 }),
     )
-
     const cleanup = result.current.bind(element)
 
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 10, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockCanBack).toHaveBeenCalled()
-    expect(mockOnBack).not.toHaveBeenCalled()
-    expect(mockOnClose).toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 10, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 100 }]))
+
+    expect(canBack).toHaveBeenCalled()
+    expect(onBack).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('calls onBack when swipe completes and canBack is true', () => {
-    mockCanBack.mockReturnValue(true)
+    canBack.mockReturnValue(true)
+    const element = createElement()
 
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
     const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-        canBack: mockCanBack,
-        onBack: mockOnBack,
-        threshold: 80,
-      })
+      useSwipeBack(onClose, { enabled: true, canBack, onBack, threshold: 80 }),
     )
-
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 10, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockCanBack).toHaveBeenCalled()
-    expect(mockOnBack).toHaveBeenCalled()
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 10, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 100 }]))
+
+    expect(canBack).toHaveBeenCalled()
+    expect(onBack).toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('does not call onBack when canBack was false at swipe start', () => {
-    mockCanBack.mockReturnValueOnce(false).mockReturnValue(true)
-
-    const element = document.createElement('div')
-    document.body.appendChild(element)
+    canBack.mockReturnValueOnce(false).mockReturnValue(true)
+    const element = createElement()
 
     const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-        canBack: mockCanBack,
-        onBack: mockOnBack,
-        threshold: 80,
-      })
+      useSwipeBack(onClose, { enabled: true, canBack, onBack, threshold: 80 }),
     )
-
     const cleanup = result.current.bind(element)
 
-    element.dispatchEvent(new TouchEvent('touchstart', {
-      touches: [{ clientX: 10, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 100 }] as any,
-    }))
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 10, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 100 }]))
 
-    expect(mockCanBack).toHaveBeenCalledTimes(1)
-    expect(mockOnBack).not.toHaveBeenCalled()
-    expect(mockOnClose).toHaveBeenCalled()
+    expect(canBack).toHaveBeenCalledTimes(1)
+    expect(onBack).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
 
-    cleanup?.()
-    document.body.removeChild(element)
+    cleanup()
+    removeElement(element)
   })
 
   it('falls back to onClose when canBack is not provided', () => {
-    const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const { result } = renderHook(() => useSwipeBack(onClose, { enabled: true, threshold: 80 }))
 
     expect(result.current.bind).toBeDefined()
-    expect(mockOnClose).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('returns swipeStyles for visual feedback', () => {
-    const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-      })
-    )
+    const { result } = renderHook(() => useSwipeBack(onClose, { enabled: true }))
 
     expect(result.current.swipeStyles).toBeDefined()
     expect(result.current.swipeStyles.transform).toBeUndefined()
@@ -161,11 +110,7 @@ describe('useSwipeBack', () => {
   })
 
   it('disables swipe when enabled is false', () => {
-    const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: false,
-      })
-    )
+    const { result } = renderHook(() => useSwipeBack(onClose, { enabled: false }))
 
     expect(result.current.bind).toBeDefined()
   })
@@ -175,130 +120,85 @@ describe('useSwipeBack', () => {
     const addEventListenerSpy = vi.spyOn(element, 'addEventListener')
     const removeEventListenerSpy = vi.spyOn(element, 'removeEventListener')
 
-    const { result } = renderHook(() =>
-      useSwipeBack(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
-
+    const { result } = renderHook(() => useSwipeBack(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
+
     expect(addEventListenerSpy).toHaveBeenCalledWith('touchstart', expect.any(Function), { passive: true })
     expect(addEventListenerSpy).toHaveBeenCalledWith('touchmove', expect.any(Function), { passive: false })
     expect(addEventListenerSpy).toHaveBeenCalledWith('touchend', expect.any(Function), { passive: true })
     expect(addEventListenerSpy).toHaveBeenCalledWith('touchcancel', expect.any(Function), { passive: true })
 
-    if (cleanup) {
-      cleanup()
-      expect(removeEventListenerSpy).toHaveBeenCalled()
-    }
+    cleanup()
+    expect(removeEventListenerSpy).toHaveBeenCalled()
   })
 
   it('suspends route-level swipe-back while active', () => {
-    let swipeNavValue: ReturnType<typeof useSwipeNavigation>
-    
-    const { result, unmount } = renderHook(() => {
-      swipeNavValue = useSwipeNavigation()
-      return useSwipeBack(mockOnClose, {
-        enabled: true,
-      })
-    }, {
-      wrapper: SwipeNavigationProvider,
-    })
+    let swipeNavValue: ReturnType<typeof useSwipeNavigation> | undefined
+
+    const { result, unmount } = renderHook(
+      () => {
+        swipeNavValue = useSwipeNavigation()
+        return useSwipeBack(onClose, { enabled: true })
+      },
+      { wrapper: SwipeNavigationProvider },
+    )
 
     expect(result.current.bind).toBeDefined()
     expect(result.current.swipeStyles).toBeDefined()
     expect(swipeNavValue?.isSuspended()).toBe(true)
-    
+
     unmount()
     expect(swipeNavValue?.isSuspended()).toBe(false)
   })
 })
 
 describe('useRightEdgeSwipe', () => {
-  const mockOnOpen = vi.fn()
+  const onOpen = vi.fn()
 
   beforeEach(() => {
-    mockOnOpen.mockClear()
-    Object.defineProperty(window, 'innerWidth', {
-      writable: true,
-      configurable: true,
-      value: 375,
-    })
+    onOpen.mockClear()
+    installWindowSize(375)
   })
 
   it('opens when swiping left from the right edge', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
+    const element = createElement()
 
-    const { result } = renderHook(() =>
-      useRightEdgeSwipe(mockOnOpen, {
-        enabled: true,
-        edgeWidth: 32,
-        threshold: 72,
-      })
-    )
-
+    const { result } = renderHook(() => useRightEdgeSwipe(onOpen, { enabled: true, edgeWidth: 32, threshold: 72 }))
     const cleanup = result.current.bind(element)
 
-    element.dispatchEvent(new TouchEvent('touchstart', {
-      touches: [{ clientX: 365, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchmove', {
-      touches: [{ clientX: 285, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 285, clientY: 100 }] as any,
-    }))
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 365, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 285, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 285, clientY: 100 }]))
 
-    expect(mockOnOpen).toHaveBeenCalled()
+    expect(onOpen).toHaveBeenCalled()
 
-    cleanup?.()
-    document.body.removeChild(element)
+    cleanup()
+    removeElement(element)
   })
 
   it('ignores swipes that do not start on the right edge', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
+    const element = createElement()
 
-    const { result } = renderHook(() =>
-      useRightEdgeSwipe(mockOnOpen, {
-        enabled: true,
-        edgeWidth: 32,
-        threshold: 72,
-      })
-    )
-
+    const { result } = renderHook(() => useRightEdgeSwipe(onOpen, { enabled: true, edgeWidth: 32, threshold: 72 }))
     const cleanup = result.current.bind(element)
 
-    element.dispatchEvent(new TouchEvent('touchstart', {
-      touches: [{ clientX: 300, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchmove', {
-      touches: [{ clientX: 220, clientY: 100 }] as any,
-    }))
-    element.dispatchEvent(new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 220, clientY: 100 }] as any,
-    }))
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 300, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 220, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 220, clientY: 100 }]))
 
-    expect(mockOnOpen).not.toHaveBeenCalled()
+    expect(onOpen).not.toHaveBeenCalled()
 
-    cleanup?.()
-    document.body.removeChild(element)
+    cleanup()
+    removeElement(element)
   })
 })
 
 describe('useSwipeDismiss', () => {
-  const mockOnClose = vi.fn()
+  const onClose = vi.fn()
 
   beforeEach(() => {
-    mockOnClose.mockClear()
-    Object.defineProperty(window, 'innerWidth', {
-      writable: true,
-      configurable: true,
-      value: 375,
-    })
+    onClose.mockClear()
+    installWindowSize(375)
     vi.useFakeTimers()
   })
 
@@ -308,261 +208,137 @@ describe('useSwipeDismiss', () => {
   })
 
   it('suspends route-level swipe-back while active', () => {
-    let swipeNavValue: ReturnType<typeof useSwipeNavigation>
-    
-    const { unmount } = renderHook(() => {
-      swipeNavValue = useSwipeNavigation()
-      return useSwipeDismiss(mockOnClose, {
-        enabled: true,
-      })
-    }, {
-      wrapper: SwipeNavigationProvider,
-    })
+    let swipeNavValue: ReturnType<typeof useSwipeNavigation> | undefined
+
+    const { unmount } = renderHook(
+      () => {
+        swipeNavValue = useSwipeNavigation()
+        return useSwipeDismiss(onClose, { enabled: true })
+      },
+      { wrapper: SwipeNavigationProvider },
+    )
 
     expect(swipeNavValue?.isSuspended()).toBe(true)
-    
+
     unmount()
     expect(swipeNavValue?.isSuspended()).toBe(false)
   })
 
   it('does not require edge start in vertical mode', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 200, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 200, clientY: 200 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 200, clientY: 200 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 200, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 200, clientY: 200 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 200, clientY: 200 }]))
     vi.advanceTimersByTime(300)
-    
-    expect(mockOnClose).toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    expect(onClose).toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('closes on release past distance threshold', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 190 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 190 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 190 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 190 }]))
     vi.advanceTimersByTime(300)
-    
-    expect(mockOnClose).toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    expect(onClose).toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('closes on release past velocity threshold even if short distance', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    element.dispatchEvent(touchStart)
-    
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
     vi.advanceTimersByTime(50)
-    
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 140 }] as any,
-    })
-    element.dispatchEvent(touchMove)
-    
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 140 }] as any,
-    })
-    element.dispatchEvent(touchEnd)
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 140 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 140 }]))
     vi.advanceTimersByTime(300)
-    
-    expect(mockOnClose).toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    expect(onClose).toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('does NOT close on short slow drag', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    element.dispatchEvent(touchStart)
-    
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
     vi.advanceTimersByTime(500)
-    
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 140 }] as any,
-    })
-    element.dispatchEvent(touchMove)
-    
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 140 }] as any,
-    })
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 140 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 140 }]))
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('does NOT close on upward drag', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 200 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 0 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 0 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 200 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 0 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 0 }]))
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('does NOT close when horizontal swipe dominates', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 250, clientY: 120 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 250, clientY: 120 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 250, clientY: 120 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 250, clientY: 120 }]))
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('disabled when enabled: false', () => {
-    const element = document.createElement('div')
-    document.body.appendChild(element)
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: false,
-        threshold: 80,
-      })
-    )
+    const element = createElement()
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: false, threshold: 80 }))
     const cleanup = result.current.bind(element)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 200 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 200 }] as any,
-    })
-    
-    element.dispatchEvent(touchStart)
-    element.dispatchEvent(touchMove)
-    element.dispatchEvent(touchEnd)
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
-    document.body.removeChild(element)
+
+    element.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
+    element.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 200 }]))
+    element.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 200 }]))
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
+    removeElement(element)
   })
 
   it('does not start drag when touch originates inside scrolled descendant', () => {
@@ -572,39 +348,21 @@ describe('useSwipeDismiss', () => {
     scrollable.style.height = '100px'
     container.appendChild(scrollable)
     document.body.appendChild(container)
-    
+
     Object.defineProperty(scrollable, 'scrollHeight', { value: 200, configurable: true })
     Object.defineProperty(scrollable, 'clientHeight', { value: 100, configurable: true })
     scrollable.scrollTop = 50
-    
-    const { result } = renderHook(() =>
-      useSwipeDismiss(mockOnClose, {
-        enabled: true,
-        threshold: 80,
-      })
-    )
 
+    const { result } = renderHook(() => useSwipeDismiss(onClose, { enabled: true, threshold: 80 }))
     const cleanup = result.current.bind(container)
-    
-    const touchStart = new TouchEvent('touchstart', {
-      touches: [{ clientX: 100, clientY: 100 }] as any,
-    })
-    Object.defineProperty(touchStart, 'target', { value: scrollable })
-    
-    const touchMove = new TouchEvent('touchmove', {
-      touches: [{ clientX: 100, clientY: 200 }] as any,
-    })
-    const touchEnd = new TouchEvent('touchend', {
-      changedTouches: [{ clientX: 100, clientY: 200 }] as any,
-    })
-    
-    scrollable.dispatchEvent(touchStart)
-    scrollable.dispatchEvent(touchMove)
-    scrollable.dispatchEvent(touchEnd)
-    
-    expect(mockOnClose).not.toHaveBeenCalled()
-    
-    if (cleanup) cleanup()
+
+    scrollable.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 100, clientY: 100 }]))
+    scrollable.dispatchEvent(createTouchEvent('touchmove', [{ clientX: 100, clientY: 200 }]))
+    scrollable.dispatchEvent(createTouchEvent('touchend', [], [{ clientX: 100, clientY: 200 }]))
+
+    expect(onClose).not.toHaveBeenCalled()
+
+    cleanup()
     document.body.removeChild(container)
   })
 })

@@ -1,24 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import os from 'os'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { ENV } from '@opencode-manager/shared/config/env'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { SessionSandboxStateSchema } from '@opencode-manager/shared/schemas'
 import { SettingsService } from '../../src/services/settings'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { SessionSandboxService } from '../../src/services/session-sandbox'
 import { parseMemoryMib } from '../../src/services/sandbox/command'
 import { createSessionSandboxRoutes } from '../../src/routes/session-sandbox'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase } from '../helpers/test-database'
 
 const ENV_RESOURCES = { cpus: ENV.SANDBOX.CPUS, memoryMib: parseMemoryMib(ENV.SANDBOX.MEMORY) ?? 0 }
-
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
 
 function createTestApp(
   db: Database,
@@ -48,7 +43,7 @@ describe('session sandbox routes', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
   })
 
   afterEach(() => {
@@ -149,7 +144,7 @@ describe('session sandbox routes', () => {
     })
 
     const getRes = await app.request('/session-sandbox/ses_root')
-    const body = (await getRes.json()) as { sandboxed: boolean }
+    const body = await readJson(getRes, SessionSandboxStateSchema)
     expect(body.sandboxed).toBe(false)
   })
 

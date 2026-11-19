@@ -3,15 +3,13 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useReducer, useEffect } from 'react'
 import { VOICE_MODE_INSTRUCTION_KEY, VOICE_NO_SPEECH_TIMEOUT_MS } from '@opencode-manager/shared/opencode'
 import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
-import type { TTSEndReason } from '@/contexts/tts-context'
+import type { SpeakMessageOptions, TTSContextValue } from '@/contexts/tts-context'
 import type { SttEndOfSpeechReason } from '@/lib/webSpeechRecognizer'
+import type { StartRecordingOptions } from '@/hooks/useSTT'
 import { useVoiceConversation } from './useVoiceConversation'
-import type { UseVoiceConversationInput } from './useVoiceConversation'
+import type { UseVoiceConversationInput, VoiceConversationCollaborators } from './useVoiceConversation'
 
-interface MockStartOptions {
-  endpointing?: { pauseMs: number; noSpeechTimeoutMs: number }
-  onEndOfSpeech?: (reason: SttEndOfSpeechReason, finalText: string) => void
-}
+type ListSequence = () => Promise<string[]>
 
 interface MockSttValues {
   isRecording: boolean
@@ -28,34 +26,30 @@ interface MockSttValues {
   state: 'idle' | 'listening' | 'processing' | 'error'
 }
 
-const harness = vi.hoisted(() => ({
-  useStt: vi.fn(),
-  useTts: vi.fn(),
-  putSessionInstruction: vi.fn(),
-  removeSessionInstruction: vi.fn(),
-  listSessionInstructionKeys: vi.fn(),
-  startRecording: vi.fn(),
-  stopRecording: vi.fn(),
-  abortRecording: vi.fn(),
-  speakMessage: vi.fn(),
-  ttsStop: vi.fn(),
-  ttsUnlock: vi.fn(),
-  ttsPause: vi.fn(),
-  ttsResume: vi.fn(),
-  sendTurn: vi.fn(),
-  interrupt: vi.fn(),
-  onEditInTextBox: vi.fn(),
-}))
+const harness = {
+  putSessionInstruction: vi.fn<(sessionID: string, key: string, value: string, serverId?: string) => Promise<void>>(),
+  removeSessionInstruction: vi.fn<(sessionID: string, key: string, serverId?: string) => Promise<void>>(),
+  listSessionInstructionKeys: vi.fn<ListSequence>(),
+  startRecording: vi.fn<(options?: StartRecordingOptions) => Promise<boolean>>(),
+  stopRecording: vi.fn<() => void>(),
+  abortRecording: vi.fn<() => void>(),
+  speakMessage: vi.fn<TTSContextValue['speakMessage']>(),
+  ttsStop: vi.fn<() => void>(),
+  ttsUnlock: vi.fn<() => void>(),
+  ttsPause: vi.fn<() => void>(),
+  ttsResume: vi.fn<() => void>(),
+  sendTurn: vi.fn<(text: string, options: { busy: boolean }) => Promise<void>>(),
+  interrupt: vi.fn<() => Promise<void>>(),
+  onEditInTextBox: vi.fn<(text: string) => void>(),
+}
 
-vi.mock('@/hooks/useSTT', () => ({ useSTT: harness.useStt }))
-
-vi.mock('@/hooks/useTTS', () => ({ useTTS: harness.useTts }))
-
-vi.mock('@/api/opencode', () => ({
+const collaborators: Partial<VoiceConversationCollaborators> = {
+  useStt: useMockStt,
+  useTts: () => ttsValue,
   putSessionInstruction: harness.putSessionInstruction,
   removeSessionInstruction: harness.removeSessionInstruction,
   listSessionInstructionKeys: harness.listSessionInstructionKeys,
-}))
+}
 
 const sttListeners = new Set<() => void>()
 
@@ -74,12 +68,21 @@ const sttValue: MockSttValues = {
   state: 'idle',
 }
 
-const ttsValue = {
+const ttsValue: TTSContextValue = {
   isEnabled: true,
   isPlaying: false,
   isPaused: false,
-  error: null as string | null,
+  isLoading: false,
+  isIdle: true,
+  state: 'idle',
+  error: null,
+  currentText: null,
+  originalText: null,
+  activeMessageId: null,
+  speak: vi.fn<TTSContextValue['speak']>(),
+  speakWithConfig: vi.fn<TTSContextValue['speakWithConfig']>(),
   speakMessage: harness.speakMessage,
+  queueMessage: vi.fn<TTSContextValue['queueMessage']>(),
   stop: harness.ttsStop,
   unlock: harness.ttsUnlock,
   pause: harness.ttsPause,
@@ -98,6 +101,8 @@ function useMockStt() {
     startRecording: harness.startRecording,
     stopRecording: harness.stopRecording,
     abortRecording: harness.abortRecording,
+    reset: vi.fn<() => void>(),
+    clear: vi.fn<() => void>(),
   }
 }
 
@@ -108,9 +113,9 @@ function updateStt(patch: Partial<MockSttValues>) {
   })
 }
 
-function lastStartOptions(): MockStartOptions {
+function lastStartOptions(): StartRecordingOptions {
   const calls = harness.startRecording.mock.calls
-  return (calls[calls.length - 1]?.[0] ?? {}) as MockStartOptions
+  return calls[calls.length - 1]?.[0] ?? {}
 }
 
 async function endOfSpeech(reason: SttEndOfSpeechReason, finalText: string) {
@@ -120,10 +125,8 @@ async function endOfSpeech(reason: SttEndOfSpeechReason, finalText: string) {
   })
 }
 
-function speechEndHandler(callIndex = 0): (reason: TTSEndReason, error?: string) => void {
-  const options = harness.speakMessage.mock.calls[callIndex]?.[2] as
-    | { onEnd?: (reason: TTSEndReason, error?: string) => void }
-    | undefined
+function speechEndHandler(callIndex = 0): NonNullable<SpeakMessageOptions['onEnd']> {
+  const options = harness.speakMessage.mock.calls[callIndex]?.[2]
   if (!options?.onEnd) throw new Error('speakMessage was not called with an onEnd handler')
   return options.onEnd
 }
@@ -181,8 +184,6 @@ describe('useVoiceConversation', () => {
       error: null,
     })
     sttListeners.clear()
-    harness.useStt.mockImplementation(useMockStt)
-    harness.useTts.mockImplementation(() => ttsValue)
     harness.putSessionInstruction.mockResolvedValue(undefined)
     harness.removeSessionInstruction.mockResolvedValue(undefined)
     harness.listSessionInstructionKeys.mockResolvedValue([])
@@ -196,7 +197,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('starts listening and opens capture with the pause budget when idle', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -217,7 +218,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('sends a finished utterance and works on the reply', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -233,7 +234,7 @@ describe('useVoiceConversation', () => {
 
   it('reads a completed reply and listens again once it ends', async () => {
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -259,7 +260,7 @@ describe('useVoiceConversation', () => {
   it('marks replies as heard without speaking when text-to-speech is disabled', async () => {
     ttsValue.isEnabled = false
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -276,7 +277,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('records a message while the agent works and sends it as busy', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps({ status: 'busy' }),
     })
 
@@ -299,7 +300,7 @@ describe('useVoiceConversation', () => {
   it('pauses and resumes a reading that is held mid-reply', async () => {
     ttsValue.isPlaying = true
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -327,7 +328,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('removes the session instruction on exit', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -348,7 +349,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('hands the live transcript to the composer when editing in the text box', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -367,7 +368,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('ignores speech-to-text placeholders in the live transcript', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -382,7 +383,7 @@ describe('useVoiceConversation', () => {
 
   it('keeps an external-provider dictation open past the no-speech timeout', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -402,7 +403,7 @@ describe('useVoiceConversation', () => {
 
   it('keeps an external-provider capture running when the session starts a turn', async () => {
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -419,7 +420,7 @@ describe('useVoiceConversation', () => {
 
   it('pauses when the browser provider captures no speech for the timeout', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -438,7 +439,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('pauses without a message when the turn produces no speech', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -457,7 +458,7 @@ describe('useVoiceConversation', () => {
 
   it('pauses with an error when capture cannot start', async () => {
     harness.startRecording.mockResolvedValue(false)
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -469,7 +470,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('shows the specific microphone failure and how to fix it', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -490,7 +491,7 @@ describe('useVoiceConversation', () => {
 
   it('keeps a plain retry for a failure that retrying can clear', async () => {
     harness.sendTurn.mockRejectedValueOnce(new Error('network down'))
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -504,7 +505,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('reports that the microphone is starting until capture begins', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -523,7 +524,7 @@ describe('useVoiceConversation', () => {
   })
 
   it('pauses when speech recognition reports an error while listening', async () => {
-    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props), {
+    const { result } = renderHook((props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators), {
       initialProps: createProps(),
     })
 
@@ -538,7 +539,7 @@ describe('useVoiceConversation', () => {
 
   it('pauses instead of finishing the turn when reading the reply fails', async () => {
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -562,7 +563,7 @@ describe('useVoiceConversation', () => {
 
   it('keeps the failure label plain when the player reports no detail', async () => {
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 
@@ -582,7 +583,7 @@ describe('useVoiceConversation', () => {
 
   it('marks a reply with nothing to read as heard and listens again', async () => {
     const { result, rerender } = renderHook(
-      (props: UseVoiceConversationInput) => useVoiceConversation(props),
+      (props: UseVoiceConversationInput) => useVoiceConversation(props, collaborators),
       { initialProps: createProps() },
     )
 

@@ -1,6 +1,9 @@
 import { useSettings } from '@/hooks/useSettings'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES, isColorThemeId } from '@opencode-manager/shared/themes'
+import { UserPreferencesSchema } from '@opencode-manager/shared/schemas'
+
+const themePreferenceSchema = UserPreferencesSchema.pick({ theme: true })
 import { Loader2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -60,7 +63,10 @@ export function GeneralSettings() {
         </div>
         <Select
           value={preferences?.theme || 'dark'}
-          onValueChange={(value) => updateSettings({ theme: value as 'dark' | 'light' | 'system' })}
+          onValueChange={(value) => {
+            const parsedTheme = themePreferenceSchema.safeParse({ theme: value })
+            if (parsedTheme.success) updateSettings({ theme: parsedTheme.data.theme })
+          }}
         >
           <SelectTrigger id="appearance" className="w-full shrink-0 sm:w-40">
             <SelectValue placeholder="Select a theme" />

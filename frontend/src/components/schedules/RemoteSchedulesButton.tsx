@@ -11,18 +11,12 @@ interface RemoteSchedulesDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-/**
- * The schedule list for one project on a linked OpenCode server, controlled by its caller.
- */
 export function RemoteSchedulesDialog({ serverId, directory, open, onOpenChange }: RemoteSchedulesDialogProps) {
   const target: ScheduleServerTarget = { serverId, directory }
 
   return <ServerSchedulesDialog open={open} onOpenChange={onOpenChange} target={target} />
 }
 
-/**
- * Opens the schedule list for one project on a linked OpenCode server.
- */
 export function RemoteSchedulesButton({ serverId, directory }: { serverId: string; directory: string }) {
   const [open, setOpen] = useState(false)
 

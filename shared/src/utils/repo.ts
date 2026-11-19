@@ -28,14 +28,6 @@ export function buildChatSessionPath(chatId: string, sessionId: string): string 
   return `/chats/${encodeURIComponent(chatId)}/sessions/${encodeURIComponent(sessionId)}`
 }
 
-/**
- * Reads the chat id a workspace chat directory names. The directory must end in
- * `<workspace>/<chats dir>/<chat id>`; a path nested deeper inside a chat, a different parent
- * directory, or a malformed id yields null. Works without Node's `path` module.
- *
- * @param directory Session directory to read.
- * @returns The chat id, or null when the directory is not a chat root.
- */
 export function getChatIdFromDirectory(directory: string): string | null {
   const normalized = trimTrailingChar(trimTrailingChar(directory.trim(), '/'), '\\')
   if (!normalized) return null
@@ -120,15 +112,8 @@ export function getBranchNameError(name: string): string | null {
   return null
 }
 
-/**
- * Who owns a repo worktree: OpenCode, a schedule, or nobody (a plain git worktree).
- */
 export type RepoWorktreeSource = 'opencode' | 'schedule' | 'git'
 
-/**
- * The schedule a worktree belongs to. `runId` is null for the schedule's shared worktree,
- * `inUse` is true while a running run works in it, and `name` is the schedule's display name.
- */
 export interface RepoWorktreeSchedule {
   repoId: number
   jobId: number
@@ -137,10 +122,6 @@ export interface RepoWorktreeSchedule {
   name: string
 }
 
-/**
- * A repository visible from another repository in the same project: the repo itself, a plain
- * git or OpenCode worktree, or a schedule worktree.
- */
 export type RepoSibling = Repo & {
   currentBranch?: string
   worktreeSource?: RepoWorktreeSource

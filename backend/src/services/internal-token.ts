@@ -1,11 +1,14 @@
 import type { Database } from 'bun:sqlite'
 import { randomBytes } from 'node:crypto'
+import { z } from 'zod'
 
 const KEY = 'internal_token'
 
+const tokenRowSchema = z.object({ value: z.string() })
+
 export function getOrCreateInternalToken(db: Database): string {
-  const row = db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(KEY) as { value: string } | undefined
-  if (row) return row.value
+  const row = tokenRowSchema.safeParse(db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(KEY))
+  if (row.success) return row.data.value
   const token = randomBytes(32).toString('hex')
   const now = Date.now()
   db.prepare('INSERT INTO app_secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)').run(KEY, token, now, now)

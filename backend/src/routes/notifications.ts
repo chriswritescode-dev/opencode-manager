@@ -8,8 +8,18 @@ interface NotificationRouteVariables {
   session?: Session['session'];
 }
 
+export type NotificationRoutesService = Pick<NotificationService,
+  | 'getVapidPublicKey'
+  | 'saveSubscription'
+  | 'removeSubscription'
+  | 'getSubscriptions'
+  | 'removeSubscriptionById'
+  | 'isConfigured'
+  | 'sendTestNotification'
+>
+
 export function createNotificationRoutes(
-  notificationService: NotificationService
+  notificationService: NotificationRoutesService
 ) {
   const app = new Hono<{ Variables: NotificationRouteVariables }>();
 

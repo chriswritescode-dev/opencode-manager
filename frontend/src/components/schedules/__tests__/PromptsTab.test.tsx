@@ -1,11 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { useReducer } from 'react'
+import { describe, it, expect, vi } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PromptsTab } from '../PromptsTab'
-import type { PromptDialog } from '@/hooks/useScheduleUrlState'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { PromptTemplate } from '@opencode-manager/shared/types'
 
-const sampleTemplate = {
+const sampleTemplate: PromptTemplate = {
   id: 1,
   title: 'Weekly Health Report',
   category: 'Health',
@@ -18,31 +20,13 @@ const sampleTemplate = {
   updatedAt: 1_000_000,
 }
 
-const mocks = vi.hoisted(() => ({
-  deleteMutate: vi.fn(),
-}))
-
-vi.mock('@/hooks/usePromptTemplates', () => ({
-  usePromptTemplates: () => ({ data: [sampleTemplate], isLoading: false }),
-  useCreatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeletePromptTemplate: () => ({ mutate: mocks.deleteMutate, isPending: false }),
-}))
-
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
+const routes: FetchRoute[] = [
+  { method: 'GET', path: '/api/prompt-templates', respond: () => ({ json: { templates: [sampleTemplate] } }) },
+  { method: 'DELETE', path: '/api/prompt-templates/:id', respond: () => ({ status: 204 }) },
+]
 
 interface PromptsTabProps {
-  promptDialog: PromptDialog
+  promptDialog: 'new' | 'edit' | 'import' | 'delete' | null
   templateId: number | null
   onNew: () => void
   onEdit: (id: number) => void
@@ -64,24 +48,45 @@ function createProps(overrides: Partial<PromptsTabProps> = {}): PromptsTabProps 
   }
 }
 
+function renderPromptsTab(overrides: Partial<PromptsTabProps> = {}) {
+  const active: PromptsTabProps = createProps(overrides)
+  const harness = { rerender: () => {} }
+
+  function Harness() {
+    const [, force] = useReducer((count: number) => count + 1, 0)
+    harness.rerender = force
+    return <PromptsTab {...active} />
+  }
+
+  const result = renderWithProviders(<Harness />, {
+    auth: false,
+    theme: false,
+    toaster: false,
+    fetchRoutes: routes,
+  })
+
+  return {
+    ...result,
+    rerenderWith: async (update: Partial<PromptsTabProps>) => {
+      Object.assign(active, update)
+      await act(async () => {
+        harness.rerender()
+      })
+    },
+  }
+}
+
 describe('PromptsTab', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('filters templates by search and shows an empty match state', async () => {
     const user = userEvent.setup()
-    render(<PromptsTab {...createProps()} />, { wrapper: createWrapper() })
+    renderPromptsTab()
 
-    await user.type(screen.getByRole('searchbox', { name: 'Search prompts' }), 'health')
+    const search = await screen.findByRole('searchbox', { name: 'Search prompts' })
+    await user.type(search, 'health')
     expect(screen.getByText('Weekly Health Report')).toBeInTheDocument()
 
-    await user.clear(screen.getByRole('searchbox', { name: 'Search prompts' }))
-    await user.type(screen.getByRole('searchbox', { name: 'Search prompts' }), 'nothing here')
+    await user.clear(search)
+    await user.type(search, 'nothing here')
     expect(screen.queryByText('Weekly Health Report')).not.toBeInTheDocument()
     expect(screen.getByText('No matching templates')).toBeInTheDocument()
 
@@ -89,117 +94,81 @@ describe('PromptsTab', () => {
     expect(screen.getByText('Weekly Health Report')).toBeInTheDocument()
   })
 
-  it('renders the sample template title', () => {
-    render(<PromptsTab {...createProps()} />, { wrapper: createWrapper() })
-    expect(screen.getByText('Weekly Health Report')).toBeInTheDocument()
+  it('renders the sample template title', async () => {
+    renderPromptsTab()
+
+    expect(await screen.findByText('Weekly Health Report')).toBeInTheDocument()
   })
 
   it('calls onNew when the New button is clicked', async () => {
     const user = userEvent.setup()
     const onNew = vi.fn()
-
-    render(<PromptsTab {...createProps({ onNew })} />, { wrapper: createWrapper() })
+    renderPromptsTab({ onNew })
 
     await user.click(screen.getByRole('button', { name: 'New' }))
+
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 
   it('calls onDelete from the row actions menu', async () => {
     const user = userEvent.setup()
     const onDelete = vi.fn()
-    render(<PromptsTab {...createProps({ onDelete })} />, { wrapper: createWrapper() })
+    renderPromptsTab({ onDelete })
 
-    await user.click(screen.getByRole('button', { name: 'More actions' }))
+    await user.click(await screen.findByRole('button', { name: 'More actions' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
     expect(onDelete).toHaveBeenCalledWith(sampleTemplate.id)
   })
 
-  it('calls deleteMutate when confirming the delete dialog', async () => {
+  it('deletes the template when the delete dialog is confirmed', async () => {
     const user = userEvent.setup()
+    const result = renderPromptsTab({ promptDialog: 'delete', templateId: sampleTemplate.id })
 
-    render(
-      <PromptsTab {...createProps({ promptDialog: 'delete', templateId: sampleTemplate.id })} />,
-      { wrapper: createWrapper() },
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Delete template')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('Delete template')).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(mocks.deleteMutate).toHaveBeenCalledWith(sampleTemplate.id, expect.any(Object))
+
+    await waitFor(() =>
+      expect(result.fetchFake.lastRequest('DELETE', '/api/prompt-templates/:id')?.path).toBe(`/api/prompt-templates/${sampleTemplate.id}`),
+    )
   })
 
   it('calls onEdit when a template row is clicked', async () => {
     const user = userEvent.setup()
     const onEdit = vi.fn()
-    render(<PromptsTab {...createProps({ onEdit })} />, { wrapper: createWrapper() })
+    renderPromptsTab({ onEdit })
 
-    await user.click(screen.getByText('Weekly Health Report'))
+    await user.click(await screen.findByText('Weekly Health Report'))
+
     expect(onEdit).toHaveBeenCalledWith(sampleTemplate.id)
   })
 
   it('shows the edit dialog populated with template values', async () => {
-    render(
-      <PromptsTab
-        {...createProps({ promptDialog: 'edit', templateId: sampleTemplate.id })}
-      />,
-      { wrapper: createWrapper() },
-    )
+    renderPromptsTab({ promptDialog: 'edit', templateId: sampleTemplate.id })
 
-    await waitFor(() => {
-      expect(screen.getByText('Edit template')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('Edit template')).toBeInTheDocument())
 
-    const promptTextarea = screen.getByRole('textbox', { name: 'Prompt' })
-    expect(promptTextarea).toHaveValue(sampleTemplate.prompt)
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue(sampleTemplate.prompt)
   })
 
   it('imports a markdown file and shows parsed values in the dialog', async () => {
     const user = userEvent.setup()
-    const fileContent = '---\ntitle: Imported\n---\nHello prompt'
-
-    const mockFileReader = {
-      onload: null as ((e: { target: { result: string } }) => void) | null,
-      readAsText: vi.fn(function (this: typeof mockFileReader, _file: Blob) {
-        if (this.onload) {
-          this.onload({ target: { result: fileContent } })
-        }
-      }),
-    }
-    vi.stubGlobal('FileReader', vi.fn(() => mockFileReader))
-
     const onImport = vi.fn()
-    const { container, rerender } = render(
-      <PromptsTab {...createProps({ onImport })} />,
-      { wrapper: createWrapper() },
-    )
+    const fileContent = '---\ntitle: Imported\n---\nHello prompt'
+    const { container, rerenderWith } = renderPromptsTab({ onImport })
 
-    const fileInput = container.querySelector('input[type="file"]')!
-    const file = new File([fileContent], 'template.md', { type: 'text/markdown' })
-    await user.upload(fileInput, file)
+    const fileInput = container.querySelector('input[type="file"]')
+    if (!(fileInput instanceof HTMLInputElement)) throw new Error('template file input is not rendered')
 
-    await waitFor(() => {
-      expect(onImport).toHaveBeenCalledTimes(1)
-    })
+    await user.upload(fileInput, new File([fileContent], 'template.md', { type: 'text/markdown' }))
 
-    rerender(
-      <PromptsTab
-        promptDialog="import"
-        templateId={null}
-        onNew={vi.fn()}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        onImport={onImport}
-        onCloseDialog={vi.fn()}
-      />,
-    )
+    await waitFor(() => expect(onImport).toHaveBeenCalledTimes(1))
 
-    await waitFor(() => {
-      expect(screen.getByText('New template')).toBeInTheDocument()
-    })
+    await rerenderWith({ promptDialog: 'import' })
 
-    const promptTextarea = screen.getByRole('textbox', { name: 'Prompt' })
-    expect(promptTextarea).toHaveValue('Hello prompt')
+    await waitFor(() => expect(screen.getByText('New template')).toBeInTheDocument())
+
+    expect(screen.getByRole('textbox', { name: 'Prompt' })).toHaveValue('Hello prompt')
   })
 })

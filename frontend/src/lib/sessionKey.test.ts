@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { buildPinnedSessionKeys, getSessionKey } from './sessionKey'
-import type { Session } from '@/api/types'
 
 describe('getSessionKey', () => {
   it('combines the session directory and id', () => {
-    const session = { id: 'ses_1', location: { directory: '/w/a' } } as Session
-
-    expect(getSessionKey(session)).toBe('/w/a:ses_1')
+    expect(getSessionKey({ id: 'ses_1', location: { directory: '/w/a' } })).toBe('/w/a:ses_1')
   })
 })
 

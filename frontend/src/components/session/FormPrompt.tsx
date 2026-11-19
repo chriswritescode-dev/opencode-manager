@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { z } from 'zod'
 import { X, ChevronDown, ChevronUp, Check, Loader2, MessageCircleQuestion } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ExternalFieldCard } from '@/components/ui/external-field-card'
+import { readJsonNumber, readJsonString } from '@/components/jsonValue'
 import type { FormAnswer, FormField, FormInfo } from '@opencode-manager/shared/opencode'
 import { buildAnswer, hasMissingAnswers, visibleFields } from '@/lib/formFields'
 import { clearFormDraft, loadFormDraft, saveFormDraft, type FormDraft } from '@/lib/formDrafts'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
-import { useShortcutActions } from '@/contexts/KeyboardShortcutsContext'
+import { useShortcutActions } from '@/contexts/keyboard-shortcuts-context'
 import { useMobile, useSwipeDismiss } from '@/hooks/useMobile'
 
 type AnswerableFormField = Exclude<FormField, { type: 'external' }>
@@ -48,8 +50,9 @@ function buildInitialState(fields: AnswerableFormField[]): FormDraft {
       if (custom.length > 0) customValues[field.key] = [...new Set(custom)]
       continue
     }
-    if (typeof value === 'string' && usesCustomInput(field) && !isPredefinedValue(field, value)) {
-      customDrafts[field.key] = value
+    const textValue = z.string().safeParse(value)
+    if (textValue.success && usesCustomInput(field) && !isPredefinedValue(field, textValue.data)) {
+      customDrafts[field.key] = textValue.data
       continue
     }
     answer[field.key] = value
@@ -202,7 +205,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
     const descriptionId = field.description ? `${inputId}-description` : undefined
 
     if (field.type === 'boolean') {
-      const selected = typeof value === 'boolean' ? value : undefined
+      const selected = z.boolean().safeParse(value).data
       return (
         <FieldGroup key={field.key} label={label} description={field.description} required={required}>
           <div className="flex gap-3 md:gap-2">
@@ -214,7 +217,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
     }
 
     if (field.type === 'number' || field.type === 'integer') {
-      const numberValue = typeof value === 'number' || typeof value === 'string' ? value : ''
+      const numberValue = z.union([z.number(), z.string()]).safeParse(value).data ?? ''
       return (
         <div key={field.key} className="space-y-2">
           <FieldLabel id={inputId} label={label} description={field.description} required={required} />
@@ -223,8 +226,8 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
             type="number"
             aria-describedby={descriptionId}
             value={numberValue}
-            min={typeof field.minimum === 'number' ? field.minimum : undefined}
-            max={typeof field.maximum === 'number' ? field.maximum : undefined}
+            min={readJsonNumber(field.minimum)}
+            max={readJsonNumber(field.maximum)}
             step={field.type === 'integer' ? 1 : 'any'}
             onChange={(e) => setFieldAnswer(field.key, e.target.value === '' ? '' : Number(e.target.value))}
             className="w-full rounded-lg border border-border bg-muted/60 dark:bg-muted/5 px-3.5 py-3 text-base focus:border-primary focus:outline-none md:px-3 md:py-2 md:text-sm"
@@ -274,7 +277,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
     }
 
     if (field.options && field.options.length > 0) {
-      const selected = typeof value === 'string' ? value : ''
+      const selected = readJsonString(value) ?? ''
       const customValue = customDrafts[field.key] ?? ''
       return (
         <FieldGroup key={field.key} label={label} description={field.description} required={required}>
@@ -317,7 +320,7 @@ export function FormPrompt({ form, onReply, onCancel, onMinimize, onAskSideQuest
         <Textarea
           id={inputId}
           aria-describedby={descriptionId}
-          value={typeof value === 'string' ? value : ''}
+          value={readJsonString(value) ?? ''}
           onChange={(e) => setFieldAnswer(field.key, e.target.value)}
           placeholder={field.placeholder ?? 'Type your answer...'}
           className="min-h-[60px] md:min-h-[80px] text-[16px] md:text-sm resize-none border-primary/30 focus:border-primary"

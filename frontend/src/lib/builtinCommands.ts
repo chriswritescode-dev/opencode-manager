@@ -78,16 +78,6 @@ const CHAT_UNAVAILABLE_COMMAND_ACTIONS: ReadonlySet<BuiltinCommandAction> = new 
   'showWalkthrough',
 ])
 
-/**
- * Built-in composer commands for a server and page scope. Commands backed by Manager-only features are
- * omitted for linked OpenCode servers; MCP, skills, and the session picker stay because their views work
- * against the linked server. Chat sessions omit the MCP, skills, and walkthrough commands because their
- * dialogs are not mounted there.
- *
- * @param isLocalServer Whether the composer targets the local Manager server.
- * @param isChat Whether the composer is mounted on a chat session page.
- * @returns The commands offered for that scope.
- */
 export function getBuiltinCommands(isLocalServer: boolean, isChat = false): readonly BuiltinCommand[] {
   const available = isLocalServer
     ? BUILTIN_COMMANDS

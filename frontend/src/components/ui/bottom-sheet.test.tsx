@@ -2,7 +2,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { stubMatchMedia } from '@/test/test-utils'
+import { act } from '@testing-library/react'
+import { installMatchMedia, installWindowSize } from '@/test/browserFakes'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from './bottom-sheet'
 import {
   DropdownMenu,
@@ -10,15 +11,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useSwipeDismiss } from '@/hooks/useMobile'
-
-vi.mock('@/hooks/useMobile', () => ({
-  useSwipeDismiss: vi.fn(() => ({
-    bind: vi.fn(),
-    swipeProgress: 0,
-    swipeStyles: {},
-  })),
-}))
 
 function renderSheet(isOpen: boolean) {
   return render(
@@ -72,17 +64,12 @@ function SheetWithMenu({ onClose }: { onClose: () => void }) {
 }
 
 afterEach(() => {
-  Reflect.deleteProperty(window, 'matchMedia')
+  vi.useRealTimers()
 })
 
 describe('BottomSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(useSwipeDismiss).mockReturnValue({
-      bind: vi.fn(),
-      swipeProgress: 0,
-      swipeStyles: {},
-    })
   })
 
   it('renders when isOpen is true', () => {
@@ -190,16 +177,6 @@ describe('BottomSheet', () => {
     expect(handleClose).toHaveBeenCalledTimes(1)
   })
 
-  it('applies pb-safe class', () => {
-    render(
-      <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
-        <div>Test content</div>
-      </BottomSheet>,
-    )
-    const dialog = screen.getByRole('dialog', { name: 'Test sheet' })
-    expect(dialog).toBeInTheDocument()
-  })
-
   it('applies pb-safe class to BottomSheetContent', () => {
     render(
       <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
@@ -222,61 +199,33 @@ describe('BottomSheet', () => {
     expect(dialog).toHaveClass('h-[50dvh]')
   })
 
-  it('passes correct options to useSwipeDismiss', () => {
-    const mockBind = vi.fn()
-    vi.mocked(useSwipeDismiss).mockReturnValue({
-      bind: mockBind,
-      swipeProgress: 0,
-      swipeStyles: {},
-    })
-
+  it.each([
+    { dismissible: true, closes: 1 },
+    { dismissible: false, closes: 0 },
+  ])('dismisses on a downward swipe when dismissible is $dismissible', ({ dismissible, closes }) => {
+    vi.useFakeTimers()
+    installWindowSize(400)
+    const handleClose = vi.fn()
     render(
-      <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
+      <BottomSheet isOpen onClose={handleClose} ariaLabel="Test sheet" dismissible={dismissible}>
         <div>Test content</div>
       </BottomSheet>,
     )
+    const panel = screen.getByRole('dialog', { name: 'Test sheet' })
 
-    expect(useSwipeDismiss).toHaveBeenCalledWith(expect.any(Function), {
-      enabled: true,
-      threshold: 60,
-    })
-  })
+    fireEvent.touchStart(panel, { touches: [{ clientX: 10, clientY: 0 }], changedTouches: [{ clientX: 10, clientY: 0 }] })
+    fireEvent.touchMove(panel, { touches: [{ clientX: 10, clientY: 120 }], changedTouches: [{ clientX: 10, clientY: 120 }] })
+    fireEvent.touchEnd(panel, { touches: [], changedTouches: [{ clientX: 10, clientY: 120 }] })
 
-  it('disables the swipe gesture when the sheet is not dismissible', () => {
-    render(
-      <BottomSheet isOpen dismissible={false} onClose={() => {}} ariaLabel="Test sheet">
-        <div>Test content</div>
-      </BottomSheet>,
-    )
-
-    expect(useSwipeDismiss).toHaveBeenCalledWith(expect.any(Function), {
-      enabled: false,
-      threshold: 60,
-    })
-  })
-
-  it('binds gesture to the panel element with aria-modal', () => {
-    const mockBind = vi.fn()
-    vi.mocked(useSwipeDismiss).mockReturnValue({
-      bind: mockBind,
-      swipeProgress: 0,
-      swipeStyles: {},
+    act(() => {
+      vi.advanceTimersByTime(400)
     })
 
-    render(
-      <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
-        <div>Test content</div>
-      </BottomSheet>,
-    )
-
-    const panelElement = document.querySelector('[aria-modal="true"]')
-    expect(panelElement).toBeInTheDocument()
-
-    expect(mockBind).toHaveBeenCalledWith(panelElement)
+    expect(handleClose).toHaveBeenCalledTimes(closes)
   })
 
   it('moves focus to the chat prompt on desktop when it closes', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     const { rerender } = renderSheet(false)
 
     rerender(
@@ -302,7 +251,7 @@ describe('BottomSheet', () => {
   })
 
   it('does not refocus the chat prompt on touch when it closes', async () => {
-    stubMatchMedia(false)
+    installMatchMedia(false)
     const { rerender } = renderSheet(false)
 
     rerender(
@@ -329,7 +278,7 @@ describe('BottomSheet', () => {
   })
 
   it('restores focus to the opener when an autoFocus child takes focus on open', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     render(<AutoFocusSheetHost />)
     const opener = screen.getByRole('button', { name: 'open sheet' })
     opener.focus()
@@ -343,7 +292,7 @@ describe('BottomSheet', () => {
   })
 
   it('captures the opener when mounted already open and restores it on close', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     const { rerender } = render(
       <button type="button">opener</button>,
     )

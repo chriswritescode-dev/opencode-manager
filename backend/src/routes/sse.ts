@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
-import { sseAggregator } from '../services/sse-aggregator'
+import { sseAggregator, type SSEAggregator } from '../services/sse-aggregator'
 import { LOCAL_OPENCODE_SERVER_ID, SSESubscribeSchema, SSEVisibilitySchema } from '@opencode-manager/shared/schemas'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
@@ -14,7 +14,7 @@ interface SSERouteVariables {
   session?: Session['session']
 }
 
-export function createSSERoutes() {
+export function createSSERoutes(aggregator: SSEAggregator = sseAggregator) {
   const app = new Hono<{ Variables: SSERouteVariables }>()
 
   app.get('/stream', async (c) => {
@@ -31,7 +31,9 @@ export function createSSERoutes() {
       let cleanup: () => void = () => {}
 
       const queuedWriter = createQueuedSSEWriter({
-        write: (chunk) => writer.write(chunk),
+        write: async (chunk) => {
+          await writer.write(chunk)
+        },
         onError: (error) => {
           logger.error(`SSE write failed for ${clientId}:`, error)
           clearInterval(heartbeatInterval)
@@ -43,7 +45,7 @@ export function createSSERoutes() {
         queuedWriter.writeSSE('heartbeat', JSON.stringify({ timestamp: Date.now() }))
       }, HEARTBEAT_INTERVAL_MS)
 
-      cleanup = sseAggregator.addClient(
+      cleanup = aggregator.addClient(
         clientId,
         (event, data) => {
           queuedWriter.writeSSE(event, data)
@@ -72,7 +74,7 @@ export function createSSERoutes() {
         endStream()
       })
 
-      queuedWriter.writeSSE('connected', JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() }))
+      queuedWriter.writeSSE('connected', JSON.stringify({ clientId, directories, ...aggregator.getConnectionStatus() }))
 
       await streamEnded
     })
@@ -84,7 +86,7 @@ export function createSSERoutes() {
     if (!result.success) {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
-    const success = sseAggregator.addDirectories(result.data.clientId, result.data.directories)
+    const success = aggregator.addDirectories(result.data.clientId, result.data.directories)
     if (!success) {
       return c.json({ success: false, error: 'Client not found' }, 404)
     }
@@ -97,7 +99,7 @@ export function createSSERoutes() {
     if (!result.success) {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
-    const success = sseAggregator.removeDirectories(result.data.clientId, result.data.directories)
+    const success = aggregator.removeDirectories(result.data.clientId, result.data.directories)
     if (!success) {
       return c.json({ success: false, error: 'Client not found' }, 404)
     }
@@ -110,7 +112,7 @@ export function createSSERoutes() {
     if (!result.success) {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
-    const success = sseAggregator.setClientVisibility(
+    const success = aggregator.setClientVisibility(
       result.data.clientId,
       result.data.visible,
       result.data.activeSessionId ?? null,
@@ -124,10 +126,10 @@ export function createSSERoutes() {
 
   app.get('/status', (c) => {
     return c.json({
-      ...sseAggregator.getConnectionStatus(),
-      clients: sseAggregator.getClientCount(),
-      directories: sseAggregator.getActiveDirectories(),
-      activeSessions: sseAggregator.getActiveSessions()
+      ...aggregator.getConnectionStatus(),
+      clients: aggregator.getClientCount(),
+      directories: aggregator.getActiveDirectories(),
+      activeSessions: aggregator.getActiveSessions()
     })
   })
 

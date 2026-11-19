@@ -1,4 +1,4 @@
-import type { OpenCodeStreamEvent } from '@opencode-manager/shared/schemas'
+import type { SSEVisibilityRequest, SSESubscribeRequest, OpenCodeStreamEvent } from '@opencode-manager/shared/schemas'
 
 export type OpenCodeEventHandler = (event: OpenCodeStreamEvent) => void
 export type EventStreamStatusHandler = (connected: boolean) => void
@@ -25,7 +25,7 @@ export interface EventStreamTransportHandlers {
 
 export interface EventStreamTransport {
   open(url: string, handlers: EventStreamTransportHandlers): EventStreamConnection
-  post(path: string, body: unknown): Promise<boolean>
+  post(path: string, body: SSESubscribeRequest | SSEVisibilityRequest): Promise<boolean>
 }
 
 export interface EventStreamSubscription {

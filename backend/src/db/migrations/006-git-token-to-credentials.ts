@@ -1,21 +1,35 @@
 import type { Migration } from '../migration-runner'
 import { logger } from '../../utils/logger'
+import { z } from 'zod'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
+import { selectRows } from '../rows'
+
+const PreferencesRowSchema = z.object({
+  user_id: z.string(),
+  preferences: z.string(),
+})
+
+const LegacyGitTokenPreferencesSchema = z.looseObject({
+  gitToken: z.string().optional(),
+  gitCredentials: z.array(JsonValueSchema).optional(),
+})
+
+const LegacyGitCredentialsPreferencesSchema = z.looseObject({
+  gitCredentials: z.array(z.looseObject({ token: z.string() })).optional(),
+})
 
 const migration: Migration = {
   id: '006-git-token-to-credentials',
   legacy: { version: 6, name: 'git-token-to-credentials' },
 
   up(db) {
-    const rows = db.prepare('SELECT user_id, preferences FROM user_preferences').all() as Array<{
-      user_id: string
-      preferences: string
-    }>
+    const rows = selectRows(db, PreferencesRowSchema, 'SELECT user_id, preferences FROM user_preferences')
 
     for (const row of rows) {
       try {
-        const parsed = JSON.parse(row.preferences) as Record<string, unknown>
-        const gitToken = parsed.gitToken as string | undefined
-        const existingCredentials = parsed.gitCredentials as Array<unknown> | undefined
+        const parsed = LegacyGitTokenPreferencesSchema.parse(JSON.parse(row.preferences))
+        const gitToken = parsed.gitToken
+        const existingCredentials = parsed.gitCredentials
 
         if (!gitToken) continue
         if (existingCredentials && existingCredentials.length > 0) continue
@@ -42,15 +56,12 @@ const migration: Migration = {
   },
 
   down(db) {
-    const rows = db.prepare('SELECT user_id, preferences FROM user_preferences').all() as Array<{
-      user_id: string
-      preferences: string
-    }>
+    const rows = selectRows(db, PreferencesRowSchema, 'SELECT user_id, preferences FROM user_preferences')
 
     for (const row of rows) {
       try {
-        const parsed = JSON.parse(row.preferences) as Record<string, unknown>
-        const credentials = parsed.gitCredentials as Array<{ token: string }> | undefined
+        const parsed = LegacyGitCredentialsPreferencesSchema.parse(JSON.parse(row.preferences))
+        const credentials = parsed.gitCredentials
 
         const firstCredential = credentials?.[0]
         if (!firstCredential) continue

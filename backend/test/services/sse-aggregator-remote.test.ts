@@ -1,21 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV: {
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
-  },
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
-import { sseAggregator } from '../../src/services/sse-aggregator'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
+import { createOpenCodeApi, type OpenCodeApi, type V2Event } from '@opencode-manager/shared/opencode'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
+import { createSSEAggregator, type SSEAggregator } from '../../src/services/sse-aggregator'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
 
 interface CapturedClient {
@@ -24,6 +11,14 @@ interface CapturedClient {
   callback: (event: string, data: string) => void
   writeFrame: (frame: Uint8Array) => void
 }
+
+const EnvelopeSchema = z.object({
+  directory: z.string().nullable(),
+  serverId: z.string().optional(),
+  payload: JsonValueSchema,
+})
+
+const ResyncSchema = z.object({ timestamp: z.number(), serverId: z.string() })
 
 function createCapturingClient(): CapturedClient {
   const events: Array<{ event: string; data: string }> = []
@@ -37,27 +32,30 @@ function createCapturingClient(): CapturedClient {
   }
 }
 
-function parseFrame(frame: string): { directory: string | null; serverId?: string; payload: { type: string } } {
-  return JSON.parse(frame.replace(/^event: message\ndata: /, '').trim())
+function parseFrame(frame: string) {
+  return EnvelopeSchema.parse(JSON.parse(frame.replace(/^event: message\ndata: /, '').trim()))
 }
 
-function makeClient(): Pick<OpenCodeClient, 'api'> {
-  const api = {
-    permission: {
-      request: {
-        list: vi.fn(async (input?: { location?: { directory?: string } }) => ({
-          location: { directory: input?.location?.directory ?? '' },
-          data: [{ id: 'perm-1', sessionID: 'ses-1' }],
-        })),
-      },
-    },
-    form: {
-      list: vi.fn(async (input?: { location?: { directory?: string } }) => ({
-        location: { directory: input?.location?.directory ?? '' },
-        data: [],
-      })),
-    },
-  } as unknown as OpenCodeApi
+function sseBody(events: V2Event[]): string {
+  return events.map((event) => `event: message\ndata: ${JSON.stringify(event)}\n\n`).join('')
+}
+
+function makeClient(events: V2Event[] = []): Pick<OpenCodeClient, 'api'> {
+  const api = createOpenCodeApi({
+    baseUrl: 'http://opencode.stub',
+    fetch: Object.assign(
+      async () => new Response(sseBody(events), { headers: { 'content-type': 'text/event-stream' } }),
+      { preconnect: fetch.preconnect },
+    ),
+  })
+  api.permission.request.list = vi.fn<OpenCodeApi['permission']['request']['list']>(async (input) => ({
+    location: { directory: input?.location?.directory ?? '' },
+    data: [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }],
+  }))
+  api.form.list = vi.fn<OpenCodeApi['form']['list']>(async (input) => ({
+    location: { directory: input?.location?.directory ?? '' },
+    data: [],
+  }))
   return { api }
 }
 
@@ -76,10 +74,14 @@ const LOCAL_EVENT = {
 } satisfies V2Event
 
 describe('SSEAggregator remote envelope delivery', () => {
+  let aggregator: SSEAggregator
+
   beforeEach(() => {
-    sseAggregator.shutdown()
-    sseAggregator.setOpenCodeClient(null)
-    sseAggregator.setScheduledSessionsResolver(() => [])
+    aggregator = createSSEAggregator()
+  })
+
+  afterEach(() => {
+    aggregator.shutdown()
   })
 
   it('broadcasts a located remote envelope to every connected client whatever they are subscribed to', () => {
@@ -88,13 +90,13 @@ describe('SSEAggregator remote envelope delivery', () => {
     const otherServer = createCapturingClient()
     const local = createCapturingClient()
     const unsubscribed = createCapturingClient()
-    sseAggregator.addClient('remote-key', subscribed.callback, subscribed.writeFrame, ['srv_a|/repo'])
-    sseAggregator.addClient('other-dir', otherDirectory.callback, otherDirectory.writeFrame, ['srv_a|/other'])
-    sseAggregator.addClient('other-server', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
-    sseAggregator.addClient('local-dir', local.callback, local.writeFrame, ['/repo'])
-    sseAggregator.addClient('no-directories', unsubscribed.callback, unsubscribed.writeFrame, [])
+    aggregator.addClient('remote-key', subscribed.callback, subscribed.writeFrame, ['srv_a|/repo'])
+    aggregator.addClient('other-dir', otherDirectory.callback, otherDirectory.writeFrame, ['srv_a|/other'])
+    aggregator.addClient('other-server', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
+    aggregator.addClient('local-dir', local.callback, local.writeFrame, ['/repo'])
+    aggregator.addClient('no-directories', unsubscribed.callback, unsubscribed.writeFrame, [])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
+    aggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
 
     const expected = { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(subscribed.frames.map(parseFrame)).toEqual([expected])
@@ -109,12 +111,12 @@ describe('SSEAggregator remote envelope delivery', () => {
     const second = createCapturingClient()
     const otherServer = createCapturingClient()
     const local = createCapturingClient()
-    sseAggregator.addClient('any-a', first.callback, first.writeFrame, ['srv_a|/repo'])
-    sseAggregator.addClient('any-b', second.callback, second.writeFrame, ['srv_a|/elsewhere'])
-    sseAggregator.addClient('any-c', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
-    sseAggregator.addClient('any-d', local.callback, local.writeFrame, ['/repo'])
+    aggregator.addClient('any-a', first.callback, first.writeFrame, ['srv_a|/repo'])
+    aggregator.addClient('any-b', second.callback, second.writeFrame, ['srv_a|/elsewhere'])
+    aggregator.addClient('any-c', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
+    aggregator.addClient('any-d', local.callback, local.writeFrame, ['/repo'])
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
+    aggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
     const expected = { directory: null, serverId: 'srv_a', payload: LOCAL_EVENT }
     expect(first.frames.map(parseFrame)).toEqual([expected])
@@ -125,19 +127,19 @@ describe('SSEAggregator remote envelope delivery', () => {
 
   it('skips a targeted remote envelope once the client unsubscribed', () => {
     const client = createCapturingClient()
-    sseAggregator.addClient('targeted', client.callback, client.writeFrame, ['srv_a|/repo'])
-    sseAggregator.removeDirectories('targeted', ['srv_a|/repo'])
+    aggregator.addClient('targeted', client.callback, client.writeFrame, ['srv_a|/repo'])
+    aggregator.removeDirectories('targeted', ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', LOCAL_EVENT)
+    aggregator.deliverRemoteEnvelopeToClient('targeted', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
   })
 
   it('delivers a targeted remote envelope to a subscribed client', () => {
     const client = createCapturingClient()
-    sseAggregator.addClient('targeted-ok', client.callback, client.writeFrame, ['srv_a|/repo'])
+    aggregator.addClient('targeted-ok', client.callback, client.writeFrame, ['srv_a|/repo'])
 
-    sseAggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', LOCAL_EVENT)
+    aggregator.deliverRemoteEnvelopeToClient('targeted-ok', 'srv_a', '/repo', LOCAL_EVENT)
 
     expect(client.frames.map(parseFrame)).toEqual([
       { directory: '/repo', serverId: 'srv_a', payload: LOCAL_EVENT },
@@ -148,25 +150,30 @@ describe('SSEAggregator remote envelope delivery', () => {
     const subscribed = createCapturingClient()
     const otherServer = createCapturingClient()
     const local = createCapturingClient()
-    sseAggregator.addClient('resync-a', subscribed.callback, subscribed.writeFrame, ['srv_a|/repo'])
-    sseAggregator.addClient('resync-b', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
-    sseAggregator.addClient('resync-c', local.callback, local.writeFrame, ['/repo'])
+    aggregator.addClient('resync-a', subscribed.callback, subscribed.writeFrame, ['srv_a|/repo'])
+    aggregator.addClient('resync-b', otherServer.callback, otherServer.writeFrame, ['srv_b|/repo'])
+    aggregator.addClient('resync-c', local.callback, local.writeFrame, ['/repo'])
 
-    sseAggregator.sendRemoteResync('srv_a')
+    aggregator.sendRemoteResync('srv_a')
 
     expect(subscribed.events).toHaveLength(1)
     expect(subscribed.events[0]!.event).toBe('resync')
-    expect(JSON.parse(subscribed.events[0]!.data)).toEqual({ timestamp: expect.any(Number), serverId: 'srv_a' })
+    expect(ResyncSchema.parse(JSON.parse(subscribed.events[0]!.data))).toEqual({
+      timestamp: expect.any(Number),
+      serverId: 'srv_a',
+    })
     expect(otherServer.events).toHaveLength(0)
     expect(local.events).toHaveLength(0)
     expect(subscribed.frames).toHaveLength(0)
   })
 
-  it('keeps the local envelope free of a serverId', () => {
+  it('keeps the local envelope free of a serverId', async () => {
+    aggregator.setOpenCodeClient(makeClient([LOCAL_EVENT]))
+    aggregator.start()
     const client = createCapturingClient()
-    sseAggregator.addClient('local-envelope', client.callback, client.writeFrame, ['/repo'])
+    aggregator.addClient('local-envelope', client.callback, client.writeFrame, ['/repo'])
 
-    ;(sseAggregator as unknown as { handleUpstreamEvent(event: V2Event): void }).handleUpstreamEvent(LOCAL_EVENT)
+    await flushReplay()
 
     expect(client.frames).toEqual([`event: message\ndata: {"directory":"/repo","payload":${JSON.stringify(LOCAL_EVENT)}}\n\n`])
     expect(client.frames[0]).not.toContain('serverId')
@@ -175,12 +182,12 @@ describe('SSEAggregator remote envelope delivery', () => {
 
   it('routes remote subscriptions to the remote replay hook instead of the local client', async () => {
     const openCodeClient = makeClient()
-    sseAggregator.setOpenCodeClient(openCodeClient)
+    aggregator.setOpenCodeClient(openCodeClient)
     const remoteReplay = vi.fn(async () => {})
 
-    sseAggregator.addClient('mixed', () => {}, () => {}, ['/repo', 'srv_a|/repo'])
-    sseAggregator.setRemoteReplayHandler(remoteReplay)
-    sseAggregator.addDirectories('mixed', ['srv_a|/new'])
+    aggregator.addClient('mixed', () => {}, () => {}, ['/repo', 'srv_a|/repo'])
+    aggregator.setRemoteReplayHandler(remoteReplay)
+    aggregator.addDirectories('mixed', ['srv_a|/new'])
 
     await flushReplay()
 
@@ -192,11 +199,11 @@ describe('SSEAggregator remote envelope delivery', () => {
 
   it('does not replay remote keys through the local client on connect', async () => {
     const openCodeClient = makeClient()
-    sseAggregator.setOpenCodeClient(openCodeClient)
+    aggregator.setOpenCodeClient(openCodeClient)
     const remoteReplay = vi.fn()
-    sseAggregator.setRemoteReplayHandler(remoteReplay)
+    aggregator.setRemoteReplayHandler(remoteReplay)
 
-    sseAggregator.addClient('remote-only', () => {}, () => {}, ['srv_a|/repo'])
+    aggregator.addClient('remote-only', () => {}, () => {}, ['srv_a|/repo'])
     await flushReplay()
 
     expect(openCodeClient.api.permission.request.list).not.toHaveBeenCalled()
@@ -206,12 +213,12 @@ describe('SSEAggregator remote envelope delivery', () => {
 
   it('isolates a failing remote replay hook', async () => {
     const healthy = vi.fn()
-    sseAggregator.setRemoteReplayHandler(() => { throw new Error('boom') })
-    sseAggregator.addClient('failing', () => {}, () => {}, ['srv_a|/repo'])
+    aggregator.setRemoteReplayHandler(() => { throw new Error('boom') })
+    aggregator.addClient('failing', () => {}, () => {}, ['srv_a|/repo'])
     await flushReplay()
 
-    sseAggregator.setRemoteReplayHandler(healthy)
-    sseAggregator.addDirectories('failing', ['srv_a|/other'])
+    aggregator.setRemoteReplayHandler(healthy)
+    aggregator.addDirectories('failing', ['srv_a|/other'])
     await flushReplay()
 
     expect(healthy).toHaveBeenCalledWith('failing', 'srv_a', '/other')
@@ -219,10 +226,10 @@ describe('SSEAggregator remote envelope delivery', () => {
 
   it('stops broadcasting remote envelopes after a client is removed', () => {
     const client = createCapturingClient()
-    sseAggregator.addClient('removed', client.callback, client.writeFrame, ['srv_a|/repo'])
-    sseAggregator.removeClient('removed')
+    aggregator.addClient('removed', client.callback, client.writeFrame, ['srv_a|/repo'])
+    aggregator.removeClient('removed')
 
-    sseAggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
+    aggregator.deliverRemoteEnvelope('srv_a', null, LOCAL_EVENT)
 
     expect(client.frames).toHaveLength(0)
   })
@@ -231,8 +238,8 @@ describe('SSEAggregator remote envelope delivery', () => {
     const stringify = vi.spyOn(JSON, 'stringify')
 
     try {
-      sseAggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
-      sseAggregator.deliverRemoteEnvelopeToClient('absent', 'srv_a', '/repo', LOCAL_EVENT)
+      aggregator.deliverRemoteEnvelope('srv_a', '/repo', LOCAL_EVENT)
+      aggregator.deliverRemoteEnvelopeToClient('absent', 'srv_a', '/repo', LOCAL_EVENT)
 
       expect(stringify).not.toHaveBeenCalledWith(LOCAL_EVENT)
     } finally {

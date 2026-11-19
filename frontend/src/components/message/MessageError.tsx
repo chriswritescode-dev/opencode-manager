@@ -6,15 +6,15 @@ interface MessageErrorProps {
   error: SessionStructuredError
 }
 
-const ERROR_LABELS: Record<string, string> = {
-  'provider.auth': 'Provider authentication failed',
-  'provider.rate-limit': 'Provider rate limit reached',
-  'provider.quota': 'Provider quota exceeded',
-  'provider.timeout': 'Provider request timed out',
-  'permission.rejected': 'Permission denied',
-  'tool.execution': 'Tool execution failed',
-  aborted: 'Stopped',
-}
+const ERROR_LABELS = new Map<string, string>([
+  ['provider.auth', 'Provider authentication failed'],
+  ['provider.rate-limit', 'Provider rate limit reached'],
+  ['provider.quota', 'Provider quota exceeded'],
+  ['provider.timeout', 'Provider request timed out'],
+  ['permission.rejected', 'Permission denied'],
+  ['tool.execution', 'Tool execution failed'],
+  ['aborted', 'Stopped'],
+])
 
 function getErrorIcon(errorType: string) {
   switch (errorType) {
@@ -32,7 +32,7 @@ function getErrorIcon(errorType: string) {
 
 export const MessageError = memo(function MessageError({ error }: MessageErrorProps) {
   const Icon = getErrorIcon(error.type)
-  const label = ERROR_LABELS[error.type] ?? 'Error'
+  const label = ERROR_LABELS.get(error.type) ?? 'Error'
   const isAborted = error.type === 'aborted'
   const tone = isAborted
     ? 'text-muted-foreground'

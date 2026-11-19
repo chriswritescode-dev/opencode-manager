@@ -1,4 +1,12 @@
 import { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { selectRows } from './rows'
+
+const SessionPinRowSchema = z.object({
+  session_id: z.string(),
+  directory: z.string(),
+  pinned_at: z.number(),
+})
 
 export interface SessionPinRecord {
   sessionId: string
@@ -18,9 +26,11 @@ export function ensureSessionPinsTable(db: Database): void {
 }
 
 export function listSessionPins(db: Database): SessionPinRecord[] {
-  const rows = db
-    .prepare('SELECT session_id, directory, pinned_at FROM session_pins ORDER BY pinned_at DESC')
-    .all() as { session_id: string; directory: string; pinned_at: number }[]
+  const rows = selectRows(
+    db,
+    SessionPinRowSchema,
+    'SELECT session_id, directory, pinned_at FROM session_pins ORDER BY pinned_at DESC',
+  )
   return rows.map(r => ({ sessionId: r.session_id, directory: r.directory, pinnedAt: r.pinned_at }))
 }
 

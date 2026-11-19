@@ -1,10 +1,13 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Chat } from '@opencode-manager/shared/schemas'
-import type { Session } from '@/api/types'
-import { FetchError } from '@/api/fetchWrapper'
+import { act, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import type { QueryClient } from '@tanstack/react-query'
+import type { Chat, SessionPin } from '@opencode-manager/shared/schemas'
+import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
+import { SESSION_PINS_QUERY_KEY } from '@/hooks/useSessionPins'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { makeSession } from '@/test/fixtures/api'
+import { createTestQueryClient, renderHookWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 import {
   useChat,
   useChatFolders,
@@ -13,100 +16,76 @@ import {
   useDeleteChatSession,
 } from './useChats'
 
-const mocks = vi.hoisted(() => ({
-  listChats: vi.fn(),
-  getChat: vi.fn(),
-  createChat: vi.fn(),
-  deleteChatSession: vi.fn(),
-  useSessionsAcrossDirectories: vi.fn(),
-  removeDeletedSessionsFromListCaches: vi.fn(),
-  cleanupSessionPins: vi.fn(),
-  useSessionPins: vi.fn(),
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
-vi.mock('@/api/chats', () => ({
-  listChats: mocks.listChats,
-  getChat: mocks.getChat,
-  createChat: mocks.createChat,
-  deleteChatSession: mocks.deleteChatSession,
-}))
+const CHATS_PATH = '/api/chats'
+const PINS_PATH = '/api/session-pins'
+const CHAT_ITEM_PATH = '/api/chats/:chatId'
+const CHAT_SESSION_PATH = '/api/chats/:chatId/sessions/:sessionId'
 
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSessionsAcrossDirectories: mocks.useSessionsAcrossDirectories,
-  removeDeletedSessionsFromListCaches: mocks.removeDeletedSessionsFromListCaches,
-  cleanupSessionPins: mocks.cleanupSessionPins,
-}))
+const NEW_CHAT_ID = '20240102-120000-aaaaaa'
+const MID_CHAT_ID = '20240102-110000-cccccc'
+const OLD_CHAT_ID = '20240101-100000-bbbbbb'
 
-vi.mock('@/hooks/useSessionPins', () => ({
-  useSessionPins: mocks.useSessionPins,
-}))
+function chat(id: string, directory: string): Chat {
+  return { id, directory, filesPath: `chats/${id}`, createdAt: 1000 }
+}
 
-vi.mock('@/lib/toast', () => ({
-  showToast: mocks.showToast,
-}))
+function makePin(sessionId: string, directory: string, pinnedAt: number): SessionPin {
+  return { sessionId, directory, pinnedAt }
+}
 
-const chat = (id: string, directory: string): Chat => ({
-  id,
-  directory,
-  filesPath: `${directory}/files`,
-  createdAt: 1000,
-})
+function chatsRoute(pages: Record<string, Chat[]>, nextCursors: Record<string, string> = {}): FetchRoute {
+  return {
+    method: 'GET',
+    path: CHATS_PATH,
+    respond: (request) => {
+      const cursor = request.searchParams.get('cursor') ?? ''
+      const chats = pages[cursor] ?? []
+      const nextCursor = nextCursors[cursor]
+      return { json: nextCursor === undefined ? { chats } : { chats, nextCursor } }
+    },
+  }
+}
 
-const session = (id: string, directory: string, updated: number): Session => ({
-  id,
-  projectID: 'proj_1',
-  title: `Session ${id}`,
-  time: { created: updated, updated },
-  location: { directory },
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-})
+function sessionListKey(directory: string): readonly unknown[] {
+  return ['opencode', 'sessions', directory, {}, LOCAL_OPENCODE_SERVER_ID]
+}
 
-const createQueryClient = () => new QueryClient({
-  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-})
+interface SessionListCache {
+  pages: Array<{ items: Array<{ id: string }> }>
+  pageParams: unknown[]
+}
 
-const createWrapper = (queryClient: QueryClient) => {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+function listCacheSessionIds(queryClient: QueryClient, directory: string): string[] {
+  const cached = queryClient.getQueryData<SessionListCache>(sessionListKey(directory))
+  return cached?.pages.flatMap((page) => page.items.map((item) => item.id)) ?? []
 }
 
 describe('useChatFolders', () => {
-  beforeEach(() => {
-    mocks.listChats.mockReset()
-  })
-
   it('pages chats and flattens pages in order', async () => {
-    mocks.listChats.mockImplementation(async ({ cursor }: { cursor?: string }) => {
-      if (cursor === 'cursor_2') {
-        return { chats: [chat('20240101100000-bbbbbb', '/chats/old')] }
-      }
-      return {
-        chats: [
-          chat('20240102120000-aaaaaa', '/chats/new'),
-          chat('20240102110000-cccccc', '/chats/mid'),
-        ],
-        nextCursor: 'cursor_2',
-      }
-    })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useChatFolders(2), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useChatFolders(2), {
+      ...hookProviders,
+      fetchRoutes: [
+        chatsRoute(
+          {
+            '': [chat(NEW_CHAT_ID, '/chats/new'), chat(MID_CHAT_ID, '/chats/mid')],
+            [MID_CHAT_ID]: [chat(OLD_CHAT_ID, '/chats/old')],
+          },
+          { '': MID_CHAT_ID },
+        ),
+      ],
     })
 
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-    expect(result.current.chats.map((entry) => entry.id)).toEqual([
-      '20240102120000-aaaaaa',
-      '20240102110000-cccccc',
-    ])
+    expect(result.current.chats.map((entry) => entry.id)).toEqual([NEW_CHAT_ID, MID_CHAT_ID])
     expect(result.current.hasNextPage).toBe(true)
+    expect(fetchFake.lastRequest('GET', CHATS_PATH)?.searchParams.get('limit')).toBe('2')
 
     await act(async () => {
       await result.current.fetchNextPage()
@@ -114,57 +93,33 @@ describe('useChatFolders', () => {
 
     await waitFor(() => expect(result.current.chats).toHaveLength(3))
 
-    expect(result.current.chats.map((entry) => entry.id)).toEqual([
-      '20240102120000-aaaaaa',
-      '20240102110000-cccccc',
-      '20240101100000-bbbbbb',
-    ])
-    expect(mocks.listChats).toHaveBeenLastCalledWith({ limit: 2, cursor: 'cursor_2' })
+    expect(result.current.chats.map((entry) => entry.id)).toEqual([NEW_CHAT_ID, MID_CHAT_ID, OLD_CHAT_ID])
+    expect(fetchFake.lastRequest('GET', CHATS_PATH)?.searchParams.get('cursor')).toBe(MID_CHAT_ID)
   })
 })
 
 describe('useChatSessions', () => {
-  beforeEach(() => {
-    mocks.listChats.mockReset()
-    mocks.useSessionsAcrossDirectories.mockReset()
-    mocks.useSessionPins.mockReset()
-    mocks.useSessionsAcrossDirectories.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isError: false,
-      error: null,
-    })
-    mocks.useSessionPins.mockReturnValue({ data: [] })
-  })
-
   it('orders rows by folder then update time, keeps pinned first, drops archived sessions', async () => {
     const now = Date.now()
-    const newestChat = chat('20240102120000-aaaaaa', '/chats/new')
-    const olderChat = chat('20240101100000-bbbbbb', '/chats/old')
-    mocks.listChats.mockResolvedValue({ chats: [newestChat, olderChat] })
+    const newestChat = chat(NEW_CHAT_ID, '/chats/new')
+    const olderChat = chat(OLD_CHAT_ID, '/chats/old')
 
-    const archived = session('ses_archived', '/chats/new', now - 500)
-    archived.time.archived = now - 500
-    mocks.useSessionsAcrossDirectories.mockReturnValue({
-      data: [
-        session('ses_new_older', '/chats/new', now - 3000),
-        session('ses_old_pinned', '/chats/old', now - 4000),
-        session('ses_new_newer', '/chats/new', now - 1000),
-        session('ses_old_unpinned', '/chats/old', now - 500),
-        archived,
-        session('ses_unrelated', '/chats/other', now - 1000),
+    const { result } = renderHookWithProviders(() => useChatSessions(2), {
+      ...hookProviders,
+      fetchRoutes: [
+        chatsRoute({ '': [newestChat, olderChat] }),
+        ...appRoutes({
+          sessions: [
+            makeSession({ id: 'ses_new_older', title: 'Session ses_new_older', location: { directory: '/chats/new' }, time: { created: now - 3000, updated: now - 3000 } }),
+            makeSession({ id: 'ses_old_pinned', title: 'Session ses_old_pinned', location: { directory: '/chats/old' }, time: { created: now - 4000, updated: now - 4000 } }),
+            makeSession({ id: 'ses_new_newer', title: 'Session ses_new_newer', location: { directory: '/chats/new' }, time: { created: now - 1000, updated: now - 1000 } }),
+            makeSession({ id: 'ses_old_unpinned', title: 'Session ses_old_unpinned', location: { directory: '/chats/old' }, time: { created: now - 500, updated: now - 500 } }),
+            makeSession({ id: 'ses_archived', title: 'Session ses_archived', location: { directory: '/chats/new' }, time: { created: now - 500, updated: now - 500, archived: now - 500 } }),
+            makeSession({ id: 'ses_unrelated', title: 'Session ses_unrelated', location: { directory: '/chats/other' }, time: { created: now - 1000, updated: now - 1000 } }),
+          ],
+          pins: [makePin('ses_old_pinned', '/chats/old', now)],
+        }),
       ],
-      isLoading: false,
-      isError: false,
-      error: null,
-    })
-    mocks.useSessionPins.mockReturnValue({
-      data: [{ sessionId: 'ses_old_pinned', directory: '/chats/old', pinnedAt: now }],
-    })
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useChatSessions(2), {
-      wrapper: createWrapper(queryClient),
     })
 
     await waitFor(() => expect(result.current.rows).toHaveLength(4))
@@ -175,118 +130,103 @@ describe('useChatSessions', () => {
       'ses_new_older',
       'ses_old_unpinned',
     ])
-    expect(mocks.useSessionsAcrossDirectories).toHaveBeenCalledWith(['/chats/new', '/chats/old'])
 
     const pinnedRow = result.current.rows[0]
-    expect(pinnedRow.isPinned).toBe(true)
-    expect(pinnedRow.chat.id).toBe(olderChat.id)
-    expect(pinnedRow.path).toBe(`/chats/${olderChat.id}/sessions/ses_old_pinned`)
-    expect(result.current.rows[1].isPinned).toBe(false)
-    expect(result.current.rows[1].path).toBe(`/chats/${newestChat.id}/sessions/ses_new_newer`)
-
-    const folders = renderHook(() => useChatFolders(2), {
-      wrapper: createWrapper(queryClient),
-    })
-    await waitFor(() =>
-      expect(folders.result.current.chats.map((entry) => entry.id)).toEqual([
-        newestChat.id,
-        olderChat.id,
-      ]),
-    )
+    expect(pinnedRow?.isPinned).toBe(true)
+    expect(pinnedRow?.chat.id).toBe(olderChat.id)
+    expect(pinnedRow?.path).toBe(`/chats/${olderChat.id}/sessions/ses_old_pinned`)
+    expect(result.current.rows[1]?.isPinned).toBe(false)
+    expect(result.current.rows[1]?.path).toBe(`/chats/${newestChat.id}/sessions/ses_new_newer`)
     expect(result.current.hasMore).toBe(false)
   })
 })
 
 describe('useCreateChat', () => {
-  beforeEach(() => {
-    mocks.createChat.mockReset()
-    mocks.showToast.success.mockReset()
-    mocks.showToast.error.mockReset()
-  })
-
   it('creates the chat, invalidates caches and reports the built session path', async () => {
-    const createdChat = chat('20240102120000-aaaaaa', '/chats/new')
-    mocks.createChat.mockResolvedValue({ chat: createdChat, sessionId: 'ses_new' })
-
-    const queryClient = createQueryClient()
-    const sessionsKey = ['opencode', 'sessions', '/chats/new', {}]
-    const chatsKey = ['chats', 10]
-    queryClient.setQueryData(sessionsKey, { pages: [], pageParams: [] })
-    queryClient.setQueryData(chatsKey, { pages: [], pageParams: [] })
-
+    const createdChat = chat(NEW_CHAT_ID, '/chats/new')
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['chats', 10], { pages: [], pageParams: [] })
+    queryClient.setQueryData(sessionListKey('/chats/new'), { pages: [], pageParams: [] })
     const onCreated = vi.fn()
-    const { result } = renderHook(() => useCreateChat(onCreated), {
-      wrapper: createWrapper(queryClient),
+
+    const { result, fetchFake } = renderHookWithProviders(() => useCreateChat(onCreated), {
+      ...hookProviders,
+      queryClient,
+      fetchRoutes: [
+        {
+          method: 'POST',
+          path: CHATS_PATH,
+          respond: () => ({ json: { chat: createdChat, sessionId: 'ses_new' } }),
+        },
+      ],
     })
 
     await act(async () => {
       await result.current.mutateAsync({ title: 'New chat' })
     })
 
-    expect(mocks.createChat).toHaveBeenCalledWith({ title: 'New chat' })
+    expect(fetchFake.lastRequest('POST', CHATS_PATH)?.body).toEqual({ title: 'New chat' })
     expect(onCreated).toHaveBeenCalledWith(`/chats/${createdChat.id}/sessions/ses_new`)
-
-    await waitFor(() => expect(queryClient.getQueryState(chatsKey)?.isInvalidated).toBe(true))
-    await waitFor(() => expect(queryClient.getQueryState(sessionsKey)?.isInvalidated).toBe(true))
+    await waitFor(() => expect(queryClient.getQueryState(['chats', 10])?.isInvalidated).toBe(true))
+    await waitFor(() =>
+      expect(queryClient.getQueryState(sessionListKey('/chats/new'))?.isInvalidated).toBe(true),
+    )
   })
 })
 
 describe('useDeleteChatSession', () => {
-  beforeEach(() => {
-    mocks.deleteChatSession.mockReset()
-    mocks.removeDeletedSessionsFromListCaches.mockReset()
-    mocks.cleanupSessionPins.mockReset()
-    mocks.showToast.success.mockReset()
-    mocks.showToast.error.mockReset()
-  })
-
   it('deletes the session, updates list caches and shows a success toast', async () => {
-    mocks.deleteChatSession.mockResolvedValue({ deleted: true, folderRemoved: false })
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['chats', 10], { pages: [], pageParams: [] })
+    queryClient.setQueryData(SESSION_PINS_QUERY_KEY, [makePin('ses_new', '/chats/new', 1)])
+    queryClient.setQueryData(sessionListKey('/chats/new'), {
+      pages: [{ items: [makeSession({ id: 'ses_new' })] }],
+      pageParams: [],
+    })
 
-    const queryClient = createQueryClient()
-    const chatsKey = ['chats', 10]
-    queryClient.setQueryData(chatsKey, { pages: [], pageParams: [] })
-
-    const { result } = renderHook(() => useDeleteChatSession(), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useDeleteChatSession(), {
+      ...hookProviders,
+      queryClient,
+      fetchRoutes: [
+        { method: 'DELETE', path: CHAT_SESSION_PATH, respond: () => ({ json: { deleted: true, folderRemoved: false } }) },
+        { method: 'PUT', path: PINS_PATH, respond: () => ({ json: { pins: [] } }) },
+        { method: 'GET', path: PINS_PATH, respond: () => ({ json: { pins: [] } }) },
+        { method: 'GET', path: CHAT_ITEM_PATH, respond: () => ({ status: 404, json: { error: 'Chat not found' } }) },
+      ],
     })
 
     await act(async () => {
       await result.current.mutateAsync({
-        chatId: '20240102120000-aaaaaa',
+        chatId: NEW_CHAT_ID,
         sessionId: 'ses_new',
         directory: '/chats/new',
       })
     })
 
-    expect(mocks.deleteChatSession).toHaveBeenCalledWith('20240102120000-aaaaaa', 'ses_new')
-    expect(mocks.removeDeletedSessionsFromListCaches).toHaveBeenCalledWith(queryClient, 'ses_new')
-    expect(mocks.cleanupSessionPins).toHaveBeenCalledWith(
-      queryClient,
-      { id: 'ses_new', directory: '/chats/new' },
-      '/chats/new',
-    )
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Chat deleted')
-    await waitFor(() => expect(queryClient.getQueryState(chatsKey)?.isInvalidated).toBe(true))
+    expect(fetchFake.findRequests('DELETE', CHAT_SESSION_PATH)).toHaveLength(1)
+    expect(listCacheSessionIds(queryClient, '/chats/new')).toEqual([])
+    expect(fetchFake.lastRequest('PUT', PINS_PATH)?.body).toEqual({
+      sessionId: 'ses_new',
+      directory: '/chats/new',
+      pinned: false,
+    })
+    expect(await screen.findByText('Chat deleted')).toBeInTheDocument()
+    await waitFor(() => expect(queryClient.getQueryState(['chats', 10])?.isInvalidated).toBe(true))
   })
 })
 
 describe('useChat', () => {
-  beforeEach(() => {
-    mocks.getChat.mockReset()
-  })
-
   it('resolves a missing chat to null', async () => {
-    mocks.getChat.mockRejectedValue(new FetchError('Chat not found', 404))
-
-    const queryClient = createQueryClient()
-    const { result } = renderHook(() => useChat('20240102120000-aaaaaa'), {
-      wrapper: createWrapper(queryClient),
+    const { result, fetchFake } = renderHookWithProviders(() => useChat(NEW_CHAT_ID), {
+      ...hookProviders,
+      fetchRoutes: [
+        { method: 'GET', path: CHAT_ITEM_PATH, respond: () => ({ status: 404, json: { error: 'Chat not found' } }) },
+      ],
     })
 
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     expect(result.current.data).toBeNull()
-    expect(mocks.getChat).toHaveBeenCalledTimes(1)
+    expect(fetchFake.findRequests('GET', CHAT_ITEM_PATH)).toHaveLength(1)
   })
 })

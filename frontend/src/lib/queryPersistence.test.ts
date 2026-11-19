@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, dehydrate, hydrate, type Query, type QueryCacheNotifyEvent } from '@tanstack/react-query'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import type { PersistedClient } from '@tanstack/react-query-persist-client'
 import { SESSION_PINS_QUERY_KEY } from '@/hooks/useSessionPins'
 import {
@@ -21,6 +22,8 @@ import {
 } from './queryPersistence'
 
 type DehydratedQuery = PersistedClient['clientState']['queries'][number]
+type UpdatedCacheEvent = Extract<QueryCacheNotifyEvent, { type: 'updated' }>
+type CacheUpdateAction = UpdatedCacheEvent['action']
 
 function buildQuery(
   queryClient: QueryClient,
@@ -63,18 +66,24 @@ function buildPersistedClient(clientState: PersistedClient['clientState']): Pers
   return { buster: 'http://localhost|user-1', timestamp: Date.now(), clientState }
 }
 
+const clients: QueryClient[] = []
+const dehydrationSource = new QueryClient()
+
 function buildDehydratedQuery(
   queryKey: readonly unknown[],
   dataUpdatedAt: number,
+  data: JsonValue = { id: `${queryKey[0]}` },
 ): DehydratedQuery {
-  return {
-    queryHash: JSON.stringify(queryKey),
-    queryKey,
-    state: { status: 'success', data: { id: queryKey[0] }, dataUpdatedAt } as DehydratedQuery['state'],
-  }
+  const query = dehydrationSource
+    .getQueryCache()
+    .build(dehydrationSource, { queryKey, queryFn: async () => data })
+  query.setState({ status: 'success', data, dataUpdatedAt, fetchStatus: 'idle' })
+  const [dehydrated] = dehydrate(dehydrationSource, {
+    shouldDehydrateQuery: (candidate) => candidate === query,
+  }).queries
+  if (!dehydrated) throw new Error('dehydration produced no query')
+  return dehydrated
 }
-
-const clients: QueryClient[] = []
 
 function createClient(): QueryClient {
   const client = new QueryClient()
@@ -381,14 +390,10 @@ describe('capInfiniteQueryPages', () => {
       mutations: [],
       queries: [
         buildDehydratedQuery(['repos'], 1),
-        {
-          ...buildDehydratedQuery(['opencode', 'sessions', '/work/repo'], 2),
-          state: {
-            status: 'success',
-            dataUpdatedAt: 2,
-            data: { pages: [{ items: ['a'] }, { items: ['b'] }, { items: ['c'] }], pageParams: [undefined, 'c2', 'c3'] },
-          } as DehydratedQuery['state'],
-        },
+        buildDehydratedQuery(['opencode', 'sessions', '/work/repo'], 2, {
+          pages: [{ items: ['a'] }, { items: ['b'] }, { items: ['c'] }],
+          pageParams: [null, 'c2', 'c3'],
+        }),
       ],
     }
 
@@ -397,7 +402,7 @@ describe('capInfiniteQueryPages', () => {
     expect(capped.queries[0].state.data).toEqual({ id: 'repos' })
     expect(capped.queries[1].state.data).toEqual({
       pages: [{ items: ['a'] }],
-      pageParams: [undefined],
+      pageParams: [null],
     })
     expect(clientState.queries[1].state.data).toMatchObject({
       pages: [{ items: ['a'] }, { items: ['b'] }, { items: ['c'] }],
@@ -426,11 +431,9 @@ describe('capInfiniteQueryPages', () => {
   })
 
   it('leaves plain list data alone', () => {
-    const clientState = { mutations: [], queries: [buildDehydratedQuery(['repos'], 1)] }
+    const persistedClient = buildPersistedClient({ mutations: [], queries: [buildDehydratedQuery(['repos'], 1)] })
 
-    expect(serializePersistedClient(buildPersistedClient(clientState))).toBe(
-      JSON.stringify(buildPersistedClient(clientState)),
-    )
+    expect(serializePersistedClient(persistedClient)).toBe(JSON.stringify(persistedClient))
   })
 })
 
@@ -570,7 +573,7 @@ describe('createQueryCachePersister', () => {
       timestamp: Date.now(),
       clientState: {
         mutations: [],
-        queries: [{ queryKey: ['repos'], state: { data: [], dataUpdatedAt: 1 } } as never],
+        queries: [buildDehydratedQuery(['repos'], 1, [])],
       },
     })
     await vi.advanceTimersByTimeAsync(1000)
@@ -625,47 +628,47 @@ describe('shouldPersistCacheEvent', () => {
 
   function updateEvent(
     queryKey: readonly unknown[],
-    action: { type: string } & Record<string, unknown>,
+    action: CacheUpdateAction,
   ): QueryCacheNotifyEvent {
     return {
       type: 'updated',
       query: buildQuery(queryClient, queryKey),
       action,
-    } as QueryCacheNotifyEvent
+    }
   }
 
-  it.each([
-    ['added', { type: 'added' }],
-    ['removed', { type: 'removed' }],
-  ])('reports an allowlisted query that was %s', (_label, event) => {
+  it('reports an allowlisted query that was added', () => {
+    expect(shouldPersistCacheEvent({ type: 'added', query: buildQuery(queryClient, ['repos']) })).toBe(true)
     expect(
-      shouldPersistCacheEvent({
-        ...event,
-        query: buildQuery(queryClient, ['repos']),
-      } as QueryCacheNotifyEvent),
-    ).toBe(true)
-    expect(
-      shouldPersistCacheEvent({
-        ...event,
-        query: buildQuery(queryClient, ['opencode', 'transcript', 'ses_1']),
-      } as QueryCacheNotifyEvent),
+      shouldPersistCacheEvent({ type: 'added', query: buildQuery(queryClient, ['opencode', 'transcript', 'ses_1']) }),
     ).toBe(false)
   })
 
-  it.each([
-    ['success', { type: 'success', data: null }],
-    ['error', { type: 'error', error: new Error('boom') }],
-    ['failed', { type: 'failed', failureCount: 1, error: new Error('boom') }],
-    ['invalidate', { type: 'invalidate' }],
-  ])('reports an allowlisted query updated on %s', (_label, action) => {
+  it('reports an allowlisted query that was removed', () => {
+    expect(shouldPersistCacheEvent({ type: 'removed', query: buildQuery(queryClient, ['repos']) })).toBe(true)
+    expect(
+      shouldPersistCacheEvent({ type: 'removed', query: buildQuery(queryClient, ['opencode', 'transcript', 'ses_1']) }),
+    ).toBe(false)
+  })
+
+  const persistableActions: Array<{ label: string; action: CacheUpdateAction }> = [
+    { label: 'success', action: { type: 'success', data: null } },
+    { label: 'error', action: { type: 'error', error: new Error('boom') } },
+    { label: 'failed', action: { type: 'failed', failureCount: 1, error: new Error('boom') } },
+    { label: 'invalidate', action: { type: 'invalidate' } },
+  ]
+
+  it.each(persistableActions)('reports an allowlisted query updated on $label', ({ action }) => {
     expect(shouldPersistCacheEvent(updateEvent(['repos'], action))).toBe(true)
   })
 
-  it.each([
-    ['fetch', { type: 'fetch' }],
-    ['pause', { type: 'pause' }],
-    ['continue', { type: 'continue' }],
-  ])('ignores a %s action, which only moves the fetch status', (_label, action) => {
+  const fetchStatusActions: Array<{ label: string; action: CacheUpdateAction }> = [
+    { label: 'fetch', action: { type: 'fetch' } },
+    { label: 'pause', action: { type: 'pause' } },
+    { label: 'continue', action: { type: 'continue' } },
+  ]
+
+  it.each(fetchStatusActions)('ignores a $label action, which only moves the fetch status', ({ action }) => {
     expect(shouldPersistCacheEvent(updateEvent(['repos'], action))).toBe(false)
   })
 
@@ -680,10 +683,11 @@ describe('shouldPersistCacheEvent', () => {
       shouldPersistCacheEvent({
         type: 'observerResultsUpdated',
         query: buildQuery(queryClient, ['repos']),
-      } as QueryCacheNotifyEvent),
+      }),
     ).toBe(false)
   })
 })
+
 
 describe('createBusterGuardedPersister', () => {
   function createBasePersister(

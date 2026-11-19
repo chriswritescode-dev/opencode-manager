@@ -90,7 +90,9 @@ export class CredentialProvider {
       )
     }
 
-    return { ...env, ...this.getGhCliEnvForContext(context) }
+    const combined: Record<string, string> = Object.fromEntries(Object.entries(env))
+    Object.assign(combined, this.getGhCliEnvForContext(context))
+    return combined
   }
 
   getGhCliEnv(options: CredentialResolutionOptions = {}): Record<string, string> {
@@ -116,7 +118,7 @@ export class CredentialProvider {
   }
 
   private getCredentials(preferences: UserPreferences): GitCredential[] {
-    return (preferences.gitCredentials || []) as GitCredential[]
+    return preferences.gitCredentials ?? []
   }
 
   private getGitEnvForContext(context: CredentialResolutionContext): Record<string, string> {

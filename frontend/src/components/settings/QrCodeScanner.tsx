@@ -24,22 +24,22 @@ interface QrCodeScannerProps {
   fallbackHint?: string
 }
 
-function describeCameraError(error: unknown, fallbackHint: string): string {
-  if (error instanceof DOMException) {
-    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+function describeCameraError(cause: unknown, fallbackHint: string): string {
+  if (cause instanceof DOMException) {
+    if (cause.name === 'NotAllowedError' || cause.name === 'SecurityError') {
       return `Camera permission was denied. Allow camera access for this site. ${fallbackHint}`
     }
-    if (error.name === 'NotFoundError' || error.name === 'OverconstrainedError') {
+    if (cause.name === 'NotFoundError' || cause.name === 'OverconstrainedError') {
       return `No camera was found on this device. ${fallbackHint}`
     }
-    if (error.name === 'NotReadableError') {
+    if (cause.name === 'NotReadableError') {
       return `The camera is already in use by another application. ${fallbackHint}`
     }
   }
   return `The camera could not be started. ${fallbackHint}`
 }
 
-function fitScanDimensions(width: number, height: number): { width: number; height: number } {
+function fitScanDimensions(width: number, height: number) {
   const longest = Math.max(width, height)
   if (longest <= MAX_SCAN_DIMENSION) {
     return { width, height }

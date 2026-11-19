@@ -21,10 +21,6 @@ interface SessionListProps {
   renderSessions?: (args: SessionListRenderArgs) => ReactNode;
 }
 
-/**
- * Lets a caller lay out the loaded root sessions itself, for example grouped by worktree.
- * Search, paging, pinning, selection and delete stay owned by SessionList.
- */
 export interface SessionListRenderArgs {
   sessions: Session[];
   searchQuery: string;

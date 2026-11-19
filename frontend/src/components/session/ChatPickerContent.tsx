@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
-import type { Session } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { DeleteSessionDialog } from '@/components/session/DeleteSessionDialog'
 import {
@@ -7,12 +6,8 @@ import {
   type SessionPickerRow,
   type SessionPickerSection,
 } from '@/components/session/SessionPickerList'
-import {
-  PickerSearchBar,
-  optionId,
-  usePickerCursor,
-  usePickerKeyNav,
-} from '@/components/session/usePickerKeyboardNav'
+import { PickerSearchBar } from '@/components/session/PickerSearchBar'
+import { optionId, usePickerCursor, usePickerKeyNav } from '@/components/session/picker-cursor'
 import { useChatSessions, useDeleteChatSession, type ChatSessionRow } from '@/hooks/useChats'
 import { useToggleSessionPin } from '@/hooks/useSessionPins'
 
@@ -25,10 +20,6 @@ interface ChatPickerContentProps {
   searchTrailing?: React.ReactNode
 }
 
-/**
- * Chat sessions for the shared session picker: newest first, filtered by title, with pin and
- * confirm-before-delete actions on the same row menu as every other picker list.
- */
 export function ChatPickerContent({
   open,
   activeSessionID,
@@ -91,14 +82,6 @@ export function ChatPickerContent({
       if (chatRow) setChatToDelete(chatRow)
     },
     [rowByKey],
-  )
-
-  const handleRequestDelete = useCallback(
-    (session: Session) => {
-      const chatRow = chatRows.find((row) => row.session.id === session.id)
-      if (chatRow) setChatToDelete(chatRow)
-    },
-    [chatRows],
   )
 
   const handleTogglePin = useCallback(
@@ -180,7 +163,7 @@ export function ChatPickerContent({
           onOpenRow={openRow}
           onHoverRow={moveCursor}
           onTogglePin={handleTogglePin}
-          onRequestDelete={handleRequestDelete}
+          onRequestDelete={requestDeleteRow}
           registerRef={registerRef}
         />
 

@@ -303,7 +303,7 @@ export function KeyboardShortcuts() {
       updateSettingsRef.current({
         keyboardShortcuts: applied.keyboardShortcuts,
         directShortcuts: applied.directShortcuts,
-        ...(applied.leaderKey ? { leaderKey: applied.leaderKey } : {}),
+        leaderKey: applied.leaderKey,
       })
       setTempShortcuts(applied.keyboardShortcuts)
       if (applied.leaderKey !== undefined) {

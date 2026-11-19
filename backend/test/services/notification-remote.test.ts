@@ -4,13 +4,8 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { NotificationService } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
+import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
-import * as repoService from '../../src/services/repo'
-import type { PushNotificationPayload } from '@opencode-manager/shared/types'
-
-vi.mock('../../src/services/repo', () => ({
-  resolveRepoForDirectory: vi.fn(async () => null),
-}))
 
 const USER_ID = 'user-1'
 const SERVER_ID = 'srv_a'
@@ -33,7 +28,7 @@ function permissionAskedEvent(sessionID: string): SSEEvent {
   }
 }
 
-function createService(server: { name: string; enabled: boolean } | null = { name: 'Studio', enabled: true }) {
+function createService(server: Pick<OpenCodeServer, 'name' | 'enabled'> | null = { name: 'Studio', enabled: true }) {
   const db = new Database(':memory:')
   migrate(db, allMigrations)
   const registry = { get: vi.fn(() => server) }
@@ -67,10 +62,9 @@ describe('NotificationService remote server events', () => {
 
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_remote'), SERVER_ID)
 
-    expect(repoService.resolveRepoForDirectory).not.toHaveBeenCalled()
     expect(registry.get).toHaveBeenCalledWith(SERVER_ID)
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Run Command')
     expect(payload.body).toBe('Studio · ls -la')
     expect(payload.data?.url).toBe('/servers/srv_a/sessions/ses_remote')

@@ -39,7 +39,6 @@ const BLOCKED_REMOTE_ACCESS_HEADER_NAMES = new Set([
   "cf-connecting-ip",
 ]);
 
-/** Reports whether a header name is reserved by the transport or uses the proxy- prefix. */
 export function isBlockedRemoteAccessHeaderName(name: string): boolean {
   const normalized = name.trim().toLowerCase();
   return BLOCKED_REMOTE_ACCESS_HEADER_NAMES.has(normalized) || normalized.startsWith("proxy-");
@@ -80,7 +79,6 @@ export const RemoteAccessHeaderListSchema = z
     `Remote access headers are too long to fit in a QR code (limit ${REMOTE_ACCESS_HEADERS_MAX_ENCODED_LENGTH} encoded characters)`,
   );
 
-/** Serializes a remote-access header into the `Name:Value` form carried by the link `h` parameter. */
 export function formatRemoteAccessHeaderParam(header: RemoteAccessHeader): string {
   return `${header.name}:${header.value}`;
 }
@@ -190,19 +188,16 @@ export type PairedDevicesResponse = z.infer<typeof PairedDevicesResponseSchema>;
 export type DevicePairingErrorCode =
   (typeof DEVICE_PAIRING_ERROR_CODES)[keyof typeof DEVICE_PAIRING_ERROR_CODES];
 
-/** Builds the browser pairing link whose code stays in the URL fragment. */
 export function buildManagerBrowserPairingLink(origin: string, code: string): string {
   return `${trimUrlTrailingSlashes(origin)}${DEVICE_PAIRING_PATH}#c=${encodeURIComponent(code)}`;
 }
 
-/** Reads a pairing code from a URL fragment, or null when the fragment holds no valid code. */
 export function readPairingCodeFromHash(hash: string): string | null {
   const code = new URLSearchParams(hash.replace(/^#/, "")).get("c");
   const parsed = DevicePairingCodeSchema.safeParse(code);
   return parsed.success ? parsed.data : null;
 }
 
-/** Parses a browser pairing link into its origin and code, or null when the text is not one. */
 export function parseManagerBrowserPairingLink(text: string): { origin: string; code: string } | null {
   const url = parseHttpUrl(text.trim());
   if (!url) return null;

@@ -1,43 +1,43 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { execSync } from 'child_process'
-import { mkdtempSync, existsSync } from 'fs'
-import { tmpdir } from 'os'
-import path from 'path'
-import { rm } from 'fs/promises'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { rm } from 'node:fs/promises'
 
-import { resolveDefaultBranch, createWorktreeSafely, removeWorktree } from '../../src/services/repo'
+import { cloneOrigin, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
+import { createWorktreeSafely, removeWorktree, resolveDefaultBranch } from '../../src/services/repo'
+
+interface WorktreeCreator {
+  label: string
+  create: (repoPath: string, target: string, branch: string) => Promise<void>
+}
+
+const worktreeCreators: WorktreeCreator[] = [
+  {
+    label: 'createWorktreeSafely',
+    create: async (repoPath, target, branch) => {
+      await createWorktreeSafely(repoPath, target, branch, {})
+    },
+  },
+  {
+    label: 'git worktree add',
+    create: async (repoPath, target, branch) => {
+      git(['worktree', 'add', '-b', branch, target], repoPath)
+    },
+  },
+]
 
 describe('repo worktree helpers', () => {
-  let baseRepoPath: string
-  let originRepoPath: string
-  let worktreePath: string
   let tmpDir: string
-  const env = process.env as Record<string, string>
+  let baseRepoPath: string
 
   beforeAll(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'repo-worktree-test-'))
-    originRepoPath = path.join(tmpDir, 'origin.git')
+    const originRepoPath = path.join(tmpDir, 'origin.git')
     baseRepoPath = path.join(tmpDir, 'base')
-    worktreePath = path.join(tmpDir, 'feature-x')
-
-    // Init bare origin
-    execSync(`git init --bare -b main "${originRepoPath}"`, { env })
-
-    // Clone origin to get a working base repo (default branch is "main")
-    execSync(`git clone "${originRepoPath}" "${baseRepoPath}"`, { env })
-
-    // Set git config for commits
-    execSync(`git -C "${baseRepoPath}" config user.email test@test.com`, { env })
-    execSync(`git -C "${baseRepoPath}" config user.name Test`, { env })
-
-    // Ensure the branch is "main" and push
-    execSync(`git -C "${baseRepoPath}" branch -M main`, { env })
-    execSync(`git -C "${baseRepoPath}" commit --allow-empty -m "Initial commit"`, { env })
-    execSync(`git -C "${baseRepoPath}" push origin main`, { env })
-
-    // Set bare repo HEAD to main so origin/HEAD is resolvable
-    execSync(`git -C "${originRepoPath}" symbolic-ref HEAD refs/heads/main`, { env })
-    execSync(`git -C "${baseRepoPath}" remote set-head origin --auto`, { env })
+    createOrigin(originRepoPath, path.join(tmpDir, 'seed'))
+    cloneOrigin(originRepoPath, baseRepoPath)
+    git(['remote', 'set-head', 'origin', '--auto'], baseRepoPath)
   })
 
   afterAll(async () => {
@@ -45,52 +45,38 @@ describe('repo worktree helpers', () => {
   })
 
   describe('resolveDefaultBranch', () => {
-    it('resolves default branch from origin/HEAD', async () => {
-      const branch = await resolveDefaultBranch(baseRepoPath, env)
-      expect(branch).toBe('main')
+    it('resolves the default branch from origin/HEAD', async () => {
+      await expect(resolveDefaultBranch(baseRepoPath, {})).resolves.toBe('main')
     })
 
     it('falls back to main when origin/HEAD cannot be resolved', async () => {
-      const branch = await resolveDefaultBranch('/nonexistent/path', env)
-      expect(branch).toBe('main')
+      await expect(resolveDefaultBranch(path.join(tmpDir, 'missing-repo'), {})).resolves.toBe('main')
     })
   })
 
   describe('createWorktreeSafely', () => {
     it('creates a worktree for a new branch and checks it out', async () => {
-      await createWorktreeSafely(baseRepoPath, worktreePath, 'feature/x', env)
+      const worktreePath = path.join(tmpDir, uniqueName('feature'))
+
+      await createWorktreeSafely(baseRepoPath, worktreePath, 'feature/x', {})
 
       expect(existsSync(worktreePath)).toBe(true)
-
-      const branch = execSync(`git -C "${worktreePath}" rev-parse --abbrev-ref HEAD`, { encoding: 'utf-8' }).trim()
-      expect(branch).toBe('feature/x')
+      expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath)).toBe('feature/x')
     })
   })
 
   describe('removeWorktree', () => {
-    it('removes a worktree directory and prunes the worktree entry', async () => {
+    it.each(worktreeCreators)('removes and prunes a worktree created with $label', async ({ create }) => {
+      const worktreePath = path.join(tmpDir, uniqueName('worktree'))
+      const branch = path.basename(worktreePath)
+
+      await create(baseRepoPath, worktreePath, branch)
       expect(existsSync(worktreePath)).toBe(true)
 
       await removeWorktree(baseRepoPath, worktreePath)
 
       expect(existsSync(worktreePath)).toBe(false)
-
-      // Verify pruning — the removed worktree should not appear in the list
-      const worktreeList = execSync(`git -C "${baseRepoPath}" worktree list`, { encoding: 'utf-8' })
-      expect(worktreeList).not.toContain(worktreePath)
-    })
-
-    it('removes a linked worktree created with git worktree add', async () => {
-      const linkedPath = path.join(tmpDir, 'linked-manual')
-      execSync(`git -C "${baseRepoPath}" worktree add -b manual/linked "${linkedPath}"`, { env })
-      expect(existsSync(linkedPath)).toBe(true)
-
-      await removeWorktree(baseRepoPath, linkedPath)
-
-      expect(existsSync(linkedPath)).toBe(false)
-
-      const worktreeList = execSync(`git -C "${baseRepoPath}" worktree list`, { encoding: 'utf-8' })
-      expect(worktreeList).not.toContain(linkedPath)
+      expect(git(['worktree', 'list'], baseRepoPath)).not.toContain(worktreePath)
     })
   })
 })

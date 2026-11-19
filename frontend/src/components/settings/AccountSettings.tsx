@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { useState } from 'react'
 import { Edit2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
@@ -14,13 +15,17 @@ import { ConnectDeviceSettings } from './ConnectDeviceSettings'
 import { PairedDevicesSettings } from './PairedDevicesSettings'
 import { RemoteAccessHeadersSettings } from './RemoteAccessHeadersSettings'
 
-interface Passkey {
-  id: string
-  name?: string
-  credentialID: string
-  createdAt: string
-  deviceType: string
-}
+const passkeySchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  credentialID: z.string(),
+  createdAt: z.string(),
+  deviceType: z.string(),
+})
+
+const passkeysSchema = z.array(passkeySchema)
+
+type Passkey = z.infer<typeof passkeySchema>
 
 export function AccountSettings() {
   const { user, addPasskey, logout } = useAuth()
@@ -36,12 +41,13 @@ export function AccountSettings() {
 
   const { data: passkeys, isLoading: passkeysLoading } = useQuery({
     queryKey: ['passkeys'],
-    queryFn: async () => {
+    queryFn: async (): Promise<Passkey[]> => {
       const response = await fetch('/api/auth/passkey/list-user-passkeys', {
         credentials: 'include',
       })
       if (!response.ok) return []
-      return response.json() as Promise<Passkey[]>
+      const parsed = passkeysSchema.safeParse(await response.json())
+      return parsed.success ? parsed.data : []
     },
     enabled: !!user,
   })

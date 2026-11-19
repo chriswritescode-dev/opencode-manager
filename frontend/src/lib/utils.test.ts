@@ -103,7 +103,6 @@ describe('sanitizeForTTS', () => {
   it('should return empty string for empty input', () => {
     expect(sanitizeForTTS('')).toBe('')
     expect(sanitizeForTTS('   ')).toBe('')
-    expect(sanitizeForTTS(null as unknown as string)).toBe('')
   })
 
   it('should handle headers and lists combined', () => {

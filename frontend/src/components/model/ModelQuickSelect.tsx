@@ -143,7 +143,7 @@ function VirtualizedList<T>({
     const updateViewportHeight = () => setViewportHeight(element.clientHeight)
     updateViewportHeight()
 
-    if (typeof ResizeObserver === 'undefined') {
+    if (!('ResizeObserver' in globalThis)) {
       window.addEventListener('resize', updateViewportHeight)
       return () => window.removeEventListener('resize', updateViewportHeight)
     }
@@ -387,7 +387,7 @@ export const ModelQuickSelect = memo(function ModelQuickSelect({
     const container = quickListRef.current
     if (!container) return
     const element = container.querySelector<HTMLElement>(`[data-model-index="${activeIndex}"]`)
-    if (element && typeof element.scrollIntoView === 'function') {
+    if (element) {
       element.scrollIntoView({ block: 'nearest' })
     }
   }, [activeIndex, showAllModels])
@@ -721,16 +721,13 @@ export const ModelQuickSelect = memo(function ModelQuickSelect({
             </div>
           ) : (
             <div className="flex-1 flex overflow-hidden min-h-0">
-              {/* Provider sidebar — desktop only */}
               <div className="hidden md:flex md:flex-col w-48 lg:w-56 border-r border-border overflow-y-auto flex-shrink-0">
                 <div className="p-3 space-y-1">
                   {providerItems.map(renderSidebarProviderOption)}
                 </div>
               </div>
 
-              {/* Right panel */}
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-                {/* Desktop: model grid */}
                 <div className="hidden md:block flex-1 overflow-hidden min-h-0">
                   <VirtualizedList
                     items={browseModels}
@@ -744,7 +741,6 @@ export const ModelQuickSelect = memo(function ModelQuickSelect({
                   />
                 </div>
 
-                {/* Mobile: current single-column navigation */}
                 <div className="md:hidden flex-1 overflow-hidden min-h-0">
                   {selectedProviderId ? (
                     <VirtualizedList

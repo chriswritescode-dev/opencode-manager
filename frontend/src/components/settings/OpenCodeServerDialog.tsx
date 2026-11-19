@@ -100,7 +100,6 @@ function buildDefaultValues(server?: OpenCodeServer | null): ServerFormValues {
   }
 }
 
-/** Labels a reachable server's version: supported, same major but different, or an incompatible major. */
 export function OpenCodeVersionBadge({ result }: { result: OpenCodeServerTestResult }) {
   if (result.versionSupported) return <Badge variant="secondary">Supported</Badge>
   if (result.version && isSameOpenCodeMajor(result.version)) {

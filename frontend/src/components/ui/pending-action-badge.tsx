@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 
 type BadgeColor = 'orange' | 'blue'
 
-const colorStyles: Record<BadgeColor, { bg: string; hover: string; text: string }> = {
+const colorStyles = {
   orange: {
     bg: 'bg-highlight/10',
     hover: 'hover:bg-highlight/20',
@@ -15,7 +15,7 @@ const colorStyles: Record<BadgeColor, { bg: string; hover: string; text: string 
     hover: 'hover:bg-info/20',
     text: 'text-info',
   },
-}
+} satisfies Record<BadgeColor, { bg: string; hover: string; text: string }>
 
 interface PendingActionBadgeProps {
   count: number

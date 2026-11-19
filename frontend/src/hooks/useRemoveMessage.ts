@@ -5,7 +5,7 @@ import {
   stageRevert,
 } from '@/api/opencode'
 import { parseOpenCodeModelRef } from '@opencode-manager/shared/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'

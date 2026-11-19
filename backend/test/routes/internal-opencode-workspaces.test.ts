@@ -1,138 +1,93 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
-import type { Database } from 'bun:sqlite'
-import type { Repo } from '../../src/types/repo'
+import { z } from 'zod'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
 
-const mockDb = {
-  prepare: vi.fn().mockReturnValue({
-    run: vi.fn(),
-    get: vi.fn(),
-    all: vi.fn(),
+const WorkspaceSchema = z.object({
+  repoId: z.number(),
+  name: z.string(),
+  branch: z.string().nullable(),
+  cloneStatus: z.string(),
+  directory: z.string(),
+  originUrl: z.string().nullable(),
+  projectId: z.string().nullable(),
+  isWorktree: z.boolean(),
+  extra: z.object({
+    repoId: z.number(),
+    localPath: z.string(),
+    fullPath: z.string(),
   }),
-  exec: vi.fn(),
-  close: vi.fn(),
-  transaction: vi.fn((fn: () => void) => fn()),
-} as unknown as Database
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(() => mockDb),
-}))
-
-const mockListRepos = vi.fn()
-vi.mock('../../src/db/queries', async () => {
-  const { getRepoDisplayName } = await vi.importActual<typeof import('@opencode-manager/shared/utils')>('@opencode-manager/shared/utils')
-  return {
-    listRepos: (...args: unknown[]) => mockListRepos(...args),
-    getRepoName: (repo: Parameters<typeof getRepoDisplayName>[0]) => getRepoDisplayName(repo),
-  }
 })
 
-vi.mock('../../src/db/migration-runner', () => ({
-  migrate: vi.fn(),
-}))
-
-vi.mock('../../src/services/internal-token', () => ({
-  getOrCreateInternalToken: vi.fn().mockReturnValue('test-internal-token'),
-}))
-
-vi.mock('../../src/services/schedules', () => ({
-  ScheduleService: vi.fn(),
-}))
-
-vi.mock('../../src/services/notification', () => ({
-  NotificationService: vi.fn(),
-}))
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode/client', () => ({
-  createOpenCodeClient: vi.fn(),
-}))
-
-function makeRepo(overrides: Partial<Repo>): Repo {
-  return {
-    id: 1,
-    localPath: 'test-repo',
-    fullPath: '/tmp/test-repo',
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: Date.now(),
-    ...overrides,
-  }
-}
+const WorkspacesResponseSchema = z.object({ workspaces: z.array(WorkspaceSchema) })
 
 describe('internal-opencode-workspaces routes', () => {
+  let db: ReturnType<typeof createTestDatabase>
   let app: Hono
   let token: string
 
+  function authHeaders() {
+    return { authorization: `Bearer ${token}` }
+  }
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockListRepos.mockReturnValue([])
+    db = createTestDatabase()
+    token = getOrCreateInternalToken(db)
     app = new Hono()
-    app.route('/api/internal', createInternalTestApp(mockDb))
-    token = 'test-internal-token'
+    app.route('/api/internal', createInternalTestApp(db))
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('GET /api/internal/opencode-workspaces returns 401 without bearer token', async () => {
     const res = await app.request('/api/internal/opencode-workspaces')
+
     expect(res.status).toBe(401)
   })
 
-  it('GET /api/internal/opencode-workspaces returns 200 with bearer token', async () => {
-    const res = await app.request('/api/internal/opencode-workspaces', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { workspaces: unknown[] }
-    expect(body).toHaveProperty('workspaces')
-    expect(Array.isArray(body.workspaces)).toBe(true)
-  })
-
   it('GET /api/internal/opencode-workspaces only returns ready repos', async () => {
-    mockListRepos.mockReturnValue([
-      makeRepo({ id: 1, cloneStatus: 'ready', localPath: 'ready-repo' }),
-      makeRepo({ id: 2, cloneStatus: 'cloning', localPath: 'cloning-repo' }),
-      makeRepo({ id: 3, cloneStatus: 'error', localPath: 'error-repo' }),
-    ])
+    seedRepo(db, { localPath: 'ready-repo', cloneStatus: 'ready' })
+    seedRepo(db, { localPath: 'cloning-repo', cloneStatus: 'cloning' })
+    seedRepo(db, { localPath: 'error-repo', cloneStatus: 'error' })
 
-    const res = await app.request('/api/internal/opencode-workspaces', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await app.request('/api/internal/opencode-workspaces', { headers: authHeaders() })
+    const body = await readJson(res, WorkspacesResponseSchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { workspaces: Array<{ repoId: number; cloneStatus: string }> }
-    expect(body.workspaces.length).toBe(1)
-    expect(body.workspaces[0]?.cloneStatus).toBe('ready')
-    expect(body.workspaces[0]?.repoId).toBeDefined()
+    expect(body.workspaces.map((workspace) => workspace.cloneStatus)).toEqual(['ready'])
+    expect(body.workspaces[0]?.repoId).toBeGreaterThan(0)
   })
 
-  it('GET /api/internal/opencode-workspaces returns workspace structure', async () => {
-    mockListRepos.mockReturnValue([
-      makeRepo({ id: 1, localPath: 'test-repo', cloneStatus: 'ready' }),
-      makeRepo({ id: 2, localPath: 'worktree-repo', cloneStatus: 'ready', isWorktree: true }),
-    ])
+  it('GET /api/internal/opencode-workspaces returns the workspace structure', async () => {
+    const repo = seedRepo(db, { localPath: 'test-repo', cloneStatus: 'ready' })
+    const worktree = seedRepo(db, { localPath: 'worktree-repo', cloneStatus: 'ready', isWorktree: true })
 
-    const res = await app.request('/api/internal/opencode-workspaces', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await app.request('/api/internal/opencode-workspaces', { headers: authHeaders() })
+    const body = await readJson(res, WorkspacesResponseSchema)
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { workspaces: Array<{ repoId: number; name: string; branch: string | null; cloneStatus: string; directory: string; isWorktree: boolean; extra: { repoId: number; localPath: string; fullPath: string } }> }
-    expect(body.workspaces.length).toBe(2)
-    const workspace = body.workspaces.find((w) => w.repoId === 1)!
-    expect(workspace).toHaveProperty('repoId')
-    expect(workspace).toHaveProperty('name')
-    expect(workspace).toHaveProperty('branch')
-    expect(workspace).toHaveProperty('cloneStatus')
-    expect(workspace).toHaveProperty('directory')
-    expect(workspace).toHaveProperty('projectId')
-    expect(workspace).toHaveProperty('extra')
-    expect(workspace.extra).toHaveProperty('repoId')
-    expect(workspace.extra).toHaveProperty('localPath')
-    expect(workspace.extra).toHaveProperty('fullPath')
-    const worktreeWorkspace = body.workspaces.find((w) => w.repoId === 2)!
-    expect(workspace.isWorktree).toBe(false)
-    expect(worktreeWorkspace.isWorktree).toBe(true)
+    expect(body.workspaces).toHaveLength(2)
+
+    const workspace = body.workspaces.find((entry) => entry.repoId === repo.id)
+    expect(workspace).toEqual({
+      repoId: repo.id,
+      name: 'test-repo',
+      branch: null,
+      cloneStatus: 'ready',
+      directory: repo.fullPath,
+      originUrl: null,
+      projectId: null,
+      isWorktree: false,
+      extra: { repoId: repo.id, localPath: 'test-repo', fullPath: repo.fullPath },
+    })
+
+    const worktreeWorkspace = body.workspaces.find((entry) => entry.repoId === worktree.id)
+    expect(worktreeWorkspace?.isWorktree).toBe(true)
+    expect(worktreeWorkspace?.directory).toBe(worktree.fullPath)
   })
 })

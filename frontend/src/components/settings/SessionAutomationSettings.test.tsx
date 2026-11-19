@@ -1,70 +1,58 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SessionAutomationSettings } from './SessionAutomationSettings'
-import { useSettings } from '@/hooks/useSettings'
-import type { UserPreferences } from '@/api/types/settings'
-import { createUseSettingsMock } from '@/test/test-utils'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { installPointerCapture } from '@/test/browserFakes'
 
-vi.mock('@/hooks/useSettings')
-
-const basePreferences: UserPreferences = {
-  theme: 'dark',
-  mode: 'build',
-  autoScroll: true,
-  expandDiffs: true,
-  expandToolCalls: false,
-  showReasoning: false,
-  simpleChatMode: false,
-  keyboardShortcuts: {},
-  customCommands: [],
-}
-
-function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences: basePreferences, ...overrides }))
+function renderAutomation(initial: Parameters<typeof createSettingsServer>[0] = {}) {
+  installPointerCapture()
+  const settings = createSettingsServer(initial)
+  const result = renderWithProviders(<SessionAutomationSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: settings.routes,
+  })
+  return { ...result, settings }
 }
 
 describe('SessionAutomationSettings', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
-  })
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('defaults the select to ask every time', () => {
-    mockUseSettings()
-    render(<SessionAutomationSettings />)
+  it('defaults the select to ask every time', async () => {
+    renderAutomation()
 
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Default permission mode for new sessions' })).toHaveTextContent('Ask every time')
+    expect(
+      await screen.findByRole('combobox', { name: 'Default permission mode for new sessions' }),
+    ).toHaveTextContent('Ask every time')
   })
 
   it('persists the chosen default permission mode immediately', async () => {
     const user = userEvent.setup()
-    const updateSettings = vi.fn()
-    mockUseSettings({
-      preferences: { ...basePreferences, sessionDefaults: { permissionMode: 'ask' } },
-      updateSettings,
-    })
-    render(<SessionAutomationSettings />)
+    const { fetchFake } = renderAutomation()
 
-    await user.click(screen.getByRole('combobox', { name: 'Default permission mode for new sessions' }))
+    await user.click(
+      await screen.findByRole('combobox', { name: 'Default permission mode for new sessions' }),
+    )
     await user.click(screen.getByRole('option', { name: 'Accept everything' }))
 
-    expect(updateSettings).toHaveBeenCalledWith({ sessionDefaults: { permissionMode: 'auto' } })
+    expect(fetchFake.lastRequest('PATCH', '/api/settings')?.body).toEqual({
+      preferences: { sessionDefaults: { permissionMode: 'auto' } },
+    })
+    expect(
+      screen.getByRole('combobox', { name: 'Default permission mode for new sessions' }),
+    ).toHaveTextContent('Accept everything')
   })
 
-  it('renders no goal controls', () => {
-    mockUseSettings({ preferences: { ...basePreferences, sessionDefaults: { permissionMode: 'ask' } } })
-    render(<SessionAutomationSettings />)
+  it('renders no goal controls', async () => {
+    renderAutomation({ sessionDefaults: { permissionMode: 'ask' } })
 
-    expect(screen.getByRole('combobox', { name: 'Default permission mode for new sessions' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('Goal auditor model')).toBeNull()
-    expect(screen.queryByLabelText('Max automatic continuations')).toBeNull()
-    expect(screen.queryByLabelText('Token budget per goal')).toBeNull()
+    expect(
+      await screen.findByRole('combobox', { name: 'Default permission mode for new sessions' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Goal auditor model')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Max automatic continuations')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Token budget per goal')).not.toBeInTheDocument()
   })
 })

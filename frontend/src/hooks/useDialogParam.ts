@@ -20,9 +20,6 @@ export function dialogSearch(name: string, extraParams?: Record<string, string>)
   return `?${params.toString()}`
 }
 
-/**
- * Opens a dialog in an existing param set: sets `dialog` to `name`, applies `extraParams`, and clears `mobileTab`.
- */
 export function openDialogParams(
   params: URLSearchParams,
   name: string,

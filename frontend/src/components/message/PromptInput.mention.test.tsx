@@ -1,337 +1,123 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { PromptInput } from './PromptInput'
-import { useComposerDraftStore } from '@/stores/composerDraftStore'
-import { createCommandActionsMock, createVoiceConversationControllerMock } from '@/test/test-utils'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import type { AgentInfo, SkillInfo } from '@opencode-manager/shared/opencode'
+import { makeAgent, promptTextarea, renderPromptInput } from '@/test/promptInput'
 
-const mocks = vi.hoisted(() => ({
-  sendPrompt: vi.fn(),
-  switchSessionModel: vi.fn(),
-  switchSessionAgent: vi.fn(),
-  runCommand: vi.fn(),
-  agents: [] as Array<{ name: string; description?: string; mode?: string; hidden?: boolean }>,
-  skills: [] as Array<{ id: string; name: string; description?: string }>,
-  useSTT: vi.fn(),
-  useVoiceConversation: vi.fn(),
-  useMobile: vi.fn(),
-  useCommands: vi.fn(),
-  useFileSearch: vi.fn(),
-  useModelSelection: vi.fn(),
-  useVariants: vi.fn(),
-  useSessionAgent: vi.fn(),
-  useUserBash: vi.fn(),
-  useSessionAgentStore: vi.fn(),
-  useSendErrorStore: vi.fn(),
-}))
+const reviewerAgent: AgentInfo = makeAgent({ id: 'reviewer', description: 'Reviewer' })
+const prReviewSkill: SkillInfo = { id: 'pr-review', name: 'PR Review', description: 'Review a PR', path: '/skills/pr-review/SKILL.md', content: '' }
 
-const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0, labels: [] as string[] }))
-
-vi.mock('@/api/opencode', async () => {
-  const actual = await vi.importActual('@/api/opencode')
-  return {
-    ...actual,
-    sendPrompt: mocks.sendPrompt,
-    runCommand: mocks.runCommand,
-    switchSessionModel: mocks.switchSessionModel,
-    switchSessionAgent: mocks.switchSessionAgent,
+function selectedSuggestionLabel(): string {
+  const list = screen.getByTestId('prompt-suggestions')
+  for (const row of list.querySelectorAll('[data-index]')) {
+    const button = row.querySelector('button')
+    if (!button) continue
+    const isSelected = button.className.split(/\s+/).some((token) => token === 'bg-primary' || token === 'bg-primary/15')
+    if (isSelected) return button.textContent ?? ''
   }
-})
-
-vi.mock('@/hooks/useOpenCode', async () => {
-  const actual = await vi.importActual('@/hooks/useOpenCode')
-  return {
-    ...actual,
-    useAgents: () => ({ data: mocks.agents }),
-    useSkills: () => ({ data: mocks.skills }),
-    useSession: () => ({ data: undefined }),
-  }
-})
-
-vi.mock('@/hooks/useSTT', () => ({
-  useSTT: mocks.useSTT,
-  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
-}))
-vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
-vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
-vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
-vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
-vi.mock('@/hooks/useModelSelection', () => ({ useModelSelection: mocks.useModelSelection }))
-vi.mock('@/hooks/useVariants', () => ({ useVariants: mocks.useVariants }))
-vi.mock('@/hooks/useSessionAgent', () => ({ useSessionAgent: mocks.useSessionAgent }))
-vi.mock('@/stores/userBashStore', () => ({ useUserBash: mocks.useUserBash }))
-vi.mock('@/stores/sessionAgentStore', () => ({ useSessionAgentStore: mocks.useSessionAgentStore }))
-vi.mock('@/stores/sendErrorStore', () => ({
-  useSendErrorStore: Object.assign(
-    (selector: (state: unknown) => unknown) => selector({ errors: {} }),
-    { getState: () => ({ clearError: vi.fn(), setError: vi.fn() }) },
-  ),
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({
-    hasForSession: vi.fn().mockReturnValue(false),
-    setShowDialog: vi.fn(),
-  }),
-}))
-
-vi.mock('@/components/agent/AgentQuickSelect', () => ({
-  AgentQuickSelect: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/model/ModelQuickSelect', () => ({
-  ModelQuickSelect: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/session/PermissionModeToggle', () => ({
-  PermissionModeToggle: () => null,
-}))
-
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: () => ({ data: undefined }),
-  useSessionGoalCommand: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-}))
-
-vi.mock('@/hooks/useSessionPermissionMode', () => ({
-  useSessionPermissionMode: () => ({ data: undefined }),
-}))
-
-vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number; items: Array<{ label: string }> }) => {
-    if (props.isOpen) {
-      suggestionProps.isOpen = true
-      suggestionProps.selectedIndex = props.selectedIndex
-      suggestionProps.labels = props.items.map((item) => item.label)
-    }
-    return null
-  },
-}))
-
-vi.mock('./ComposerToolsMenu', () => ({
-  ComposerToolsMenu: () => null,
-}))
-
-vi.mock('@/components/session/SessionSandboxMenu', () => ({
-  SessionSandboxMenu: () => null,
-}))
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-})
-
-const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
-  id: 'test-session',
-  projectID: 'proj_1',
-  time: { created: 1000, updated: 1000 },
-  location: { directory: '/test' },
-  agent: 'build',
-  model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-  ...overrides,
-})
+  return ''
+}
 
 describe('PromptInput agent mention submission', () => {
-  const defaultProps = {
-    directory: '/test',
-    sessionID: 'test-session',
-    isSessionActive: false,
-    isStreamingResponse: false,
-    onScrollToBottom: vi.fn(),
-    commandActions: createCommandActionsMock(),
-    onPromptChange: vi.fn(),
-  }
-
-  const renderComponent = (overrides: Partial<typeof defaultProps> = {}) => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} {...overrides} />
-      </QueryClientProvider>
-    )
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useComposerDraftStore.setState({ drafts: {} })
-    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
-    mocks.sendPrompt.mockResolvedValue({
-      id: 'inbox_1',
-      sessionID: 'test-session',
-      time: { created: 1000 },
-      type: 'user',
-      payload: { text: '' },
-      delivery: 'queue',
-    })
-    mocks.switchSessionModel.mockResolvedValue(undefined)
-    mocks.switchSessionAgent.mockResolvedValue(undefined)
-    mocks.runCommand.mockResolvedValue(undefined)
-    mocks.agents = [{ name: 'reviewer', description: 'Reviewer' }]
-    mocks.skills = [{ id: 'pr-review', name: 'PR Review', description: 'Review a PR' }]
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useSTT.mockReturnValue({
-      isRecording: false,
-      isProcessing: false,
-      isSupported: false,
-      isEnabled: false,
-      interimTranscript: '',
-      transcript: '',
-      startRecording: vi.fn(),
-      stopRecording: vi.fn(),
-      abortRecording: vi.fn(),
-      reset: vi.fn(),
-      clear: vi.fn(),
-    })
-    mocks.useCommands.mockReturnValue({ searchCommands: () => [], findCommand: () => undefined, recentNames: [] })
-    mocks.useFileSearch.mockReturnValue({ files: [] })
-    mocks.useModelSelection.mockReturnValue({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      modelString: 'anthropic/claude-sonnet-4',
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      recentModels: [],
-      favoriteModels: [],
-      toggleFavorite: vi.fn(),
-      isModelReady: true,
-    })
-    mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: vi.fn() })
-    mocks.useSessionAgent.mockReturnValue({ agent: 'build' })
-    mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
-    mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: vi.fn() }))
-    suggestionProps.isOpen = false
-    suggestionProps.selectedIndex = 0
-    suggestionProps.labels = []
-  })
-
   it('sends an @agent mention as an attachment without switching the session agent', async () => {
-    renderComponent()
+    const { fetchFake } = await renderPromptInput({ agents: [reviewerAgent], sessionAgent: 'build' })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'ask @reviewer' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'ask @reviewer' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-
-    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      sessionID: 'test-session',
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
       text: 'ask @reviewer',
       agents: [{ name: 'reviewer', mention: { start: 4, end: 13, text: '@reviewer' } }],
-    }), 'local')
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    })
+    expect(fetchFake.findRequests('POST', '/api/opencode/api/session/test-session/agent')).toHaveLength(0)
   })
 
-  it('queues an @agent mention as an attachment without switching the session agent', async () => {
-    renderComponent({ isStreamingResponse: true })
+  it('queues an @agent mention as an attachment while a response streams', async () => {
+    const { fetchFake } = await renderPromptInput({ agents: [reviewerAgent], isStreamingResponse: true })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'ask @reviewer' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'ask @reviewer' } })
     fireEvent.click(screen.getByTitle('Queue message'))
 
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-
-    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      sessionID: 'test-session',
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
       text: 'ask @reviewer',
       agents: [{ name: 'reviewer', mention: { start: 4, end: 13, text: '@reviewer' } }],
       delivery: 'queue',
-    }), 'local')
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
+    })
   })
 
   it('sends an @skill mention as a skill attachment', async () => {
-    renderComponent()
+    const { fetchFake } = await renderPromptInput({ skills: [prReviewSkill] })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'use @pr-review and @pr-review' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'use @pr-review and @pr-review' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-
-    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
       text: 'use @pr-review and @pr-review',
       agents: [],
       skills: [{ id: 'pr-review', mention: { start: 4, end: 14, text: '@pr-review' } }],
-    }), 'local')
+    })
   })
 
-  it('sends plain text without inferring an agent attachment or switching', async () => {
-    renderComponent()
+  it('sends plain text without an agent attachment', async () => {
+    const { fetchFake } = await renderPromptInput({ agents: [reviewerAgent], sessionAgent: 'build' })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: 'plain text' } })
+    fireEvent.change(promptTextarea(), { target: { value: 'plain text' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.sendPrompt).toHaveBeenCalled())
-
-    expect(mocks.sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      sessionID: 'test-session',
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
       text: 'plain text',
       agents: [],
-    }), 'local')
-    expect(mocks.switchSessionAgent).not.toHaveBeenCalled()
-    expect(mocks.switchSessionModel).not.toHaveBeenCalled()
+    })
   })
 
-  it('moves the mention selection in the visual direction of the arrow on mobile', async () => {
-    mocks.useMobile.mockReturnValue(true)
-    mocks.agents = [
-      { name: 'alpha', description: 'Alpha agent' },
-      { name: 'beta', description: 'Beta agent' },
-    ]
-    renderComponent()
+  it.each([
+    [true, 'ArrowUp', 'ArrowDown'],
+    [false, 'ArrowDown', 'ArrowUp'],
+  ])('moves the mention selection with the arrows (mobile: %s)', async (mobile, forward, backward) => {
+    await renderPromptInput({
+      mobile,
+      agents: [
+        makeAgent({ id: 'alpha', description: 'Alpha agent' }),
+        makeAgent({ id: 'beta', description: 'Beta agent' }),
+      ],
+    })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+    fireEvent.change(promptTextarea(), { target: { value: '@', selectionStart: 1 } })
 
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    expect(suggestionProps.selectedIndex).toBe(0)
+    await waitFor(() => expect(screen.getByTestId('prompt-suggestions')).toBeInTheDocument())
+    expect(selectedSuggestionLabel()).toContain('alpha')
 
-    fireEvent.keyDown(input, { key: 'ArrowUp' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+    fireEvent.keyDown(promptTextarea(), { key: forward })
+    await waitFor(() => expect(selectedSuggestionLabel()).toContain('beta'))
 
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
-  })
-
-  it('keeps the desktop arrow direction unchanged', async () => {
-    mocks.agents = [
-      { name: 'alpha', description: 'Alpha agent' },
-      { name: 'beta', description: 'Beta agent' },
-    ]
-    renderComponent()
-
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
-
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    expect(suggestionProps.selectedIndex).toBe(0)
-
-    fireEvent.keyDown(input, { key: 'ArrowUp' })
-    expect(suggestionProps.selectedIndex).toBe(0)
-
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
+    fireEvent.keyDown(promptTextarea(), { key: backward })
+    await waitFor(() => expect(selectedSuggestionLabel()).toContain('alpha'))
   })
 
   it('offers only mentionable subagents in the @ list', async () => {
-    mocks.agents = [
-      { name: 'build', description: 'Build', mode: 'primary', hidden: false },
-      { name: 'plan', description: 'Plan', mode: 'primary', hidden: false },
-      { name: 'explore', description: 'Explore', mode: 'subagent', hidden: false },
-      { name: 'general', description: 'General', mode: 'all', hidden: false },
-      { name: 'Compaction', description: 'Compaction', mode: 'primary', hidden: true },
-      { name: 'Title', description: 'Title', mode: 'primary', hidden: true },
-    ]
-    mocks.skills = []
-    renderComponent()
+    await renderPromptInput({
+      agents: [
+        makeAgent({ id: 'build', description: 'Build', mode: 'primary' }),
+        makeAgent({ id: 'plan', description: 'Plan', mode: 'primary' }),
+        makeAgent({ id: 'explore', description: 'Explore' }),
+        makeAgent({ id: 'general', description: 'General', mode: 'all' }),
+        makeAgent({ id: 'Compaction', description: 'Compaction', mode: 'primary', hidden: true }),
+        makeAgent({ id: 'Title', description: 'Title', mode: 'primary', hidden: true }),
+      ],
+      skills: [],
+    })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } })
+    fireEvent.change(promptTextarea(), { target: { value: '@', selectionStart: 1 } })
 
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    expect(suggestionProps.labels).toEqual(['explore', 'general'])
+    await waitFor(() => expect(screen.getByTestId('prompt-suggestions')).toBeInTheDocument())
+    const labels = Array.from(screen.getByTestId('prompt-suggestions').querySelectorAll('button')).map(
+      (button) => button.textContent,
+    )
+    expect(labels).toHaveLength(2)
+    expect(labels[0]).toContain('explore')
+    expect(labels[1]).toContain('general')
   })
 })

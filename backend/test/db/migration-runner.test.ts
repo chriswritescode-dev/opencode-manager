@@ -1,8 +1,13 @@
 import { Database } from 'bun:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { migrate, type Migration } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
-import { logger } from '../../src/utils/logger'
+import { selectRow, selectRows } from '../../src/db/rows'
+import { expectLoggedMessage, testLogEntries } from '../helpers/log-assertions'
+
+const AppliedMigrationIdRowSchema = z.object({ id: z.string() })
+const TableNameRowSchema = z.object({ name: z.string() })
 
 function makeMigration(id: string, up: () => void = vi.fn(), legacy?: Migration['legacy']): Migration {
   return { id, legacy, up, down: () => {} }
@@ -16,7 +21,7 @@ function createLegacyTable(db: Database, rows: Array<[number, string]>): void {
 }
 
 function appliedIds(db: Database): string[] {
-  return (db.prepare('SELECT id FROM applied_migrations ORDER BY id').all() as Array<{ id: string }>).map((row) => row.id)
+  return selectRows(db, AppliedMigrationIdRowSchema, 'SELECT id FROM applied_migrations ORDER BY id').map((row) => row.id)
 }
 
 describe('migrate', () => {
@@ -60,27 +65,26 @@ describe('migrate', () => {
   it('adopts numbered migrations recorded in the old version-keyed table', () => {
     const db = new Database(':memory:')
     createLegacyTable(db, [[15, 'schedule-worktree-isolation']])
-    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const up = vi.fn()
 
     migrate(db, [makeMigration('015-schedule-worktree-isolation', up, { version: 15, name: 'schedule-worktree-isolation' })])
 
     expect(up).not.toHaveBeenCalled()
     expect(appliedIds(db)).toEqual(['015-schedule-worktree-isolation'])
-    expect(warnSpy).not.toHaveBeenCalled()
+    expect(testLogEntries('warn')).toHaveLength(0)
   })
 
   it('warns and skips when a legacy version was recorded under a different name', () => {
     const db = new Database(':memory:')
     createLegacyTable(db, [[15, 'repos-add-name']])
-    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const up = vi.fn()
 
     migrate(db, [makeMigration('015-schedule-worktree-isolation', up, { version: 15, name: 'schedule-worktree-isolation' })])
 
     expect(up).not.toHaveBeenCalled()
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Migration version 15 is recorded as "repos-add-name" but the code defines "schedule-worktree-isolation"'),
+    expectLoggedMessage(
+      'Migration version 15 is recorded as "repos-add-name" but the code defines "schedule-worktree-isolation"',
+      'warn',
     )
   })
 
@@ -94,7 +98,6 @@ describe('migrate', () => {
 
   it('rolls back and stops when a migration fails', () => {
     const db = new Database(':memory:')
-    vi.spyOn(logger, 'error').mockImplementation(() => {})
     const later = vi.fn()
 
     expect(() => migrate(db, [
@@ -107,7 +110,8 @@ describe('migrate', () => {
 
     expect(later).not.toHaveBeenCalled()
     expect(appliedIds(db)).toEqual([])
-    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'partial'").get()).toBeFalsy()
+    expect(selectRow(db, TableNameRowSchema, "SELECT name FROM sqlite_master WHERE name = 'partial'")).toBeNull()
+    expectLoggedMessage('Migration 202610061345-broken failed', 'error')
   })
 })
 

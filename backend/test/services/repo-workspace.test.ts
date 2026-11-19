@@ -1,176 +1,147 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Database } from 'bun:sqlite'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import type { Repo } from '@opencode-manager/shared/types'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { GitAuthEnvironmentProvider } from '../../src/services/git-auth'
 import type { ProjectConfigService } from '../../src/services/project-config'
+import type { ScheduleService } from '../../src/services/schedules'
 import type { TerminalService } from '../../src/services/terminal'
+import { createScheduleRun, updateScheduleRunWorktree } from '../../src/db/schedules'
 import { RepoWorkspaceError } from '../../src/services/repo'
 import { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { getScheduleWorktreePath } from '../../src/services/schedule-worktree-paths'
+import { createGitAuthService, createCommittedRepo, git } from '../helpers/git-fixtures'
+import { testLogEntries } from '../helpers/log-assertions'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createTestDatabase, seedRepo, seedScheduleJob } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-const mocks = vi.hoisted(() => ({
-  listRepoSiblings: vi.fn(),
-  resolveRepoProjectId: vi.fn(),
-  loggerWarn: vi.fn(),
-}))
+const PROJECT_ID = 'commit-A'
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: mocks.loggerWarn,
-  },
-}))
-
-vi.mock('../../src/services/repo', () => {
-  class MockRepoWorkspaceError extends Error {
-    readonly status = 400
-
-    constructor(message: string) {
-      super(message)
-      this.name = 'RepoWorkspaceError'
-    }
-  }
-
-  return {
-    listRepoSiblings: async (
-      _database: unknown,
-      _repoId: unknown,
-      _gitEnv: unknown,
-      _client: unknown,
-      filter?: (sibling: { worktreeSource?: string }) => boolean,
-    ) => {
-      const siblings = await mocks.listRepoSiblings() as Array<{ worktreeSource?: string }>
-      return filter ? siblings.filter(filter) : siblings
-    },
-    resolveRepoProjectId: mocks.resolveRepoProjectId,
-    findSiblingByDirectory: <T extends { fullPath: string }>(siblings: T[], directory: string): T | undefined =>
-      siblings.find((sibling) => sibling.fullPath === directory),
-    RepoWorkspaceError: MockRepoWorkspaceError,
-  }
-})
-
-const REPO: Repo = {
-  id: 1,
-  localPath: 'repo-a',
-  fullPath: '/repos/repo-a',
-  defaultBranch: 'main',
-  cloneStatus: 'ready',
-  clonedAt: 0,
-} as Repo
-
-const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
-
-function createService(overrides: {
-  worktreeCreate?: ReturnType<typeof vi.fn>
-  worktreeRemove?: ReturnType<typeof vi.fn>
-  runWorktreeSetupForRepo?: ReturnType<typeof vi.fn>
-  removeAll?: ReturnType<typeof vi.fn>
-}) {
-  const worktreeCreate = overrides.worktreeCreate ?? vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
-  const worktreeRemove = overrides.worktreeRemove ?? vi.fn(async () => undefined)
-  const runWorktreeSetupForRepo =
-    overrides.runWorktreeSetupForRepo ?? vi.fn(async () => ({ status: 'started' as const }))
-  const removeAll = overrides.removeAll ?? vi.fn(async () => undefined)
-
-  const openCodeClient = {
-    api: { worktree: { create: worktreeCreate, remove: worktreeRemove } },
-  } as unknown as OpenCodeClient
-  const projectConfigService = { runWorktreeSetupForRepo } as unknown as ProjectConfigService
-  const terminalService = { removeAll } as unknown as TerminalService
-  const removeScheduleWorktrees = vi.fn(async () => ({ removed: 1 }))
-
-  return {
-    service: new RepoWorkspaceService(
-      {} as Database,
-      openCodeClient,
-      gitAuthService,
-      projectConfigService,
-      terminalService,
-      { removeWorktrees: removeScheduleWorktrees },
-    ),
-    removeScheduleWorktrees,
-    worktreeCreate,
-    worktreeRemove,
-    runWorktreeSetupForRepo,
-    removeAll,
-    terminalService,
-  }
+interface ServiceOverrides {
+  worktreeList?: OpenCodeApi['worktree']['list']
+  worktreeCreate?: OpenCodeApi['worktree']['create']
+  worktreeRemove?: OpenCodeApi['worktree']['remove']
+  runWorktreeSetupForRepo?: Pick<ProjectConfigService, 'runWorktreeSetupForRepo'>['runWorktreeSetupForRepo']
+  removeAll?: Pick<TerminalService, 'removeAll'>['removeAll']
+  terminalList?: Pick<TerminalService, 'list'>['list']
+  terminalCreate?: Pick<TerminalService, 'create'>['create']
+  removeWorktrees?: Pick<ScheduleService, 'removeWorktrees'>['removeWorktrees']
 }
 
 describe('RepoWorkspaceService', () => {
+  let workspace: TempWorkspace
+  let db: Database
+  let repo: Repo
+
+  function createService(overrides: ServiceOverrides = {}) {
+    const worktreeList = overrides.worktreeList ?? vi.fn(async () => [])
+    const worktreeCreate =
+      overrides.worktreeCreate ??
+      vi.fn(async (input: Parameters<OpenCodeApi['worktree']['create']>[0]) => ({
+        directory: path.join(workspace.path, 'worktrees', input.name ?? 'default'),
+      }))
+    const worktreeRemove = overrides.worktreeRemove ?? vi.fn(async () => undefined)
+    const runWorktreeSetupForRepo =
+      overrides.runWorktreeSetupForRepo ?? vi.fn(async () => ({ status: 'none' as const }))
+    const removeAll = overrides.removeAll ?? vi.fn(async () => undefined)
+    const terminalList = overrides.terminalList ?? vi.fn(async () => [])
+    const terminalCreate = overrides.terminalCreate ?? vi.fn(async () => {
+      throw new Error('terminal creation is not expected in this test')
+    })
+    const removeWorktrees = overrides.removeWorktrees ?? vi.fn(async () => ({ removed: 1 }))
+    const openCodeClient = createStubOpenCodeClient({
+      api: { worktree: { list: worktreeList, create: worktreeCreate, remove: worktreeRemove } },
+    })
+    const gitAuthService: GitAuthEnvironmentProvider = createGitAuthService()
+
+    const service = new RepoWorkspaceService(
+      db,
+      openCodeClient,
+      gitAuthService,
+      { runWorktreeSetupForRepo },
+      { removeAll, list: terminalList, create: terminalCreate },
+      { removeWorktrees },
+    )
+
+    return { service, worktreeCreate, worktreeRemove, worktreeList, runWorktreeSetupForRepo, removeAll, removeWorktrees }
+  }
+
+  function openCodeWorktree(directory: string) {
+    mkdirSync(directory, { recursive: true })
+    return { directory, strategy: 'opencode' }
+  }
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.resolveRepoProjectId.mockResolvedValue('project-1')
-    mocks.listRepoSiblings.mockResolvedValue([])
+    workspace = createTempWorkspace('ocm-repo-workspace-')
+    db = createTestDatabase()
+    repo = seedRepo(db, { localPath: 'repo-a' })
+    createCommittedRepo(repo.fullPath)
+  })
+
+  afterEach(() => {
+    db.close()
+    workspace.restore()
   })
 
   describe('create', () => {
-    it('creates the worktree with projectID, name and branch and runs the setup', async () => {
-      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x', branch: 'feature/x' }))
-      const runWorktreeSetupForRepo = vi.fn(async () => ({ status: 'started' as const }))
-      const { service, terminalService } = createService({ worktreeCreate, runWorktreeSetupForRepo })
+    it('creates the worktree with the resolved project id, name and branch, then runs the setup', async () => {
+      const { service, worktreeCreate, runWorktreeSetupForRepo } = createService()
 
-      const result = await service.create(REPO, { name: 'feature-x', ref: 'feature/x' })
+      const result = await service.create(repo, { name: 'feature-x', ref: 'feature/x' })
 
-      expect(worktreeCreate).toHaveBeenCalledWith({
-        projectID: 'project-1',
-        name: 'feature-x',
-        branch: 'feature/x',
-      })
-      expect(runWorktreeSetupForRepo).toHaveBeenCalledWith(REPO, '/worktrees/feature-x', terminalService)
+      expect(worktreeCreate).toHaveBeenCalledWith({ projectID: PROJECT_ID, name: 'feature-x', branch: 'feature/x' })
+      expect(runWorktreeSetupForRepo).toHaveBeenCalledWith(repo, path.join(workspace.path, 'worktrees', 'feature-x'), expect.anything())
       expect(result).toEqual({
-        directory: '/worktrees/feature-x',
-        branch: 'feature/x',
-        worktreeSetup: { status: 'started' },
+        directory: path.join(workspace.path, 'worktrees', 'feature-x'),
+        worktreeSetup: { status: 'none' },
       })
     })
 
     it('creates the worktree without optional options', async () => {
-      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
-      const { service } = createService({ worktreeCreate })
+      const { service, worktreeCreate } = createService()
 
-      await service.create(REPO)
+      await service.create(repo)
 
-      expect(worktreeCreate).toHaveBeenCalledWith({ projectID: 'project-1' })
+      expect(worktreeCreate).toHaveBeenCalledWith({ projectID: PROJECT_ID, name: undefined, branch: undefined })
     })
 
     it('runs the initializer before the worktree setup', async () => {
       const order: string[] = []
-      const worktreeCreate = vi.fn(async () => {
-        order.push('create')
-        return { directory: '/worktrees/feature-x' }
+      const { service } = createService({
+        worktreeCreate: vi.fn(async (input) => {
+          order.push('create')
+          return { directory: path.join(workspace.path, 'worktrees', input.name ?? 'default') }
+        }),
+        runWorktreeSetupForRepo: vi.fn(async () => {
+          order.push('setup')
+          return { status: 'none' as const }
+        }),
       })
       const initialize = vi.fn(async () => {
         order.push('initialize')
       })
-      const runWorktreeSetupForRepo = vi.fn(async () => {
-        order.push('setup')
-        return { status: 'started' as const }
-      })
-      const { service } = createService({ worktreeCreate, runWorktreeSetupForRepo })
 
-      await service.create(REPO, { initialize })
+      await service.create(repo, { name: 'feature-x', initialize })
 
-      expect(initialize).toHaveBeenCalledWith('/worktrees/feature-x')
+      expect(initialize).toHaveBeenCalledWith(path.join(workspace.path, 'worktrees', 'feature-x'))
       expect(order).toEqual(['create', 'initialize', 'setup'])
     })
 
     it('removes the worktree and rethrows when the initializer fails, without running the setup', async () => {
       const initializeError = new Error('seed failed')
-      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
-      const worktreeRemove = vi.fn(async () => undefined)
+      const { service, worktreeRemove, runWorktreeSetupForRepo } = createService()
       const initialize = vi.fn(async () => {
         throw initializeError
       })
-      const runWorktreeSetupForRepo = vi.fn(async () => ({ status: 'started' as const }))
-      const { service } = createService({ worktreeCreate, worktreeRemove, runWorktreeSetupForRepo })
 
-      await expect(service.create(REPO, { initialize })).rejects.toThrow(initializeError)
+      await expect(service.create(repo, { name: 'feature-x', initialize })).rejects.toBe(initializeError)
 
       expect(worktreeRemove).toHaveBeenCalledWith({
-        projectID: 'project-1',
-        directory: '/worktrees/feature-x',
+        projectID: PROJECT_ID,
+        directory: path.join(workspace.path, 'worktrees', 'feature-x'),
         force: true,
       })
       expect(runWorktreeSetupForRepo).not.toHaveBeenCalled()
@@ -178,141 +149,158 @@ describe('RepoWorkspaceService', () => {
 
     it('logs and rethrows the initializer error when removing the worktree also fails', async () => {
       const initializeError = new Error('seed failed')
-      const worktreeCreate = vi.fn(async () => ({ directory: '/worktrees/feature-x' }))
-      const worktreeRemove = vi.fn(async () => {
-        throw new Error('remove failed')
+      const { service } = createService({
+        worktreeRemove: vi.fn(async () => {
+          throw new Error('remove failed')
+        }),
       })
       const initialize = vi.fn(async () => {
         throw initializeError
       })
-      const { service } = createService({ worktreeCreate, worktreeRemove })
 
-      await expect(service.create(REPO, { initialize })).rejects.toThrow(initializeError)
+      await expect(service.create(repo, { name: 'feature-x', initialize })).rejects.toBe(initializeError)
 
-      expect(mocks.loggerWarn).toHaveBeenCalled()
+      expect(testLogEntries('warn').map((entry) => entry.message)).toContainEqual(
+        expect.stringContaining('Failed to remove worktree'),
+      )
     })
   })
 
   describe('remove', () => {
-    it('throws a 400 when the directory is not a worktree sibling and touches nothing', async () => {
-      const worktreeRemove = vi.fn(async () => undefined)
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/other', worktreeSource: 'opencode' }])
-      const { service } = createService({ worktreeRemove, removeAll })
+    it('rejects a directory that is not a worktree sibling and touches nothing', async () => {
+      const { service, removeAll, worktreeRemove } = createService()
 
-      const error = await service.remove(REPO, '/worktrees/unknown').catch((caught: unknown) => caught)
-
-      expect(error).toBeInstanceOf(RepoWorkspaceError)
-      expect(error).toMatchObject({ status: 400 })
+      await expect(service.remove(repo, path.join(workspace.path, 'worktrees', 'unknown'))).rejects.toBeInstanceOf(
+        RepoWorkspaceError,
+      )
       expect(removeAll).not.toHaveBeenCalled()
       expect(worktreeRemove).not.toHaveBeenCalled()
     })
 
     it('removes terminals for the matched sibling before removing the worktree', async () => {
-      const worktreeRemove = vi.fn(async () => undefined)
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
-      const { service } = createService({ worktreeRemove, removeAll })
-
-      await service.remove(REPO, '/worktrees/feature-x')
-
-      expect(removeAll).toHaveBeenCalledWith('/worktrees/feature-x')
-      expect(worktreeRemove).toHaveBeenCalledWith({
-        projectID: 'project-1',
-        directory: '/worktrees/feature-x',
-        force: true,
+      const directory = openCodeWorktree(path.join(workspace.path, 'worktrees', 'feature-x')).directory
+      const order: string[] = []
+      const { service } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(directory)]),
+        removeAll: vi.fn(async (target: string) => {
+          order.push(`terminals:${target}`)
+        }),
+        worktreeRemove: vi.fn(async () => {
+          order.push('worktree')
+        }),
       })
-      expect(removeAll.mock.invocationCallOrder[0]!).toBeLessThan(worktreeRemove.mock.invocationCallOrder[0]!)
+
+      await service.remove(repo, directory)
+
+      expect(order).toEqual([`terminals:${directory}`, 'worktree'])
+    })
+
+    it('removes the OpenCode worktree with force after successful terminal cleanup', async () => {
+      const directory = openCodeWorktree(path.join(workspace.path, 'worktrees', 'feature-x')).directory
+      const { service, worktreeRemove } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(directory)]),
+      })
+
+      await service.remove(repo, directory)
+
+      expect(worktreeRemove).toHaveBeenCalledWith({ projectID: PROJECT_ID, directory, force: true })
     })
 
     it('logs a terminal removal failure and still removes the worktree', async () => {
-      const worktreeRemove = vi.fn(async () => undefined)
-      const removeAll = vi.fn(async () => {
-        throw new Error('pty cleanup failed')
+      const directory = openCodeWorktree(path.join(workspace.path, 'worktrees', 'feature-x')).directory
+      const { service, worktreeRemove } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(directory)]),
+        removeAll: vi.fn(async () => {
+          throw new Error('pty cleanup failed')
+        }),
       })
-      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/feature-x', worktreeSource: 'opencode' }])
-      const { service } = createService({ worktreeRemove, removeAll })
 
-      await expect(service.remove(REPO, '/worktrees/feature-x')).resolves.toBeUndefined()
+      await expect(service.remove(repo, directory)).resolves.toBeUndefined()
 
-      expect(mocks.loggerWarn).toHaveBeenCalled()
-      expect(worktreeRemove).toHaveBeenCalledWith({
-        projectID: 'project-1',
-        directory: '/worktrees/feature-x',
-        force: true,
-      })
+      expect(testLogEntries('warn').map((entry) => entry.message)).toContainEqual(
+        expect.stringContaining('Failed to remove terminals for'),
+      )
+      expect(worktreeRemove).toHaveBeenCalledWith({ projectID: PROJECT_ID, directory, force: true })
     })
+
     it('removes a schedule worktree through its schedule without touching terminals', async () => {
-      const worktreeRemove = vi.fn(async () => undefined)
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([{
-        fullPath: '/schedule-worktrees/job-7-shared',
-        worktreeSource: 'schedule',
-        schedule: { repoId: 3, jobId: 7, runId: null, inUse: false, name: 'Shared job' },
-      }])
-      const { service, removeScheduleWorktrees } = createService({ worktreeRemove, removeAll })
+      seedScheduleJob(db, repo.id, { name: 'Shared job' })
+      const directory = getScheduleWorktreePath(1, null)
+      const { service, removeWorktrees, removeAll, worktreeRemove } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(directory)]),
+      })
 
-      await service.remove(REPO, '/schedule-worktrees/job-7-shared')
+      await service.remove(repo, directory)
 
-      expect(removeScheduleWorktrees).toHaveBeenCalledWith(3, 7, '/schedule-worktrees/job-7-shared')
+      expect(removeWorktrees).toHaveBeenCalledWith(repo.id, 1, directory)
       expect(removeAll).not.toHaveBeenCalled()
       expect(worktreeRemove).not.toHaveBeenCalled()
     })
 
     it('refuses to remove a schedule worktree a running run is using', async () => {
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([{
-        fullPath: '/schedule-worktrees/job-7-run-2',
-        worktreeSource: 'schedule',
-        schedule: { repoId: 1, jobId: 7, runId: 2, inUse: true, name: 'Run job' },
-      }])
-      const { service, removeScheduleWorktrees } = createService({ removeAll })
+      const job = seedScheduleJob(db, repo.id, { name: 'Run job' })
+      const directory = getScheduleWorktreePath(job.id, 2)
+      const run = createScheduleRun(db, {
+        jobId: job.id,
+        repoId: repo.id,
+        triggerSource: 'manual',
+        status: 'running',
+        startedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      updateScheduleRunWorktree(db, repo.id, job.id, run.id, { worktreePath: directory })
+      const { service, removeWorktrees, removeAll } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(directory)]),
+      })
 
-      await expect(service.remove(REPO, '/schedule-worktrees/job-7-run-2')).rejects.toThrow('in use by a running scheduled run')
+      await expect(service.remove(repo, directory)).rejects.toThrow('in use by a running scheduled run')
       expect(removeAll).not.toHaveBeenCalled()
-      expect(removeScheduleWorktrees).not.toHaveBeenCalled()
+      expect(removeWorktrees).not.toHaveBeenCalled()
     })
 
     it('reports a plain git worktree that git refuses to remove', async () => {
-      const worktreeRemove = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([{ fullPath: '/worktrees/manual', worktreeSource: 'git' }])
-      const { service } = createService({ worktreeRemove })
+      const directory = path.join(workspace.path, 'worktrees', 'manual')
+      git(['worktree', 'add', '-b', 'manual/linked', directory], repo.fullPath)
+      writeFileSync(path.join(directory, 'untracked.txt'), 'dirty\n')
+      const { service, worktreeRemove } = createService()
 
-      const error = await service.remove(REPO, '/worktrees/manual').catch((caught: unknown) => caught)
+      const removal = service.remove(repo, directory)
 
-      expect(error).toBeInstanceOf(RepoWorkspaceError)
-      expect((error as Error).message).toMatch(/^Could not remove worktree/)
+      await expect(removal).rejects.toBeInstanceOf(RepoWorkspaceError)
+      await expect(removal).rejects.toThrow(/^Could not remove worktree/)
       expect(worktreeRemove).not.toHaveBeenCalled()
+      expect(git(['worktree', 'list', '--porcelain'], repo.fullPath)).toContain(directory)
     })
   })
 
   describe('removeRepoTerminals', () => {
     it('removes terminals for the repo directory and each worktree sibling', async () => {
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockResolvedValue([
-        { fullPath: '/worktrees/a', worktreeSource: 'opencode' },
-        { fullPath: '/worktrees/b', worktreeSource: 'opencode' },
-        { fullPath: '/repos/manager-worktree', isWorktree: true },
-      ])
-      const { service } = createService({ removeAll })
+      const firstWorktree = openCodeWorktree(path.join(workspace.path, 'worktrees', 'a')).directory
+      const secondWorktree = openCodeWorktree(path.join(workspace.path, 'worktrees', 'b')).directory
+      const otherRepo = seedRepo(db, { localPath: 'repo-b' })
+      const { service, removeAll } = createService({
+        worktreeList: vi.fn(async () => [openCodeWorktree(firstWorktree), openCodeWorktree(secondWorktree)]),
+      })
 
-      await service.removeRepoTerminals(REPO)
+      await service.removeRepoTerminals(repo)
 
-      expect(removeAll).toHaveBeenCalledWith('/repos/repo-a')
-      expect(removeAll).toHaveBeenCalledWith('/worktrees/a')
-      expect(removeAll).toHaveBeenCalledWith('/worktrees/b')
-      expect(removeAll).not.toHaveBeenCalledWith('/repos/manager-worktree')
+      expect(removeAll).toHaveBeenCalledWith(repo.fullPath)
+      expect(removeAll).toHaveBeenCalledWith(firstWorktree)
+      expect(removeAll).toHaveBeenCalledWith(secondWorktree)
+      expect(removeAll).not.toHaveBeenCalledWith(otherRepo.fullPath)
     })
 
     it('still removes the repo terminals when listing siblings fails', async () => {
-      const removeAll = vi.fn(async () => undefined)
-      mocks.listRepoSiblings.mockRejectedValue(new Error('siblings failed'))
-      const { service } = createService({ removeAll })
+      const { service, removeAll } = createService()
 
-      await expect(service.removeRepoTerminals(REPO)).resolves.toBeUndefined()
+      db.prepare('DROP TABLE repos').run()
 
-      expect(removeAll).toHaveBeenCalledWith('/repos/repo-a')
-      expect(mocks.loggerWarn).toHaveBeenCalled()
+      await expect(service.removeRepoTerminals(repo)).resolves.toBeUndefined()
+
+      expect(removeAll).toHaveBeenCalledWith(repo.fullPath)
+      expect(testLogEntries('warn').map((entry) => entry.message)).toContainEqual(
+        expect.stringContaining('Failed to list OpenCode workspace siblings'),
+      )
     })
   })
 })

@@ -12,6 +12,8 @@ import {
 } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { runWhenIntegrationReady } from '../services/opencode/integration-ready'
+
+type IntegrationConnectKeyInput = NonNullable<Parameters<OpenCodeClient['api']['integration']['connect']['key']>[0]>
 import {
   ModelSelectionSchema,
   readOpenCodeModelState,
@@ -106,12 +108,13 @@ export function createProvidersRoutes(openCodeClient: OpenCodeClient) {
       const validated = SetCredentialRequestSchema.parse(body)
 
       const integrationID = c.req.param('id')
+      const connectInput: IntegrationConnectKeyInput = {
+        integrationID,
+        key: validated.apiKey,
+        answer: validated.answer,
+      }
       await runWhenIntegrationReady(openCodeClient.api, { integrationID }, () =>
-        openCodeClient.api.integration.connect.key({
-          integrationID,
-          key: validated.apiKey,
-          ...(validated.answer ? { answer: validated.answer } : {}),
-        }),
+        openCodeClient.api.integration.connect.key(connectInput),
       )
 
       return c.json({ success: true })

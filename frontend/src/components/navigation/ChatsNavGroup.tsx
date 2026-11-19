@@ -30,10 +30,6 @@ function toChatItem(row: ChatSessionRow): SidebarSessionItem {
   }
 }
 
-/**
- * The sidebar's chat group: the newest chat sessions above the repositories, expandable to more
- * pages and persisted independently of the repository accordion.
- */
 export function ChatsNavGroup() {
   const navigate = useNavigate()
   const location = useLocation()

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { showToast as toast } from '@/lib/toast'

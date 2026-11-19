@@ -1,59 +1,47 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useOpenCodeApplyFeedback } from './useOpenCodeApplyFeedback'
+import { renderHookWithProviders } from '@/test/render'
 
-const mocks = vi.hoisted(() => ({
-  invalidateConfigCaches: vi.fn(),
-  showToast: { success: vi.fn() },
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
-vi.mock('@/lib/queryInvalidation', () => ({
-  invalidateConfigCaches: mocks.invalidateConfigCaches,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: mocks.showToast,
-}))
-
-const createWrapper = (queryClient: QueryClient) => {
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client: queryClient }, children)
-}
+const configQueryKey = ['opencode', 'config', '/repo'] as const
+const managedConfigQueryKey = ['opencode-config', 'managed'] as const
+const healthQueryKey = ['health'] as const
 
 describe('useOpenCodeApplyFeedback', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('announces the applied message and refreshes server caches when no restart is needed', () => {
-    const queryClient = new QueryClient()
-    const { result } = renderHook(() => useOpenCodeApplyFeedback(), {
-      wrapper: createWrapper(queryClient),
-    })
+  it('announces the applied message and refreshes server caches when no restart is needed', async () => {
+    const { result, queryClient } = renderHookWithProviders(() => useOpenCodeApplyFeedback(), hookProviders)
+    queryClient.setQueryData(configQueryKey, { data: {} })
+    queryClient.setQueryData(managedConfigQueryKey, { config: {} })
+    queryClient.setQueryData(healthQueryKey, {})
 
     act(() => {
       result.current({ appliedMessage: 'Configuration updated', restartRequired: false })
     })
 
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Configuration updated')
-    expect(mocks.invalidateConfigCaches).toHaveBeenCalledWith(queryClient, { skipOpenCodeConfig: true })
+    expect(await screen.findByText('Configuration updated')).toBeInTheDocument()
+    expect(queryClient.getQueryState(configQueryKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(healthQueryKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(managedConfigQueryKey)?.isInvalidated).toBe(false)
   })
 
-  it('points at the restart when the in-place reload failed', () => {
-    const queryClient = new QueryClient()
-    const { result } = renderHook(() => useOpenCodeApplyFeedback(), {
-      wrapper: createWrapper(queryClient),
-    })
+  it('points at the restart when the in-place reload failed', async () => {
+    const { result } = renderHookWithProviders(() => useOpenCodeApplyFeedback(), hookProviders)
 
     act(() => {
       result.current({ appliedMessage: 'Configuration updated', restartRequired: true })
     })
 
-    expect(mocks.showToast.success).toHaveBeenCalledWith(
-      'Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.',
-    )
-    expect(mocks.invalidateConfigCaches).toHaveBeenCalledWith(queryClient, { skipOpenCodeConfig: true })
+    expect(
+      await screen.findByText(
+        'Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Configuration updated')).toBeNull()
   })
 })

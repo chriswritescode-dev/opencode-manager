@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { JsonObjectSchema, JsonValueSchema } from '@opencode-manager/shared/utils'
 import { readJsonSafe, writeJsonAtomic, withFileLock } from './atomic-json'
 import { join } from 'node:path'
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
@@ -18,7 +19,7 @@ describe('atomic-json', () => {
   describe('readJsonSafe', () => {
     it('returns fallback when file does not exist', async () => {
       const fallback = { foo: 'bar' }
-      const result = await readJsonSafe(join(tmpDir, 'nonexistent.json'), fallback)
+      const result = await readJsonSafe(join(tmpDir, 'nonexistent.json'), JsonObjectSchema, fallback)
       expect(result).toEqual(fallback)
     })
 
@@ -26,7 +27,7 @@ describe('atomic-json', () => {
       const filePath = join(tmpDir, 'invalid.json')
       await writeFile(filePath, '{ invalid json }', 'utf8')
       const fallback = { foo: 'bar' }
-      const result = await readJsonSafe(filePath, fallback)
+      const result = await readJsonSafe(filePath, JsonObjectSchema, fallback)
       expect(result).toEqual(fallback)
     })
 
@@ -34,7 +35,7 @@ describe('atomic-json', () => {
       const filePath = join(tmpDir, 'valid.json')
       const data = { foo: 'bar', nested: { value: 42 } }
       await writeFile(filePath, JSON.stringify(data), 'utf8')
-      const result = await readJsonSafe(filePath, { fallback: true })
+      const result = await readJsonSafe(filePath, JsonObjectSchema, { fallback: true })
       expect(result).toEqual(data)
     })
   })
@@ -45,8 +46,7 @@ describe('atomic-json', () => {
       const data = { test: 'value', number: 123 }
       await writeJsonAtomic(filePath, data)
       const content = await readFile(filePath, 'utf8')
-      const parsed = JSON.parse(content)
-      expect(parsed).toEqual(data)
+      expect(JsonValueSchema.parse(JSON.parse(content))).toEqual(data)
     })
 
     it('does not leave .tmp.* files on success', async () => {
@@ -67,7 +67,7 @@ describe('atomic-json', () => {
         bool: true,
       }
       await writeJsonAtomic(filePath, data)
-      const result = await readJsonSafe(filePath, null)
+      const result = await readJsonSafe(filePath, JsonValueSchema, null)
       expect(result).toEqual(data)
     })
   })
@@ -163,17 +163,15 @@ describe('atomic-json', () => {
         withFileLock(filePath, async () => {
           const data = { value: i, timestamp: Date.now() }
           await writeJsonAtomic(filePath, data)
-          const read = await readJsonSafe(filePath, null)
+          const read = await readJsonSafe(filePath, JsonValueSchema, null)
           return { written: data, read }
         }),
       )
 
       await Promise.all(operations)
-      const finalRead = await readJsonSafe(filePath, null)
+      const finalRead = await readJsonSafe(filePath, JsonValueSchema, null)
 
       expect(finalRead).toEqual({ value: numOps - 1, timestamp: expect.any(Number) })
-      expect(typeof finalRead).toBe('object')
-      expect(finalRead).not.toBeNull()
     })
   })
 })

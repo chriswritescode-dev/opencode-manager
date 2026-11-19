@@ -1,15 +1,23 @@
 import type { Migration } from '../migration-runner'
 import { logger } from '../../utils/logger'
+import { z } from 'zod'
+import { selectRows } from '../rows'
+
+const RepoLocalPathRowSchema = z.object({
+  id: z.number(),
+  local_path: z.string(),
+})
 
 const migration: Migration = {
   id: '005-repos-local-path-prefix',
   legacy: { version: 5, name: 'repos-local-path-prefix' },
 
   up(db) {
-    const repos = db.prepare("SELECT id, local_path FROM repos WHERE local_path LIKE 'repos/%'").all() as Array<{
-      id: number
-      local_path: string
-    }>
+    const repos = selectRows(
+      db,
+      RepoLocalPathRowSchema,
+      "SELECT id, local_path FROM repos WHERE local_path LIKE 'repos/%'",
+    )
 
     if (repos.length === 0) return
 

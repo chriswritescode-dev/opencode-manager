@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
 import { mkdirSafe } from '../utils/fs-safe'
+import { getErrorCode } from './error-code'
 
 export type OpenCodeDirectoryFileKind = 'agents' | 'commands'
 
@@ -35,7 +36,7 @@ async function listMarkdownFiles(rootDir: string, currentDir = rootDir): Promise
   try {
     entries = await fs.readdir(currentDir, { withFileTypes: true })
   } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return []
+    if (getErrorCode(error) === 'ENOENT') return []
     throw error
   }
 

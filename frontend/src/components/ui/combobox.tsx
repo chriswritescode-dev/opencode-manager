@@ -84,12 +84,12 @@ export function Combobox({
         (option.description?.toLowerCase().includes(inputValue.toLowerCase()))
       )
 
-  const groupedOptions = filteredOptions.reduce((acc, option) => {
+  const groupedOptions = filteredOptions.reduce<Record<string, ComboboxOption[]>>((acc, option) => {
     const group = option.group || ''
     if (!acc[group]) acc[group] = []
     acc[group].push(option)
     return acc
-  }, {} as Record<string, ComboboxOption[]>)
+  }, {})
 
   const flatFilteredOptions = Object.values(groupedOptions).flat()
 
@@ -101,7 +101,7 @@ export function Combobox({
     if (!isOpen) return
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (containerRef.current && e.target instanceof Node && !containerRef.current.contains(e.target)) {
         setIsOpen(false)
         if (allowCustomValue && isUserTyping) {
           onChange(inputValue)
@@ -118,8 +118,8 @@ export function Combobox({
   useEffect(() => {
     if (!isOpen || !listRef.current) return
 
-    const items = listRef.current.querySelectorAll('[data-option]')
-    const selectedItem = items[selectedIndex] as HTMLElement
+    const items = listRef.current.querySelectorAll<HTMLElement>('[data-option]')
+    const selectedItem = items[selectedIndex]
     if (selectedItem) {
       selectedItem.scrollIntoView({ block: 'nearest' })
     }

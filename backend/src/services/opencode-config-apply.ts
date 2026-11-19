@@ -10,10 +10,13 @@ import {
   restoreOpenCodeConfigSnapshot,
   serializeOpenCodeConfigSnapshot,
   updateOpenCodeConfigFile,
+  type OpenCodeConfigContent,
   type OpenCodeConfigSnapshot,
   type OpenCodeConfigUpdateMode,
   withOpenCodeConfigLock,
 } from './opencode-config-file'
+import { z } from 'zod'
+import { JsonObjectSchema, parseJsonObject, type JsonObject } from '@opencode-manager/shared/utils'
 import { readManagedOpenCodeConfig } from './opencode-config-effective'
 import { patchNamesOpenCodeConfigEntities, restoreOpenCodeConfigReferences } from './opencode-config-references'
 import { opencodeServerManager } from './opencode-single-server'
@@ -30,15 +33,18 @@ export type ApplyOpenCodeConfigResult =
   | { status: 'restart_pending'; config: OpenCodeConfigFile }
 
 export interface ApplyOpenCodeConfigOptions {
-  content: Record<string, unknown> | string
+  content: OpenCodeConfigContent | string
   source?: OpenCodeConfigSourceName
   expectedRevision?: string
   mode?: OpenCodeConfigUpdateMode
   settingsService: SettingsService
   openCodeClient: OpenCodeClient
+  manager?: Pick<typeof opencodeServerManager, 'markRestartPending'>
 }
 
-export async function captureLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
+export async function captureLastKnownGoodOpenCodeConfig(
+  settingsService: Pick<SettingsService, 'saveLastKnownGoodConfig'>,
+): Promise<OpenCodeConfigFile | null> {
   const previous = await readOpenCodeConfigFile()
   if (previous?.isValid) {
     settingsService.saveLastKnownGoodConfig(serializeOpenCodeConfigSnapshot(previous))
@@ -46,14 +52,17 @@ export async function captureLastKnownGoodOpenCodeConfig(settingsService: Settin
   return previous
 }
 
-export async function restoreLastKnownGoodOpenCodeConfig(settingsService: SettingsService): Promise<OpenCodeConfigFile | null> {
+export async function restoreLastKnownGoodOpenCodeConfig(
+  settingsService: Pick<SettingsService, 'getLastKnownGoodConfig'>,
+  manager: Pick<typeof opencodeServerManager, 'clearStartupError'> = opencodeServerManager,
+): Promise<OpenCodeConfigFile | null> {
   const lastGood = settingsService.getLastKnownGoodConfig()
   if (!lastGood) {
     return null
   }
 
   const config = await withOpenCodeConfigLock(() => restoreOpenCodeConfigSnapshot(lastGood))
-  opencodeServerManager.clearStartupError()
+  manager.clearStartupError()
   return config
 }
 
@@ -67,9 +76,14 @@ export async function seedOpenCodeConfigFile(): Promise<OpenCodeConfigFile> {
   })
 }
 
+export interface OpenCodeConfigApplyResponse {
+  status: 200
+  body: OpenCodeConfigFile & { restartRequired?: boolean }
+}
+
 export function toOpenCodeConfigApplyResponse(
   result: ApplyOpenCodeConfigResult,
-): { status: 200; body: Record<string, unknown> } {
+): OpenCodeConfigApplyResponse {
   return {
     status: 200,
     body: result.status === 'restart_pending'
@@ -78,20 +92,25 @@ export function toOpenCodeConfigApplyResponse(
   }
 }
 
-export async function reloadOpenCodeOrMarkRestartPending(openCodeClient: OpenCodeClient): Promise<OpenCodeReloadOutcome> {
+export async function reloadOpenCodeOrMarkRestartPending(
+  openCodeClient: OpenCodeClient,
+  manager: Pick<typeof opencodeServerManager, 'markRestartPending'> = opencodeServerManager,
+): Promise<OpenCodeReloadOutcome> {
   try {
     await reloadOpenCodeConfig(openCodeClient)
     return 'reloaded'
   } catch (error) {
     logger.warn('OpenCode configuration reload failed, marking a server restart as pending:', error)
-    opencodeServerManager.markRestartPending()
+    manager.markRestartPending()
     return 'restart_pending'
   }
 }
 
-function listChangedTopLevelKeys(previous: Record<string, unknown>, next: Record<string, unknown>): string[] {
-  const keys = new Set([...Object.keys(previous), ...Object.keys(next)])
-  return [...keys].filter((key) => !isDeepStrictEqual(previous[key], next[key]))
+function listChangedTopLevelKeys(previous: JsonObject, next: JsonObject): string[] {
+  const previousContainer = parseJsonObject(previous) ?? {}
+  const nextContainer = parseJsonObject(next) ?? {}
+  const keys = new Set([...Object.keys(previousContainer), ...Object.keys(nextContainer)])
+  return [...keys].filter((key) => !isDeepStrictEqual(previousContainer[key], nextContainer[key]))
 }
 
 function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenCodeConfigFile): boolean {
@@ -101,26 +120,17 @@ function requiresOpenCodeReload(previous: OpenCodeConfigFile | null, next: OpenC
   return listChangedTopLevelKeys(previous?.content ?? {}, next.content).length > 0
 }
 
-/**
- * Replaces substituted values in a merge patch with the `{env:…}` or `{file:…}` references held by
- * the raw config, reading the resolved config from the OpenCode server. Returns the patch unchanged
- * when it does not name any config entity.
- */
 async function keepOpenCodeConfigReferences(
-  patch: Record<string, unknown>,
+  patch: JsonObject,
   snapshot: OpenCodeConfigSnapshot,
   openCodeClient: OpenCodeClient,
-): Promise<Record<string, unknown>> {
-  if (!patchNamesOpenCodeConfigEntities(patch)) return patch
+): Promise<JsonObject> {
+  const patchContainer = parseJsonObject(patch) ?? {}
+  if (!patchNamesOpenCodeConfigEntities(patchContainer)) return patchContainer
   const resolved = await readManagedOpenCodeConfig(openCodeClient.api, snapshot.sources)
-  return restoreOpenCodeConfigReferences(patch, resolved as Record<string, unknown>, snapshot.content)
+  return restoreOpenCodeConfigReferences(patchContainer, resolved, snapshot.content)
 }
 
-/**
- * Applies config content or a merge patch under the shared config file lock, saving the previous
- * valid config as last-known-good and restoring it if that save fails. OpenCode is reloaded only when
- * top-level keys changed, and a failed reload is reported as `restart_pending`.
- */
 export async function applyOpenCodeConfigUpdate(
   input: ApplyOpenCodeConfigOptions,
 ): Promise<ApplyOpenCodeConfigResult> {
@@ -129,8 +139,8 @@ export async function applyOpenCodeConfigUpdate(
 
     const snapshot = await readOpenCodeConfigSnapshot()
     const previous = await readOpenCodeConfigFile(snapshot)
-    const savedContent = mode === 'merge' && typeof content !== 'string'
-      ? await keepOpenCodeConfigReferences(content, snapshot, input.openCodeClient)
+    const savedContent = mode === 'merge' && !z.string().safeParse(content).success
+      ? await keepOpenCodeConfigReferences(JsonObjectSchema.parse(content), snapshot, input.openCodeClient)
       : content
 
     const next = await updateOpenCodeConfigFile(savedContent, { source, expectedRevision, snapshot, mode })
@@ -152,5 +162,5 @@ export async function applyOpenCodeConfigUpdate(
     return { status: 'applied', config }
   }
 
-  return { status: await reloadOpenCodeOrMarkRestartPending(input.openCodeClient), config }
+  return { status: await reloadOpenCodeOrMarkRestartPending(input.openCodeClient, input.manager), config }
 }

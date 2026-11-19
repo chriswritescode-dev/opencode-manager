@@ -44,7 +44,6 @@ export type CreateChatRequest = z.infer<typeof CreateChatRequestSchema>
 export type CreateChatResponse = z.infer<typeof CreateChatResponseSchema>
 export type DeleteChatSessionResponse = z.infer<typeof DeleteChatSessionResponseSchema>
 
-/** Reads the UTC creation time encoded in a chat id. */
 export function parseChatIdCreatedAt(id: string): number {
   const match = CHAT_ID_PATTERN.exec(id)
   if (!match) return NaN

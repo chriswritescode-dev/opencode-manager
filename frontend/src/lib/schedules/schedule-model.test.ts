@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { resolveScheduleModel } from './schedule-model'
 import type { ModelInfo } from '@opencode-manager/shared/opencode'
+import { makeCatalogModel } from '@/test/fixtures/api'
 
 function model(providerID: string, id: string): ModelInfo {
-  return { providerID, id } as unknown as ModelInfo
+  return makeCatalogModel({ providerID, id, modelID: id })
 }
 
 describe('resolveScheduleModel', () => {

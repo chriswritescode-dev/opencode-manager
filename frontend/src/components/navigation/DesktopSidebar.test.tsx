@@ -1,334 +1,194 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { DesktopSidebar } from './DesktopSidebar'
 import { useUIState } from '@/stores/uiStateStore'
-import * as useDesktopModule from '@/hooks/useDesktop'
-import * as useSidebarCollapsedModule from '@/hooks/useSidebarCollapsed'
-import * as useAuthModule from '@/hooks/useAuth'
+import { installWindowSize } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { TestAuthMode } from '@/test/render'
 
-vi.mock('@/hooks/useDesktop')
-vi.mock('@/hooks/useSidebarCollapsed')
-vi.mock('@/hooks/useAuth')
-vi.mock('@/api/repos', () => ({
-  listRepos: vi.fn().mockResolvedValue([]),
-}))
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: () => ({ servers: [], isLoading: false }),
-  useOpenCodeServerStatuses: () => ({ statuses: [], statusById: {}, isLoading: false }),
-}))
-vi.mock('@/components/navigation/DesktopSessionTree', () => ({
-  DesktopSessionTree: () => <div data-testid="session-tree" />,
-}))
-vi.mock('@/components/session/SessionPickerDialog', () => ({
-  SessionPickerDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="sessions-picker-dialog" /> : null,
-}))
-
-function LocationDisplay() {
-  const location = useLocation()
-  const navigate = useNavigate()
-
-  return (
-    <div>
-      <div data-testid="location">{location.pathname}{location.search}</div>
-      <button onClick={() => navigate(-1)} data-testid="back-button">Back</button>
-    </div>
-  )
+interface RenderOptions {
+  route?: string
+  mobile?: boolean
+  collapsed?: boolean
+  auth?: TestAuthMode
+  authRoutes?: FetchRoute[]
 }
 
-function createWrapper(initialEntries?: string[]) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
+function renderSidebar(options: RenderOptions = {}) {
+  installWindowSize(options.mobile ? 500 : 1024)
+  if (options.collapsed) localStorage.setItem('oc:sidebar:collapsed', 'true')
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <KeyboardShortcutsProvider>
+      <TooltipProvider>
+        <DesktopSidebar />
+        <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+      </TooltipProvider>
+    </KeyboardShortcutsProvider>,
+    {
+      route: options.route ?? '/',
+      auth: options.auth ?? 'authenticated',
+      theme: false,
+      toaster: false,
+      fetchRoutes: [...(options.authRoutes ?? []), ...appRoutes()],
     },
-  })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>
-        <TooltipProvider>{children}</TooltipProvider>
-      </MemoryRouter>
-    </QueryClientProvider>
   )
+  return { ...result, capturedPathname, capturedSearch }
+}
+
+function searchParams(capturedSearch: { current: string }): URLSearchParams {
+  return new URLSearchParams(capturedSearch.current)
 }
 
 describe('DesktopSidebar', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useUIState.setState({ isToolRailMounted: false })
-  })
-
   it('returns null when user is not authenticated', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: false,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
-
-    const { container } = render(
-      <MemoryRouter>
-        <DesktopSidebar />
-      </MemoryRouter>,
-    )
+    const { container } = renderSidebar({ auth: 'anonymous' })
 
     expect(container.firstChild).toBeNull()
   })
 
   it('returns null when auth state is loading', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: true,
-      logout: vi.fn(),
-    } as any)
-
-    const { container } = render(
-      <MemoryRouter>
-        <DesktopSidebar />
-      </MemoryRouter>,
-    )
+    const { container } = renderSidebar({
+      authRoutes: [{ method: 'GET', path: '/api/auth/get-session', respond: () => new Promise(() => {}) }],
+    })
 
     expect(container.firstChild).toBeNull()
   })
 
   it('returns null when not desktop', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
-
-    const { container } = render(
-      <MemoryRouter>
-        <DesktopSidebar />
-      </MemoryRouter>
-    )
+    const { container } = renderSidebar({ mobile: true })
 
     expect(container.firstChild).toBeNull()
   })
 
-  it('hides the New Repo CTA for root path and renders Assistant', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('hides the New Repo CTA for root path and renders Assistant', async () => {
+    renderSidebar({ route: '/' })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
-
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
     expect(screen.queryByText('New Repo')).toBeNull()
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
 
-  it('renders primary CTAs for repo detail', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('renders primary CTAs for repo detail', async () => {
+    renderSidebar({ route: '/repos/5' })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
-
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
     expect(screen.queryByText('New Session')).toBeNull()
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
 
-  it('renders primary CTAs for session detail', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('renders primary CTAs for session detail', async () => {
+    renderSidebar({ route: '/repos/5/sessions/abc' })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5/sessions/abc']) })
-
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
     expect(screen.queryByText('New Session')).toBeNull()
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
 
-  it.each(['/', '/repos/5', '/repos/5/sessions/abc', '/assistant'])('leaves route tools to the tool rail on %s', (path) => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it.each(['/', '/repos/5', '/repos/5/sessions/abc', '/assistant'])(
+    'leaves route tools to the tool rail on %s',
+    async (path) => {
+      renderSidebar({ route: path })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper([path]) })
+      for (const label of ['Home', 'Settings', 'Logout']) {
+        expect(await screen.findByText(label)).toBeInTheDocument()
+      }
+      for (const label of [
+        'Menu',
+        'Files',
+        'MCP',
+        'Skills',
+        'Schedules',
+        'All Schedules',
+        'Source Control',
+        'Terminal',
+        'Walkthrough',
+        'Preview',
+      ]) {
+        expect(screen.queryByText(label)).toBeNull()
+      }
+    },
+  )
 
-    for (const label of ['Home', 'Settings', 'Logout']) {
-      expect(screen.getByText(label)).toBeInTheDocument()
-    }
-    for (const label of ['Menu', 'Files', 'MCP', 'Skills', 'Schedules', 'All Schedules', 'Source Control', 'Terminal', 'Walkthrough', 'Preview']) {
-      expect(screen.queryByText(label)).toBeNull()
-    }
-  })
   it.each([
     ['/schedules', 'New Schedule'],
     ['/repos/5/schedules', 'New Schedule'],
     ['/assistant', 'New Session'],
-  ])('does not duplicate the page header create action on %s', (path, headerAction) => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  ])('does not duplicate the page header create action on %s', async (path, headerAction) => {
+    renderSidebar({ route: path })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper([path]) })
-
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
     expect(screen.queryByText(headerAction)).toBeNull()
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
 
-  it('navigates home from the footer', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('navigates home from the footer', async () => {
+    const { capturedPathname } = renderSidebar({ route: '/repos/5?repoTab=workspaces' })
 
-    render(
-      <>
-        <DesktopSidebar />
-        <LocationDisplay />
-      </>,
-      { wrapper: createWrapper(['/repos/5?repoTab=workspaces']) }
-    )
+    fireEvent.click(await screen.findByText('Home'))
 
-    fireEvent.click(screen.getByText('Home'))
-
-    expect(screen.getByTestId('location').textContent).toBe('/')
-  })
-  it('opens settings by updating settings query params', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
-
-    render(
-      <>
-        <DesktopSidebar />
-        <LocationDisplay />
-      </>,
-      { wrapper: createWrapper(['/?dialog=files']) }
-    )
-
-    fireEvent.click(screen.getByText('Settings'))
-
-    expect(screen.getByTestId('location').textContent).toBe('/?dialog=files&settings=open&settingsTab=account')
+    await waitFor(() => expect(capturedPathname.current).toBe('/'))
   })
 
-  it('renders the session tree with home and account items in the footer', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('opens settings by updating settings query params', async () => {
+    const { capturedPathname, capturedSearch } = renderSidebar({ route: '/?dialog=files' })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
+    fireEvent.click(await screen.findByText('Settings'))
 
-    expect(screen.getByRole('region', { name: 'Sessions' })).toContainElement(screen.getByTestId('session-tree'))
+    await waitFor(() => expect(searchParams(capturedSearch).get('settings')).toBe('open'))
+    expect(capturedPathname.current).toBe('/')
+    expect(searchParams(capturedSearch).get('dialog')).toBe('files')
+    expect(searchParams(capturedSearch).get('settingsTab')).toBe('account')
+  })
+
+  it('renders the session tree with home and account items in the footer', async () => {
+    renderSidebar({ route: '/repos/5' })
+
+    const region = await screen.findByRole('region', { name: 'Sessions' })
+    expect(within(region).getByLabelText('Search sessions')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Sessions' })).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
   })
 
-  it('hides the server switcher when no linked servers exist', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('hides the server switcher when no linked servers exist', async () => {
+    renderSidebar({ route: '/' })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/']) })
-
+    await screen.findByText('Assistant')
     expect(screen.queryByRole('button', { name: /Switch server/ })).toBeNull()
   })
-  it('renders home, sessions and account items and no session tree when collapsed', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
+  it('renders home, sessions and account items and no session tree when collapsed', async () => {
+    renderSidebar({ route: '/repos/5', collapsed: true })
 
-    expect(screen.queryByTestId('session-tree')).toBeNull()
+    expect(await screen.findByText('Sessions')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Search sessions')).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
-    expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.queryByText('Files')).toBeNull()
   })
 
-  it('opens the sessions picker dialog from the collapsed Sessions item when the tool rail is not mounted', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('opens the sessions picker dialog from the collapsed Sessions item when the tool rail is not mounted', async () => {
+    useUIState.setState({ isToolRailMounted: false })
+    renderSidebar({ route: '/repos/5', collapsed: true })
 
-    render(<DesktopSidebar />, { wrapper: createWrapper(['/repos/5']) })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
-    expect(screen.queryByTestId('sessions-picker-dialog')).toBeNull()
+    fireEvent.click(await screen.findByText('Sessions'))
 
-    fireEvent.click(screen.getByText('Sessions'))
-
-    expect(screen.getByTestId('sessions-picker-dialog')).toBeInTheDocument()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 
-  it('opens the sessions panel from the collapsed Sessions item when the tool rail is mounted', () => {
-    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
-    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([true, vi.fn()])
-    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
-      isAuthenticated: true,
-      isLoading: false,
-      logout: vi.fn(),
-    } as any)
+  it('opens the sessions panel from the collapsed Sessions item when the tool rail is mounted', async () => {
     useUIState.setState({ isToolRailMounted: true })
+    const { capturedPathname, capturedSearch } = renderSidebar({ route: '/repos/5', collapsed: true })
 
-    render(
-      <>
-        <DesktopSidebar />
-        <LocationDisplay />
-      </>,
-      { wrapper: createWrapper(['/repos/5']) },
-    )
+    fireEvent.click(await screen.findByText('Sessions'))
 
-    fireEvent.click(screen.getByText('Sessions'))
-
-    expect(screen.getByTestId('location').textContent).toBe('/repos/5?panel=sessions')
-    expect(screen.queryByTestId('sessions-picker-dialog')).toBeNull()
+    await waitFor(() => expect(searchParams(capturedSearch).get('panel')).toBe('sessions'))
+    expect(capturedPathname.current).toBe('/repos/5')
   })
 })

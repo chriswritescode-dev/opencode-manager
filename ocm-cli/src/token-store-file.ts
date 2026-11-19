@@ -1,4 +1,6 @@
 import { join } from 'path'
+import { z } from 'zod'
+import { JsonObjectSchema, JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
 import { getConfigDir } from './state.js'
 import { readJsonFile, writeJsonFileAtomic } from './json-store.js'
 import type { TokenStore, TokenStoreDescription } from './token-store.js'
@@ -6,9 +8,10 @@ import { TokenStoreError, describeCause } from './token-store.js'
 
 const DOCUMENT_VERSION = 1
 
-type TokenDocument = Record<string, unknown> & {
+interface TokenDocument {
   version: number
   tokens: Record<string, string>
+  [key: string]: JsonValue
 }
 
 function tokenFilePath(): string {
@@ -16,14 +19,16 @@ function tokenFilePath(): string {
 }
 
 function readDocument(filePath: string): TokenDocument {
-  let raw: Record<string, unknown> | null
+  let content: JsonValue | null
   try {
-    raw = readJsonFile<Record<string, unknown>>(filePath)
-  } catch (err) {
-    throw new TokenStoreError(`failed to read token file ${filePath}: ${describeCause(err)}`, 'file')
+    content = readJsonFile(filePath, JsonValueSchema)
+  } catch (cause) {
+    throw new TokenStoreError(`failed to read token file ${filePath}: ${describeCause(cause)}`, 'file')
   }
   const empty: TokenDocument = { version: DOCUMENT_VERSION, tokens: {} }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return empty
+  const parsed = JsonObjectSchema.safeParse(content)
+  if (!parsed.success) return empty
+  const raw = parsed.data
   if (raw.version !== undefined && raw.version !== DOCUMENT_VERSION) {
     throw new TokenStoreError(
       `token file ${filePath} uses unsupported format version ${JSON.stringify(raw.version)}; upgrade ocm or remove the file`,
@@ -31,9 +36,11 @@ function readDocument(filePath: string): TokenDocument {
     )
   }
   const tokens: Record<string, string> = {}
-  if (raw.tokens && typeof raw.tokens === 'object' && !Array.isArray(raw.tokens)) {
-    for (const [account, token] of Object.entries(raw.tokens as Record<string, unknown>)) {
-      if (typeof token === 'string') tokens[account] = token
+  const storedTokens = JsonObjectSchema.safeParse(raw.tokens)
+  if (storedTokens.success) {
+    for (const [account, token] of Object.entries(storedTokens.data)) {
+      const value = z.string().safeParse(token)
+      if (value.success) tokens[account] = value.data
     }
   }
   return { ...raw, version: DOCUMENT_VERSION, tokens }
@@ -45,9 +52,9 @@ function mutateDocument(filePath: string, mutate: (tokens: Record<string, string
     if (!mutate(doc.tokens)) return false
     writeJsonFileAtomic(filePath, doc)
     return true
-  } catch (err) {
-    if (err instanceof TokenStoreError) throw err
-    throw new TokenStoreError(`failed to write token file ${filePath}: ${describeCause(err)}`, 'file')
+  } catch (cause) {
+    if (cause instanceof TokenStoreError) throw cause
+    throw new TokenStoreError(`failed to write token file ${filePath}: ${describeCause(cause)}`, 'file')
   }
 }
 

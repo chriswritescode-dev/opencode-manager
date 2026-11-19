@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import type { FileDiffInfo, SessionInfo } from '@opencode-manager/shared/opencode'
+import type { FileDiffInfo, OpenCodeApi, SessionInfo } from '@opencode-manager/shared/opencode'
 import type { WalkthroughSource } from '@opencode-manager/shared/schemas'
 import {
   DEFAULT_WALKTHROUGH_SOURCE,
@@ -14,8 +14,9 @@ import {
   planPullRequestFetch,
   readWalkthroughChanges,
 } from '../../src/services/walkthrough-sources'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { cloneOrigin, createCommittedRepo, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
+import { createStubOpenCodeClient, sessionInfo } from '../helpers/stub-opencode-client'
+import { catchRejectedError } from '../helpers/thrown-error'
 
 const TEST_SESSION_ID = 'ses_test'
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'walkthrough-sources-'))
@@ -33,16 +34,20 @@ function repoPath(prefix: string): string {
 }
 
 function sessionAt(directory: string): SessionInfo {
-  return { id: TEST_SESSION_ID, title: 'Test', location: { directory } } as SessionInfo
+  return sessionInfo({ id: TEST_SESSION_ID, location: { directory } })
 }
 
 function readAt(directory: string, source: WalkthroughSource): Promise<FileDiffInfo[]> {
   return readWalkthroughChanges({
-    client: {} as OpenCodeClient,
+    client: createStubOpenCodeClient(),
     session: sessionAt(directory),
     source,
     gitEnv: GIT_ENV,
   })
+}
+
+function readFailure(directory: string, source: WalkthroughSource): Promise<Error> {
+  return catchRejectedError(readAt(directory, source))
 }
 
 describe('readWalkthroughChanges', () => {
@@ -50,12 +55,17 @@ describe('readWalkthroughChanges', () => {
     const changes: FileDiffInfo[] = [
       { file: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b', additions: 1, deletions: 1, status: 'modified' },
     ]
-    const client = {
+    const client = createStubOpenCodeClient({
       api: {
-        message: { list: vi.fn(async () => ({ data: [{ id: 'msg-1' }], cursor: {} })) },
-        session: { diff: vi.fn(async () => changes) },
+        message: {
+          list: vi.fn<OpenCodeApi['message']['list']>(async () => ({
+            data: [{ id: 'msg-1', time: { created: 1 }, text: 'hi', type: 'user' }],
+            cursor: {},
+          })),
+        },
+        session: { diff: vi.fn<OpenCodeApi['session']['diff']>(async () => changes) },
       },
-    } as unknown as OpenCodeClient
+    })
 
     const result = await readWalkthroughChanges({
       client,
@@ -197,7 +207,7 @@ describe('readWalkthroughChanges', () => {
     git(['commit', '-m', 'pr'], clone)
     git(['push', 'origin', 'HEAD:refs/pull/1/head'], clone)
 
-    const error = await readAt(clone, { kind: 'pullRequest', number: 1, base: 'main' }).catch((thrown) => thrown)
+    const error = await readFailure(clone, { kind: 'pullRequest', number: 1, base: 'main' })
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
@@ -271,7 +281,7 @@ describe('readWalkthroughChanges', () => {
     const dir = repoPath('plain')
     mkdirSync(dir, { recursive: true })
 
-    const error = await readAt(dir, { kind: 'staged' }).catch((thrown) => thrown)
+    const error = await readFailure(dir, { kind: 'staged' })
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 409, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
@@ -281,7 +291,7 @@ describe('readWalkthroughChanges', () => {
     const repo = repoPath('nobase')
     createCommittedRepo(repo, 'trunk')
 
-    const error = await readAt(repo, { kind: 'branch' }).catch((thrown) => thrown)
+    const error = await readFailure(repo, { kind: 'branch' })
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 409, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
@@ -321,11 +331,11 @@ describe('readWalkthroughChanges', () => {
     const tree = git(['rev-parse', 'main^{tree}'], repo)
     rmSync(path.join(repo, '.git', 'objects', tree.slice(0, 2), tree.slice(2)), { force: true })
 
-    const error = await readAt(repo, { kind: 'branch', base: 'main' }).catch((thrown) => thrown)
+    const error = await readFailure(repo, { kind: 'branch', base: 'main' })
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 502, code: 'WALKTHROUGH_SOURCE_UNAVAILABLE' })
-    expect((error as Error).message).toContain('unable to read tree')
+    expect(error.message).toContain('unable to read tree')
   })
 
   it('reads root-relative paths when diff prefix config changes the header', async () => {
@@ -402,7 +412,7 @@ describe('readWalkthroughChanges', () => {
     createCommittedRepo(repo)
     writeFileSync(path.join(repo, 'huge.txt'), 'x'.repeat(6_000_000))
 
-    const error = await readAt(repo, { kind: 'unstaged' }).catch((thrown) => thrown)
+    const error = await readFailure(repo, { kind: 'unstaged' })
 
     expect(error).toBeInstanceOf(ChangeWalkthroughError)
     expect(error).toMatchObject({ status: 413, code: 'WALKTHROUGH_DIFF_TOO_LARGE' })

@@ -97,14 +97,12 @@ describe('useScheduleUrlState', () => {
 
   it('closePromptDialog after openNewTemplate clears promptDialog and templateId', () => {
     const { result } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), )
-    // Open new template
     act(() => {
       result.current.openNewTemplate()
     })
     expect(result.current.promptDialog).toBe('new')
     expect(result.current.templateId).toBeNull()
 
-    // Close prompt dialog
     act(() => {
       result.current.closePromptDialog()
     })
@@ -121,21 +119,18 @@ describe('useScheduleUrlState', () => {
   it('preserves unrelated params across setScheduleTab and openEditJob and closeDialog', () => {
     const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), ['/?assistant=1'])
 
-    // setScheduleTab preserves assistant param
     act(() => {
       result.current.setScheduleTab('runs')
     })
     expect(capturedSearch.current).toContain('assistant=1')
     expect(capturedSearch.current).toContain('scheduleTab=runs')
 
-    // openEditJob preserves assistant param
     act(() => {
       result.current.openEditJob(3)
     })
     expect(capturedSearch.current).toContain('assistant=1')
     expect(capturedSearch.current).toContain('scheduleDialog=edit')
 
-    // closeDialog preserves assistant param
     act(() => {
       result.current.closeDialog()
     })
@@ -231,7 +226,6 @@ describe('useScheduleUrlState', () => {
       result.current.closePromptDialog()
     })
     expect(result.current.promptDialog).toBeNull()
-    // closePromptDialog does not touch jobId
     expect(result.current.jobId).toBe(7)
   })
 
@@ -330,7 +324,6 @@ describe('useScheduleUrlState', () => {
       const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useScheduleUrlState(), ['/?jobId=5&scheduleTab=detail'])
       act(() => {
         result.current.replaceUrlParams((_p) => {
-          // No modifications
         })
       })
       expect(result.current.jobId).toBe(5)

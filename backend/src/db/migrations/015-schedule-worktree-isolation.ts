@@ -1,24 +1,19 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-  dflt_value: string | null
-}
 
 const migration: Migration = {
   id: '015-schedule-worktree-isolation',
   legacy: { version: 15, name: 'schedule-worktree-isolation' },
 
   up(db) {
-    const jobColumns = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
+    const jobColumns = selectTableColumns(db, 'schedule_jobs')
     const jobColumnNames = new Set(jobColumns.map((c) => c.name))
 
     if (!jobColumnNames.has('branch')) {
       db.run('ALTER TABLE schedule_jobs ADD COLUMN branch TEXT')
     }
 
-    const runColumns = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
+    const runColumns = selectTableColumns(db, 'schedule_runs')
     const runColumnNames = new Set(runColumns.map((c) => c.name))
 
     if (!runColumnNames.has('run_branch')) {
@@ -33,8 +28,7 @@ const migration: Migration = {
   },
 
   down(db) {
-    // Rebuild schedule_jobs without branch
-    const jobColumns = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
+    const jobColumns = selectTableColumns(db, 'schedule_jobs')
     const hasBranch = jobColumns.some((c) => c.name === 'branch')
 
     if (hasBranch) {
@@ -79,8 +73,7 @@ const migration: Migration = {
       db.run('CREATE INDEX IF NOT EXISTS idx_schedule_jobs_next_run ON schedule_jobs(enabled, next_run_at)')
     }
 
-    // Rebuild schedule_runs without run_branch, commit_hash, worktree_path
-    const runColumns = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
+    const runColumns = selectTableColumns(db, 'schedule_runs')
     const hasRunBranch = runColumns.some((c) => c.name === 'run_branch')
     const hasCommitHash = runColumns.some((c) => c.name === 'commit_hash')
     const hasWorktreePath = runColumns.some((c) => c.name === 'worktree_path')

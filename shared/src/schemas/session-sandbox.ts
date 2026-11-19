@@ -1,8 +1,12 @@
 import { z } from "zod";
 
+export const SessionSandboxCpusSchema = z.number().int().min(1).max(64);
+
+export const SessionSandboxMemoryMibSchema = z.number().int().min(1024).max(1048576);
+
 export const SessionSandboxResourcesSchema = z.object({
-  cpus: z.number().int().min(1).max(64),
-  memoryMib: z.number().int().min(1024).max(1048576),
+  cpus: SessionSandboxCpusSchema,
+  memoryMib: SessionSandboxMemoryMibSchema,
 });
 
 export type SessionSandboxResources = z.infer<typeof SessionSandboxResourcesSchema>;

@@ -1,8 +1,9 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
+import { z } from 'zod'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../../../src/db/migration-runner'
 import { allMigrations } from '../../../src/db/migrations'
@@ -12,16 +13,47 @@ import { createGitService, GitIntegrationConflictError, type GitService } from '
 import { createWorktreeSafely } from '../../../src/services/repo'
 import type { ScheduleJobPersistenceInput } from '../../../src/services/schedule-config'
 import { createRepoRoutes } from '../../../src/routes/repos'
+import { ScheduleService } from '../../../src/services/schedules'
+import { ScheduleWorktreeManager } from '../../../src/services/schedule-worktree'
+import { TerminalService } from '../../../src/services/terminal'
+import { ProjectConfigService } from '../../../src/services/project-config'
+import { SecretsService } from '../../../src/services/secrets'
+import { RepoWorkspaceService } from '../../../src/services/repo-workspace'
+import { CredentialProvider } from '../../../src/services/credential-provider'
 import { createStubOpenCodeClient } from '../../helpers/stub-opencode-client'
+import { createStubRepoEnvService } from '../../helpers/stub-repo-env-service'
+import { readJson } from '../../helpers/read-json'
+import { testLogEntries } from '../../helpers/log-assertions'
 import { cloneOrigin, createCommittedRepo, createGitAuthService, createOrigin, git, uniqueName } from '../../helpers/git-fixtures'
 import { GitOperationError, parseGitError } from '../../../src/utils/git-errors'
-import { logger } from '../../../src/utils/logger'
 import type { GitAuthService } from '../../../src/services/git-auth'
 import type { Repo } from '../../../src/types/repo'
-import type { TerminalService } from '../../../src/services/terminal'
-import type { ProjectConfigService } from '../../../src/services/project-config'
-import type { SecretsService } from '../../../src/services/secrets'
-import type { RepoWorkspaceService } from '../../../src/services/repo-workspace'
+
+async function conflictOf(operation: Promise<Error>): Promise<GitIntegrationConflictError> {
+  const error = await operation
+  if (!(error instanceof GitIntegrationConflictError)) throw error
+  return error
+}
+
+async function rejectionOf(operation: Promise<unknown>): Promise<Error> {
+  try {
+    await operation
+  } catch (error) {
+    if (error instanceof Error) return error
+    throw error
+  }
+  throw new Error('Expected the operation to reject')
+}
+
+const DeleteRepoResponseSchema = z.object({
+  success: z.boolean(),
+  branch: z.object({
+    name: z.string(),
+    deleted: z.boolean(),
+    remoteDeleted: z.boolean(),
+    error: z.string().optional(),
+  }).optional(),
+})
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'git-service-real-'))
 process.env.WORKSPACE_PATH = workspaceRoot
@@ -189,14 +221,9 @@ describe('GitService real git', () => {
         cloneStatus: 'ready',
         clonedAt: Date.now(),
       })
-      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
 
-      try {
-        await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
-        expect(warnSpy).not.toHaveBeenCalled()
-      } finally {
-        warnSpy.mockRestore()
-      }
+      await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
+      expect(testLogEntries('warn')).toHaveLength(0)
     })
 
     it('still logs a real failure', async () => {
@@ -211,14 +238,9 @@ describe('GitService real git', () => {
         cloneStatus: 'ready',
         clonedAt: Date.now(),
       })
-      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
 
-      try {
-        await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
-        expect(warnSpy).toHaveBeenCalledTimes(1)
-      } finally {
-        warnSpy.mockRestore()
-      }
+      await expect(service.getBranchStatus(repo.id, db)).resolves.toEqual({ ahead: 0, behind: 0 })
+      expect(testLogEntries('warn')).toHaveLength(1)
     })
   })
 
@@ -263,9 +285,7 @@ describe('GitService real git', () => {
       const victimBefore = git(['rev-parse', 'victim'], repoPath)
       const repo = registerClone(origin, repoPath)
 
-      const error = await service
-        .renameBranch(repo.id, '--force', 'victim', db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.renameBranch(repo.id, '--force', 'victim', db))
 
       expect(error).toBeInstanceOf(Error)
       expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).toBe('main')
@@ -296,9 +316,7 @@ describe('GitService real git', () => {
         isWorktree: true,
       })
 
-      const error = await service
-        .renameBranch(baseRepo.id, 'feature', 'feature-renamed', db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.renameBranch(baseRepo.id, 'feature', 'feature-renamed', db))
 
       expect(error).toBeInstanceOf(Error)
       const parsed = parseGitError(error)
@@ -448,9 +466,7 @@ describe('GitService real git', () => {
       git(['checkout', 'main'], repoPath)
       const repo = registerClone(origin, repoPath)
 
-      const error = await service
-        .deleteBranch(repo.id, { name: 'myfix', force: true, deleteRemote: true }, db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.deleteBranch(repo.id, { name: 'myfix', force: true, deleteRemote: true }, db))
 
       expect(error).toBeInstanceOf(GitOperationError)
       expect(parseGitError(error).code).toBe('REMOTE_BRANCH_MISMATCH')
@@ -472,9 +488,7 @@ describe('GitService real git', () => {
       git(['checkout', 'main'], repoPath)
       const repo = registerClone(origin, repoPath)
 
-      const error = await service
-        .deleteBranch(repo.id, { name: 'feature', force: false, deleteRemote: true }, db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.deleteBranch(repo.id, { name: 'feature', force: false, deleteRemote: true }, db))
 
       expect(error).toBeInstanceOf(GitOperationError)
       expect(parseGitError(error).code).toBe('BRANCH_NOT_MERGED')
@@ -526,9 +540,7 @@ describe('GitService real git', () => {
       cloneOrigin(origin, repoPath)
       const repo = registerClone(origin, repoPath)
 
-      const error = await service
-        .deleteBranch(repo.id, { name: 'main', force: true, deleteRemote: false }, db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.deleteBranch(repo.id, { name: 'main', force: true, deleteRemote: false }, db))
 
       expect(error).toBeInstanceOf(Error)
       const parsed = parseGitError(error)
@@ -560,7 +572,12 @@ describe('GitService real git', () => {
   })
 
   describe('stash', () => {
-    function setupStashRepo(prefix: string): { repo: Repo; repoPath: string } {
+    interface StashRepoFixture {
+      repo: Repo
+      repoPath: string
+    }
+
+    function setupStashRepo(prefix: string): StashRepoFixture {
       const origin = path.join(workspaceRoot, uniqueName(`${prefix}-origin.git`))
       const work = path.join(workspaceRoot, uniqueName(`${prefix}-work`))
       createOrigin(origin, work)
@@ -637,11 +654,11 @@ describe('GitService real git', () => {
       writeFileSync(path.join(repoPath, 'second.txt'), 'second\n')
       await service.pushStash(repo.id, { message: 'second', includeUntracked: true }, db)
 
-      const applyError = await service.applyStash(repo.id, 0, staleHash, false, db).catch((caught: unknown) => caught)
+      const applyError = await rejectionOf(service.applyStash(repo.id, 0, staleHash, false, db))
       expect(parseGitError(applyError).code).toBe('STASH_CHANGED')
       expect(parseGitError(applyError).statusCode).toBe(409)
 
-      const dropError = await service.dropStash(repo.id, 0, staleHash, db).catch((caught: unknown) => caught)
+      const dropError = await rejectionOf(service.dropStash(repo.id, 0, staleHash, db))
       expect(parseGitError(dropError).code).toBe('STASH_CHANGED')
 
       expect(await service.listStashes(repo.id, db)).toHaveLength(2)
@@ -652,7 +669,7 @@ describe('GitService real git', () => {
     it('rejects applying a stash index that no longer exists', async () => {
       const { repo } = setupStashRepo('stash-missing')
 
-      const error = await service.applyStash(repo.id, 0, 'deadbeef', false, db).catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.applyStash(repo.id, 0, 'deadbeef', false, db))
       expect(parseGitError(error).code).toBe('STASH_CHANGED')
     })
 
@@ -672,12 +689,7 @@ describe('GitService real git', () => {
       git(['add', 'file.txt'], repoPath)
       git(['commit', '-m', 'competing'], repoPath)
 
-      let error: unknown
-      try {
-        await service.applyStash(repo.id, 0, hash, false, db)
-      } catch (caught) {
-        error = caught
-      }
+      const error = await rejectionOf(service.applyStash(repo.id, 0, hash, false, db))
 
       expect(error).toBeInstanceOf(Error)
       expect(parseGitError(error).code).toBe('MERGE_CONFLICT')
@@ -694,12 +706,7 @@ describe('GitService real git', () => {
       git(['add', 'file.txt'], repoPath)
       git(['commit', '-m', 'competing'], repoPath)
 
-      let error: unknown
-      try {
-        await service.applyStash(repo.id, 0, hash, true, db)
-      } catch (caught) {
-        error = caught
-      }
+      const error = await rejectionOf(service.applyStash(repo.id, 0, hash, true, db))
 
       expect(error).toBeInstanceOf(Error)
       expect(parseGitError(error).code).toBe('MERGE_CONFLICT')
@@ -708,7 +715,12 @@ describe('GitService real git', () => {
   })
 
   describe('operations', () => {
-    function setupOperationRepo(prefix: string): { repo: Repo; repoPath: string } {
+    interface OperationRepoFixture {
+      repo: Repo
+      repoPath: string
+    }
+
+    function setupOperationRepo(prefix: string): OperationRepoFixture {
       const origin = path.join(workspaceRoot, uniqueName(`${prefix}-origin.git`))
       const work = path.join(workspaceRoot, uniqueName(`${prefix}-work`))
       createOrigin(origin, work)
@@ -817,7 +829,7 @@ describe('GitService real git', () => {
       writeFileSync(path.join(repoPath, 'file.txt'), 'resolved\n')
       git(['add', 'file.txt'], repoPath)
 
-      const error = await service.continueOperation(repo.id, db).catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.continueOperation(repo.id, db))
       expect(error).toBeInstanceOf(Error)
 
       expect((await service.getStatus(repo.id, db)).operation).toEqual({
@@ -874,8 +886,8 @@ describe('GitService real git', () => {
     it('rejects continue and abort when no operation is in progress', async () => {
       const { repo } = setupOperationRepo('op-none')
 
-      const continueError = await service.continueOperation(repo.id, db).catch((caught: unknown) => caught)
-      const abortError = await service.abortOperation(repo.id, db).catch((caught: unknown) => caught)
+      const continueError = await rejectionOf(service.continueOperation(repo.id, db))
+      const abortError = await rejectionOf(service.abortOperation(repo.id, db))
 
       expect(parseGitError(continueError).code).toBe('NO_OPERATION_IN_PROGRESS')
       expect(parseGitError(continueError).statusCode).toBe(409)
@@ -958,9 +970,7 @@ describe('GitService real git', () => {
       const first = await service.integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'cherry-pick' }, db)
       expect(first.integratedCommits).toBe(1)
 
-      const error = await service
-        .integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'cherry-pick' }, db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'cherry-pick' }, db))
 
       expect(error).toBeInstanceOf(GitOperationError)
       expect(parseGitError(error).code).toBe('INTEGRATE_NOTHING_TO_INTEGRATE')
@@ -1018,12 +1028,7 @@ describe('GitService real git', () => {
       writeFileSync(path.join(basePath, 'file.txt'), 'main change\n')
       git(['commit', '-am', 'main change'], basePath)
 
-      const error = await service
-        .integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'merge' }, db)
-        .catch((caught: unknown) => caught)
-
-      expect(error).toBeInstanceOf(GitIntegrationConflictError)
-      const conflict = error as GitIntegrationConflictError
+      const conflict = await conflictOf(rejectionOf(service.integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'merge' }, db)))
       expect(conflict.targetRepoId).toBe(base.id)
       expect(conflict.operation.kind).toBe('merge')
       expect(conflict.operation.conflictedFiles).toContain('file.txt')
@@ -1043,12 +1048,7 @@ describe('GitService real git', () => {
       writeFileSync(path.join(basePath, 'file.txt'), 'main change\n')
       git(['commit', '-am', 'main change'], basePath)
 
-      const error = await service
-        .integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'cherry-pick' }, db)
-        .catch((caught: unknown) => caught)
-
-      expect(error).toBeInstanceOf(GitIntegrationConflictError)
-      const conflict = error as GitIntegrationConflictError
+      const conflict = await conflictOf(rejectionOf(service.integrateBranch(worktree.id, { targetBranch: 'main', strategy: 'cherry-pick' }, db)))
       expect(conflict.targetRepoId).toBe(base.id)
       expect(conflict.operation.kind).toBe('cherry-pick')
 
@@ -1110,13 +1110,11 @@ describe('GitService real git', () => {
       const nestedHeadBefore = git(['rev-parse', 'HEAD'], nestedPath)
       const nestedStatusBefore = git(['status', '--porcelain'], nestedPath)
 
-      const error = await service
-        .integrateBranch(worktree.id, { targetBranch: 'nested', strategy: 'merge' }, db)
-        .catch((caught: unknown) => caught)
+      const error = await rejectionOf(service.integrateBranch(worktree.id, { targetBranch: 'nested', strategy: 'merge' }, db))
 
-      expect(error).toBeInstanceOf(GitOperationError)
+      if (!(error instanceof GitOperationError)) throw error
       expect(parseGitError(error).statusCode).toBe(409)
-      expect((error as GitOperationError).message).toMatch(/not a managed repository/i)
+      expect(error.message).toMatch(/not a managed repository/i)
       expect(git(['rev-parse', 'HEAD'], nestedPath)).toBe(nestedHeadBefore)
       expect(git(['status', '--porcelain'], nestedPath)).toBe(nestedStatusBefore)
     })
@@ -1194,14 +1192,17 @@ describe('GitService real git', () => {
     }
 
     function createDeleteApp(): Hono {
+      const openCodeClient = createStubOpenCodeClient()
+      const projectConfigService = new ProjectConfigService(db, createGitService(gitAuth), gitAuth)
+      const terminalService = new TerminalService(
+        { client: openCodeClient, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+        new CredentialProvider(db),
+        createStubRepoEnvService(),
+      )
+      const scheduleService = new ScheduleService(db, openCodeClient, new ScheduleWorktreeManager(gitAuth, db))
+      const repoWorkspaces = new RepoWorkspaceService(db, openCodeClient, gitAuth, projectConfigService, terminalService, scheduleService)
       const app = new Hono()
-      const scheduleService = { prepareRepoDelete: () => {} } as unknown as Parameters<typeof createRepoRoutes>[2]
-      const repoWorkspaces = {
-        create: async () => ({ directory: '' }),
-        remove: async () => undefined,
-        removeRepoTerminals: async () => undefined,
-      } as unknown as RepoWorkspaceService
-      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, repoWorkspaces, {} as unknown as SecretsService))
+      app.route('/repos', createRepoRoutes(db, gitAuth, scheduleService, openCodeClient, terminalService, projectConfigService, repoWorkspaces, new SecretsService(db)))
       return app
     }
 
@@ -1249,7 +1250,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch).toEqual({ name: 'feature', deleted: true, remoteDeleted: false })
       expect(existsSync(worktreePath)).toBe(false)
@@ -1267,7 +1268,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch).toEqual({
         name: 'feature',
@@ -1292,7 +1293,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch?.deleted).toBe(true)
       expect(data.branch?.remoteDeleted).toBe(true)
@@ -1312,7 +1313,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch).toEqual({
         name: 'feature',
@@ -1336,7 +1337,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch).toEqual({ name: 'feature', deleted: true, remoteDeleted: false })
       expect(existsSync(worktreePath)).toBe(false)
@@ -1358,7 +1359,7 @@ describe('GitService real git', () => {
       })
 
       expect(res.status).toBe(200)
-      const data = await res.json() as { success: boolean; branch?: { name: string; deleted: boolean; remoteDeleted: boolean; error?: string } }
+      const data = await readJson(res, DeleteRepoResponseSchema)
       expect(data.success).toBe(true)
       expect(data.branch?.name).toBe('feature')
       expect(data.branch?.deleted).toBe(true)

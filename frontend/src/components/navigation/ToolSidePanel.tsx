@@ -37,7 +37,7 @@ import { restoreOverlayFocus } from '@/lib/overlayFocus'
 import { useRestoreFocusOnClose } from '@/hooks/useRestoreFocusOnClose'
 import { cn } from '@/lib/utils'
 import { useToolPanelLayout, useToolPanelWidth } from '@/hooks/useToolPanelLayout'
-import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/opencode-server-context'
 
 interface PanelResizeState {
   pointerId: number
@@ -130,10 +130,6 @@ function PanelResizeHandle({ width, minWidth, maxWidth, onWidthChange }: PanelRe
 
 const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['sessions', 'mcp', 'skills', 'source-control', 'terminal'])
 
-/**
- * Escape closes the floating panel, except while a nested menu is open or the terminal owns
- * the key. Focus moving into the opener is handled by `useRestoreFocusOnClose`.
- */
 function useFloatingPanelDismiss(
   floating: boolean,
   closePanel: () => void,
@@ -168,10 +164,6 @@ interface SessionsPanelBodyProps {
   deleteActiveSessionPath?: string
 }
 
-/**
- * Session picker shown in the tool panel. While docked, choosing a session keeps the panel open on
- * the destination; as an overlay sheet the choice replaces the entry behind it and closes the panel.
- */
 function SessionsPanelBody({ docked, onClose, deleteActiveSessionPath }: SessionsPanelBodyProps) {
   const navigation = useSessionPickerNavigation({
     mode: docked ? 'panel' : 'replace',
@@ -219,10 +211,6 @@ interface ToolSidePanelProps {
   walkthroughSourceRequest?: WalkthroughSourceRequest
   walkthroughModel?: ModelRef | null
   walkthroughOnOpenSession?: (id: string) => void
-  /**
-   * Path the session picker opens after the open session is deleted; the session page passes the
-   * remote project path on linked-server routes.
-   */
   deleteActiveSessionPath?: string
 }
 
@@ -230,10 +218,6 @@ interface RailButtonProps {
   item: MoreDrawerItem
   active: boolean
   onClick: () => void
-  /**
-   * Rendered inside the button. When present, the indicator owns the button's accessible name,
-   * so the item label is not applied as an `aria-label`.
-   */
   indicator?: ReactNode
 }
 
@@ -267,12 +251,6 @@ function RailButton({ item, active, onClick, indicator }: RailButtonProps) {
   )
 }
 
-/**
- * Desktop-only tool panel with its icon rail, rendered to the right of a page's content. The panel
- * docks when the page has room and otherwise floats over the page as a sheet, so the content keeps
- * a usable width. The rail lists the current route's tool items; repo- and session-scoped tools
- * render only when their context is given.
- */
 export function ToolSidePanel({
   panel,
   filesBasePath,
@@ -458,7 +436,7 @@ export function ToolSidePanel({
     ) : null
 
   const panelContent =
-    panelBody !== null && !docked && typeof document !== 'undefined'
+    panelBody !== null && !docked && 'document' in globalThis
       ? createPortal(panelBody, document.body)
       : panelBody
 

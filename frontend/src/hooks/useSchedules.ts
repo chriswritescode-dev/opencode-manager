@@ -30,13 +30,17 @@ import {
   updateServerSchedule,
 } from '@/api/schedules'
 import { showToast } from '@/lib/toast'
-import type { ListAllRunsParams, ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
+import type { ListAllRunsParams } from '@/api/schedules'
 
 export const UNREAD_SCHEDULE_RUNS_QUERY_KEY = ['schedule-runs-unread'] as const
 
 export type ScheduleTargetRef =
   | { kind: 'repo'; repoId: number }
   | { kind: 'server'; serverId: string }
+
+function scheduleErrorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
 
 function invalidateScheduleQueries(queryClient: ReturnType<typeof useQueryClient>): void {
   queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
@@ -56,7 +60,7 @@ export function useAllSchedules() {
     queryKey: ['all-schedules'],
     queryFn: async () => {
       const response = await listAllSchedules()
-      return response.jobs as ScheduleJobWithRepo[]
+      return response.jobs
     },
     refetchInterval: 10000,
   })
@@ -67,7 +71,7 @@ export function useAllScheduleRuns(params: ListAllRunsParams, enabled: boolean =
     queryKey: ['all-schedule-runs', params],
     queryFn: async () => {
       const response = await listAllScheduleRuns(params)
-      return response.runs as ScheduleRunWithContext[]
+      return response.runs
     },
     enabled,
     refetchInterval: 5000,
@@ -159,8 +163,8 @@ export function useCreateRepoSchedule() {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule created')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to create schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to create schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -179,8 +183,8 @@ export function useUpdateRepoSchedule() {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule updated')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to update schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -197,8 +201,8 @@ export function useDeleteRepoSchedule() {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule deleted')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to delete schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -219,8 +223,8 @@ export function useRunRepoSchedule() {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to run schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -242,7 +246,7 @@ export function useCancelRepoScheduleRun() {
       showToast.success('Schedule run cancelled')
     },
     onError: (error) => {
-      showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
+      showToast.error(`Failed to cancel schedule run: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -260,8 +264,8 @@ export function useClearRepoScheduleRuns() {
       queryClient.invalidateQueries({ queryKey: ['schedule-worktrees', variables.repoId, variables.jobId] })
       showToast.success(result.cleared > 0 ? `Cleared ${result.cleared} run${result.cleared === 1 ? '' : 's'}` : 'No runs to clear')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to clear run history: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to clear run history: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -279,8 +283,8 @@ export function useDeleteRepoScheduleRun() {
       queryClient.invalidateQueries({ queryKey: ['schedule-worktrees', variables.repoId, variables.jobId] })
       showToast.success('Run deleted')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to delete run: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to delete run: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -311,8 +315,8 @@ export function useRemoveScheduleWorktrees() {
       queryClient.invalidateQueries({ queryKey: ['repo', 'siblings'] })
       showToast.success(`Removed ${result.removed} worktree${result.removed === 1 ? '' : 's'}`)
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to remove worktree: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to remove worktree: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -370,8 +374,8 @@ export function useCreateServerSchedule(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule created')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to create schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to create schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -387,8 +391,8 @@ export function useUpdateServerSchedule(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule updated')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to update schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -402,8 +406,8 @@ export function useDeleteServerSchedule(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule deleted')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to delete schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -419,8 +423,8 @@ export function useRunServerSchedule(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to run schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -437,8 +441,8 @@ export function useCancelServerScheduleRun(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule run cancelled')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to cancel schedule run: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -453,8 +457,8 @@ export function useClearServerScheduleRuns(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
       showToast.success(result.cleared > 0 ? `Cleared ${result.cleared} run${result.cleared === 1 ? '' : 's'}` : 'No runs to clear')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to clear run history: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to clear run history: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -469,8 +473,8 @@ export function useDeleteServerScheduleRun(serverId: string) {
       queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
       showToast.success('Run deleted')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to delete run: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to delete run: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -489,8 +493,8 @@ export function useUpdateScheduleTarget() {
       invalidateScheduleQueries(queryClient)
       showToast.success('Schedule updated')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to update schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -510,8 +514,8 @@ export function useDeleteScheduleTarget() {
       invalidateScheduleQueries(queryClient)
       showToast.success('Schedule deleted')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to delete schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -530,8 +534,8 @@ export function useRunScheduleTarget() {
       invalidateScheduleQueries(queryClient)
       showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
     },
-    onError: (error: unknown) => {
-      showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
+    onError: (error: Error) => {
+      showToast.error(`Failed to run schedule: ${scheduleErrorMessage(error)}`)
     },
   })
 }
@@ -551,7 +555,7 @@ export function useCancelScheduleTargetRun() {
       showToast.success('Schedule run cancelled')
     },
     onError: (error) => {
-      showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
+      showToast.error(`Failed to cancel schedule run: ${scheduleErrorMessage(error)}`)
     },
   })
 }

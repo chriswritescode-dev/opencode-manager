@@ -10,28 +10,12 @@ export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>
 export const ScheduleModeSchema = z.enum(['interval', 'cron'])
 export type ScheduleMode = z.infer<typeof ScheduleModeSchema>
 
-/**
- * Where a scheduled run executes. `worktree` gives every run a fresh worktree that is
- * removed when the run ends, `kept-worktree` keeps each run's worktree afterwards, and
- * `shared-worktree` reuses one worktree and branch for every run of the schedule.
- * `in-place` runs directly in the target directory and is the only mode available for a
- * project on a linked remote OpenCode server, which has no local checkout to branch from.
- */
 export const ScheduleWorkspaceModeSchema = z.enum(['worktree', 'kept-worktree', 'shared-worktree', 'in-place'])
 export type ScheduleWorkspaceMode = z.infer<typeof ScheduleWorkspaceModeSchema>
 
-/**
- * What clearing run history does with the run worktrees that still exist on disk.
- * `commit` commits their pending changes to their branches and keeps those branches;
- * `discard` force-removes the worktrees and deletes their branches.
- */
 export const ScheduleRunWorktreesModeSchema = z.enum(['commit', 'discard']).default('commit')
 export type ScheduleRunWorktreesMode = z.infer<typeof ScheduleRunWorktreesModeSchema>
 
-/**
- * A schedule worktree that still exists on disk. `runId` is null for the schedule's
- * shared worktree, and `inUse` is true while a running run is working in it.
- */
 export const ScheduleWorktreeSchema = z.object({
   worktreePath: z.string(),
   branch: z.string(),
@@ -91,11 +75,6 @@ export const ScheduleMcpServerConfigSchema = z.discriminatedUnion('type', [
 ])
 export type ScheduleMcpServerConfig = z.infer<typeof ScheduleMcpServerConfigSchema>
 
-/**
- * An MCP server attached to a schedule. Without `config` it names a server from
- * the OpenCode configuration, which is connected for the run even when disabled.
- * With `config` it is a schedule-only server added to the run's location.
- */
 export const ScheduleMcpServerSchema = z.object({
   name: z.string().trim().min(1).max(100),
   config: ScheduleMcpServerConfigSchema.optional(),
@@ -107,13 +86,6 @@ export const ScheduleMcpServersSchema = z.array(ScheduleMcpServerSchema).max(50)
   { message: 'MCP server names must be unique' },
 )
 
-/**
- * Bash commands whose blast radius escapes the throwaway worktree: host-level
- * commands that damage the machine regardless of cwd, plus force-pushes that can
- * overwrite remote branches. File-mutating commands (`rm -rf`, `git reset --hard`,
- * etc.) are intentionally omitted — they only affect the disposable worktree, which
- * is never auto-pushed and is the real safety boundary.
- */
 export const DEFAULT_DESTRUCTIVE_BASH_PATTERNS = [
   'git push --force*', 'git push -f *',
   'sudo *', 'dd *', 'mkfs*',
@@ -129,10 +101,6 @@ export const SchedulePermissionConfigSchema = z.object({
 })
 export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
 
-/**
- * Sandbox settings for a scheduled run's session. `resources` overrides the
- * default CPU and memory limits; null keeps the server defaults.
- */
 export const ScheduleSandboxConfigSchema = z.object({
   enabled: z.boolean(),
   resources: SessionSandboxResourcesSchema.nullable(),
@@ -141,11 +109,6 @@ export type ScheduleSandboxConfig = z.infer<typeof ScheduleSandboxConfigSchema>
 
 export type SchedulePermissionEffect = 'allow' | 'deny' | 'ask'
 
-/**
- * A single OpenCode 2 session permission rule. `action` is the tool or permission
- * action (e.g. `shell`, `external_directory`, or `*` for all), `resource` is the
- * glob matched against the tool argument, and `effect` is the resulting decision.
- */
 export interface SchedulePermissionRule {
   action: string
   resource: string
@@ -154,17 +117,6 @@ export interface SchedulePermissionRule {
 
 export type SchedulePermissionRuleset = SchedulePermissionRule[]
 
-/**
- * Builds the OpenCode session permission ruleset for an unattended scheduled run.
- *
- * OpenCode's `POST /session` `permissions` field expects an ordered array of
- * `{ action, resource, effect }` rules (`Permission.Ruleset`), evaluated with
- * last-match-wins semantics (see https://opencode.ai/docs/permissions).
- * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
- * `external_directory`, `question` and `shell` deny rules then override it for
- * external directory access, agent questions that would block an unattended run
- * with nobody to answer them, and matching destructive command patterns.
- */
 export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
 ): SchedulePermissionRuleset {
@@ -190,11 +142,6 @@ export const ScheduleJobSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   enabled: z.boolean(),
-  /**
-   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
-   * runs as already viewed and skips their completion push, while failed runs are still
-   * announced.
-   */
   showInInbox: z.boolean(),
   scheduleMode: ScheduleModeSchema,
   intervalMinutes: z.number().int().min(5).max(10080).nullable(),
@@ -242,11 +189,6 @@ const ScheduleJobBaseRequestSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
   enabled: z.boolean().default(true),
-  /**
-   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
-   * runs as already viewed and skips their completion push, while failed runs are still
-   * announced.
-   */
   showInInbox: z.boolean().default(true),
   agentSlug: z.string().min(1).max(100).optional(),
   prompt: z.string().min(1).max(20000),
@@ -277,11 +219,6 @@ export const UpdateScheduleJobRequestSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
   enabled: z.boolean().optional(),
-  /**
-   * Whether finished runs of this schedule appear in the inbox. `false` stores successful
-   * runs as already viewed and skips their completion push, while failed runs are still
-   * announced.
-   */
   showInInbox: z.boolean().optional(),
   scheduleMode: ScheduleModeSchema.optional(),
   intervalMinutes: z.number().int().min(5).max(10080).nullable().optional(),

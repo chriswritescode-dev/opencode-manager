@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { SessionPermissionModeStateSchema } from '@opencode-manager/shared/schemas'
+import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../../src/services/settings'
 import { SessionPermissionModeService } from '../../src/services/session-permission-modes'
 import { SessionAncestry } from '../../src/services/session-ancestry'
 import { createSessionPermissionModeRoutes } from '../../src/routes/session-permission-modes'
 import { createFakeSessionPermissionClient } from '../helpers/fake-session-permission-client'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase } from '../helpers/test-database'
 
 function createTestApp(db: Database, parents: Record<string, string | null> = {}): Hono {
   const app = new Hono()
@@ -17,17 +18,11 @@ function createTestApp(db: Database, parents: Record<string, string | null> = {}
   return app
 }
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
-
 describe('session permission mode routes', () => {
   let db: Database
 
   beforeEach(() => {
-    db = createTestDb()
+    db = createTestDatabase()
   })
 
   afterEach(() => {
@@ -77,7 +72,7 @@ describe('session permission mode routes', () => {
     })
 
     const getRes = await app.request('/session-permission-modes/ses_root')
-    const body = await getRes.json() as { mode: string }
+    const body = await readJson(getRes, SessionPermissionModeStateSchema)
     expect(body.mode).toBe('auto')
   })
 

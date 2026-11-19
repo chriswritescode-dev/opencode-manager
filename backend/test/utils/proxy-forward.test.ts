@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { createFetchStub } from '../helpers/fetch-stub'
 import {
   forwardProxyRequest,
   ProxyHeadersTimeoutError,
@@ -17,17 +18,18 @@ function forward(overrides: Partial<ForwardProxyRequestInput> = {}): Promise<Res
 }
 
 function deferred() {
-  let resolve!: () => void
+  let resolve: () => void = () => {}
   const promise = new Promise<void>((settle) => {
     resolve = settle
   })
   return { promise, resolve }
 }
 
-async function readWithin(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  timeoutMs = 500,
-) {
+interface FrameReader<Frame> {
+  read(): Promise<{ done: boolean; value?: Frame }>
+}
+
+async function readWithin<Frame>(reader: FrameReader<Frame>, timeoutMs = 500) {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -55,27 +57,26 @@ describe('forwardProxyRequest', () => {
         controller.close()
       },
     }))
-    const fetchFn = vi.fn().mockResolvedValue(upstream)
+    const fetchFn = createFetchStub(async () => upstream)
 
-    const response = await forward({ fetchFn: fetchFn as unknown as typeof fetch })
+    const response = await forward({ fetchFn })
     const reader = response.body?.getReader()
-    expect(reader).toBeDefined()
+    if (!reader) throw new Error('expected a streamed response body')
 
     const decoder = new TextDecoder()
-    const first = await readWithin(reader as ReadableStreamDefaultReader<Uint8Array>)
+    const first = await readWithin(reader)
     expect(decoder.decode(first.value)).toBe('first')
     expect(secondChunkEnqueued).toBe(false)
 
     secondChunk.resolve()
-    const readerRef = reader as ReadableStreamDefaultReader<Uint8Array>
-    expect(decoder.decode((await readerRef.read()).value)).toBe('second')
-    expect((await readerRef.read()).done).toBe(true)
+    expect(decoder.decode((await reader.read()).value)).toBe('second')
+    expect((await reader.read()).done).toBe(true)
   })
 
   it.each([204, 304])('returns a null body for upstream status %i', async (status) => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response(null, { status }))
+    const fetchFn = createFetchStub(async () => new Response(null, { status }))
 
-    const response = await forward({ fetchFn: fetchFn as unknown as typeof fetch })
+    const response = await forward({ fetchFn })
 
     expect(response.status).toBe(status)
     expect(response.body).toBeNull()
@@ -83,23 +84,21 @@ describe('forwardProxyRequest', () => {
 
   it('aborts a body-less request when the upstream sends no headers in time', async () => {
     let receivedSignal: AbortSignal | undefined
-    const fetchFn = vi.fn((_url: string | URL, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      receivedSignal = init.signal ?? undefined
-      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    const fetchFn = createFetchStub((_url, init) => new Promise<Response>((_resolve, reject) => {
+      receivedSignal = init?.signal ?? undefined
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
     }))
 
-    await expect(
-      forward({ fetchFn: fetchFn as unknown as typeof fetch, headersTimeoutMs: 10 }),
-    ).rejects.toBeInstanceOf(ProxyHeadersTimeoutError)
+    await expect(forward({ fetchFn, headersTimeoutMs: 10 })).rejects.toBeInstanceOf(ProxyHeadersTimeoutError)
     expect(receivedSignal?.aborted).toBe(true)
   })
 
   it('does not apply the headers timeout to a request with a body', async () => {
     const client = new AbortController()
     let receivedSignal: AbortSignal | undefined
-    const fetchFn = vi.fn((_url: string | URL, init: RequestInit) => new Promise<Response>((resolve, reject) => {
-      receivedSignal = init.signal ?? undefined
-      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    const fetchFn = createFetchStub((_url, init) => new Promise<Response>((resolve, reject) => {
+      receivedSignal = init?.signal ?? undefined
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
       setTimeout(() => resolve(new Response('ok')), 40)
     }))
 
@@ -108,7 +107,7 @@ describe('forwardProxyRequest', () => {
       body: '{"title":"x"}',
       signal: client.signal,
       headersTimeoutMs: 10,
-      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchFn,
     })
 
     expect(response.status).toBe(200)
@@ -117,41 +116,43 @@ describe('forwardProxyRequest', () => {
 
   it('rethrows non-timeout fetch failures unchanged', async () => {
     const failure = new Error('connect ECONNREFUSED')
-    const fetchFn = vi.fn().mockRejectedValue(failure)
+    const fetchFn = createFetchStub(async () => {
+      throw failure
+    })
 
-    await expect(forward({ fetchFn: fetchFn as unknown as typeof fetch })).rejects.toBe(failure)
+    await expect(forward({ fetchFn })).rejects.toBe(failure)
   })
 
   it('forwards method, headers, and body with a manual redirect and half duplex', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response('ok', { status: 201, statusText: 'Created' }))
+    const fetchFn = createFetchStub(async () => new Response('ok', { status: 201, statusText: 'Created' }))
 
     const response = await forward({
       url: 'http://upstream.example/api/session',
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-test': '1' },
       body: '{"title":"x"}',
-      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchFn,
     })
 
-    const [calledUrl, init] = fetchFn.mock.calls[0] as [string | URL, RequestInit]
+    const [calledUrl, init] = fetchFn.mock.calls[0] ?? []
     expect(calledUrl).toBe('http://upstream.example/api/session')
-    expect(init.method).toBe('POST')
-    expect(init.headers).toEqual({ 'content-type': 'application/json', 'x-test': '1' })
-    expect(init.body).toBe('{"title":"x"}')
-    expect(init.redirect).toBe('manual')
-    expect(init.duplex).toBe('half')
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toEqual({ 'content-type': 'application/json', 'x-test': '1' })
+    expect(init?.body).toBe('{"title":"x"}')
+    expect(init?.redirect).toBe('manual')
+    expect(init?.duplex).toBe('half')
     expect(response.status).toBe(201)
     expect(response.statusText).toBe('Created')
   })
 
   it('builds the returned response headers from the upstream response', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response('ok', {
+    const fetchFn = createFetchStub(async () => new Response('ok', {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },
     }))
 
     const response = await forward({
-      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchFn,
       buildResponseHeaders: (headers) => new Headers({ 'x-proxied': headers.get('content-type') ?? '' }),
     })
 

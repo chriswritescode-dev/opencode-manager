@@ -14,10 +14,16 @@ import {
   type OpenCodePairingCredentials,
   type OpenCodePairingEncryptedCredentials,
 } from '@opencode-manager/shared/opencode'
-import { trimUrlTrailingSlashes } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+import {
+  JsonObjectSchema,
+  parseJsonText,
+  trimUrlTrailingSlashes,
+  type JsonObject,
+  type JsonValue,
+} from '@opencode-manager/shared/utils'
 
 const DEFAULT_OPENCODE_PORT = 4096
-const DEFAULT_SERVICE_PORT = process.platform === 'win32' ? 45278 : 49374
 const DEFAULT_SERVICE_HOSTNAME = '127.0.0.1'
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]'])
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
@@ -49,12 +55,10 @@ export type OpenCodeServerProbe =
   | { status: 'unauthorized' }
   | { status: 'unreachable'; message: string }
 
-/** Generates a 32-byte random pairing code encoded as base64url. */
 export function generatePairingCode(): string {
   return randomBytes(32).toString('base64url')
 }
 
-/** Returns the first non-internal IPv4 address, or null when the machine exposes none. */
 export function resolveLanIPv4(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
 ): string | null {
@@ -68,7 +72,6 @@ export function resolveLanIPv4(
   return null
 }
 
-/** Picks the OpenCode base URL from the first non-internal IPv4 interface, else loopback. */
 export function resolveDefaultBaseUrl(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
 ): string {
@@ -87,12 +90,13 @@ export interface OpenCodeServiceDiscoveryOptions {
   env?: NodeJS.ProcessEnv
   home?: string
   interfaces?: NodeJS.Dict<NetworkInterfaceInfo[]>
+  platform?: NodeJS.Platform
 }
 
-/**
- * Reads the OpenCode background service registration, then its config, and resolves the URL a
- * Manager should pair with. Never throws; returns null when neither file yields a usable service.
- */
+function defaultServicePort(platform: NodeJS.Platform): number {
+  return platform === 'win32' ? 45278 : 49374
+}
+
 export function discoverOpenCodeService(
   options: OpenCodeServiceDiscoveryOptions = {},
 ): OpenCodeServiceDiscovery | null {
@@ -118,7 +122,7 @@ export function discoverOpenCodeService(
   if (hostname === null && port === null && configPassword === null) return null
 
   const configured = resolveServiceUrl(
-    `http://${bracketHostname(hostname ?? DEFAULT_SERVICE_HOSTNAME)}:${port ?? DEFAULT_SERVICE_PORT}`,
+    `http://${bracketHostname(hostname ?? DEFAULT_SERVICE_HOSTNAME)}:${port ?? defaultServicePort(options.platform ?? process.platform)}`,
     options.interfaces,
   )
   if (!configured) return null
@@ -157,30 +161,29 @@ function resolveServiceUrl(
   return { baseUrl: trimUrlTrailingSlashes(parsed.href), loopbackOnly }
 }
 
-function readServiceFile(file: string): Record<string, unknown> | null {
+function readServiceFile(file: string): JsonObject | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
-    return parsed as Record<string, unknown>
+    const parsed = JsonObjectSchema.safeParse(parseJsonText(readFileSync(file, 'utf8')))
+    return parsed.success ? parsed.data : null
   } catch {
     return null
   }
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
+function readString(value: JsonValue | undefined): string | null {
+  const text = z.string().min(1).safeParse(value)
+  return text.success ? text.data : null
 }
 
-function readPort(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65535 ? value : null
+function readPort(value: JsonValue | undefined): number | null {
+  const port = z.number().int().min(1).max(65535).safeParse(value)
+  return port.success ? port.data : null
 }
 
-/** Renders the pairing link as a half-block QR code for terminals. */
 export function renderPairingQr(link: string): string {
   return renderUnicodeCompact(link, { ecc: 'M', border: 2 })
 }
 
-/** Probes the OpenCode server info endpoint with Basic auth to report reachability and credentials validity. */
 export async function probeOpenCodeServer(
   baseUrl: string,
   credentials: PairingCredentials,
@@ -214,15 +217,10 @@ export async function probeOpenCodeServer(
   }
 }
 
-/**
- * Extracts a human-readable message from an unknown thrown value, falling back to `String(error)`
- * for non-`Error` values.
- */
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** Serves the one-shot pairing redeem endpoint on `0.0.0.0` and reports how it ended. */
 export async function startPairingServer(options: PairingServerOptions): Promise<PairingServerHandle> {
   const { code, credentials, ttlMs, maxAttempts, port = 0, hostname = '0.0.0.0' } = options
 
@@ -293,7 +291,7 @@ export async function startPairingServer(options: PairingServerOptions): Promise
       return
     }
 
-    sendJson(response, 200, encrypted, () => {
+    sendJson(response, 200, { ...encrypted }, () => {
       settle('linked')
     })
   }
@@ -328,7 +326,8 @@ export async function startPairingServer(options: PairingServerOptions): Promise
   }
 
   const address = server.address()
-  const boundPort = typeof address === 'object' && address !== null ? address.port : port
+  const parsedAddress = z.object({ port: z.number() }).safeParse(address)
+  const boundPort = parsedAddress.success ? parsedAddress.data.port : port
 
   return {
     url: `http://${hostname}:${boundPort}${REDEEM_PATH}`,
@@ -346,19 +345,24 @@ interface PairingChallenge {
   proof: string
 }
 
-function readPairingChallenge(body: unknown): PairingChallenge | null {
-  if (typeof body !== 'object' || body === null) return null
-  const { nonce, proof } = body as { nonce?: unknown; proof?: unknown }
-  if (!isOpenCodePairingNonce(nonce) || typeof proof !== 'string' || proof.length === 0) return null
-  return { nonce, proof }
+const PairingChallengeSchema = z.object({
+  nonce: z.string(),
+  proof: z.string().min(1),
+})
+
+function readPairingChallenge(body: JsonValue | null): PairingChallenge | null {
+  const challenge = PairingChallengeSchema.safeParse(body)
+  if (!challenge.success) return null
+  if (!isOpenCodePairingNonce(challenge.data.nonce)) return null
+  return challenge.data
 }
 
-function readJsonBody(request: IncomingMessage): Promise<unknown> {
+function readJsonBody(request: IncomingMessage): Promise<JsonValue | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
     let size = 0
     let finished = false
-    const finish = (value: unknown) => {
+    const finish = (value: JsonValue | null) => {
       if (finished) return
       finished = true
       resolve(value)
@@ -373,17 +377,13 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
       chunks.push(chunk)
     })
     request.on('end', () => {
-      try {
-        finish(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-      } catch {
-        finish(null)
-      }
+      finish(parseJsonText(Buffer.concat(chunks).toString('utf8')))
     })
     request.on('error', () => finish(null))
   })
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown, onFlushed?: () => void): void {
+function sendJson(response: ServerResponse, status: number, body: JsonValue, onFlushed?: () => void): void {
   const payload = JSON.stringify(body)
   response.writeHead(status, {
     'content-type': 'application/json',

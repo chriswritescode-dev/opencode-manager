@@ -37,7 +37,7 @@ function HeaderTitle({ children, logo, className }: HeaderTitleProps) {
 
   return (
     <div className={cn("flex min-w-0 items-center gap-2", className)}>
-      {logo && typeof children === "string" && children === "OpenCode" ? (
+      {logo && children === "OpenCode" ? (
         <img 
           src={theme === 'light' ? "/opencode-wordmark-light.svg" : "/opencode-wordmark-dark.svg"} 
           alt="OpenCode Manager"
@@ -77,9 +77,4 @@ export const Header = Object.assign(HeaderBase, {
   Title: HeaderTitle,
   Actions: HeaderActions,
   Settings: HeaderSettingsButton,
-}) as typeof HeaderBase & {
-  BackButton: typeof HeaderBackButton;
-  Title: typeof HeaderTitle;
-  Actions: typeof HeaderActions;
-  Settings: typeof HeaderSettingsButton;
-};
+});

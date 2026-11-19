@@ -13,6 +13,25 @@ import {
 
 const MAX_QUEUED_LIFECYCLE_OPERATIONS = 2
 
+export type OpenCodeSupervisorManager = Pick<
+  OpenCodeServerManager,
+  | 'start'
+  | 'stop'
+  | 'restart'
+  | 'checkHealth'
+  | 'isOperationInProgress'
+  | 'clearStartupError'
+  | 'getLastStartupError'
+  | 'isLastStartupErrorNonRecoverable'
+  | 'setLifecycleInitialized'
+  | 'getPort'
+  | 'getVersion'
+  | 'getMinVersion'
+  | 'isVersionSupported'
+>
+
+export type OpenCodeSupervisorSettings = Pick<SettingsService, 'getLastKnownGoodConfig'>
+
 export type OpenCodeOperationReason =
   | 'backend_startup'
   | 'health_poll'
@@ -39,8 +58,8 @@ export class OpenCodeSupervisor {
   private updatedAt = new Date().toISOString()
 
   constructor(
-    private readonly openCodeServerManager: OpenCodeServerManager,
-    private readonly settingsService: SettingsService,
+    private readonly openCodeServerManager: OpenCodeSupervisorManager,
+    private readonly settingsService: OpenCodeSupervisorSettings,
     private readonly options: OpenCodeSupervisorOptions = {},
   ) {}
 
@@ -330,10 +349,10 @@ export class OpenCodeSupervisor {
     this.touch()
   }
 
-  private recordFailure(error: unknown): void {
+  private recordFailure(cause: unknown): void {
     this.consecutiveFailures += 1
-    this.lastError = error instanceof Error
-      ? error.message
+    this.lastError = cause instanceof Error
+      ? cause.message
       : this.openCodeServerManager.getLastStartupError() ?? 'Unknown OpenCode lifecycle error'
     this.setState('unhealthy')
   }

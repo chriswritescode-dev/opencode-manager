@@ -1,321 +1,330 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: {
-    checkHealth: vi.fn(),
-    getLastStartupError: vi.fn(),
-    getPort: vi.fn(() => 5551),
-    getVersion: vi.fn(() => '1.0.0'),
-    getMinVersion: vi.fn(() => '2.0.15'),
-    isVersionSupported: vi.fn(() => true),
-    isRestartPending: vi.fn(() => false),
-    isSandboxEnforced: vi.fn(() => false),
-  },
-}))
-
-vi.mock('bun:sqlite', () => ({
-  Database: class Database {
-    prepare() {
-      return {
-        get: vi.fn(),
-      }
-    }
-  },
-}))
-
-vi.mock('../../src/services/sandbox/capability', () => ({
-  detectSandboxCapability: vi.fn(),
-}))
-
-import { opencodeServerManager } from '../../src/services/opencode-single-server'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
+import { OPENCODE_LIFECYCLE_STATES } from '@opencode-manager/shared/opencode'
+import type { OpenCodeLifecycleStatus } from '@opencode-manager/shared/opencode'
+import { DEFAULT_USER_PREFERENCES, healthResponseSchema } from '@opencode-manager/shared/schemas'
 import { createHealthRoutes } from '../../src/routes/health'
-import { detectSandboxCapability } from '../../src/services/sandbox/capability'
+import type { HealthOpenCodeStatus, HealthSupervisor } from '../../src/routes/health'
+import { detectSandboxCapability, resetSandboxCapabilityCache } from '../../src/services/sandbox/capability'
+import type { SandboxCapabilityProbes } from '../../src/services/sandbox/capability'
+import { overrideSandboxExecutableTrustValidator } from '../../src/services/sandbox/command'
 import { forceProcessAttestation } from '../../src/services/opencode/process-identity'
-import type { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
+import { createTestDatabase, seedSettings } from '../helpers/test-database'
+import { applyTestEnv } from '../helpers/test-env'
+import { readJson } from '../helpers/read-json'
 
-const mockDetectSandboxCapability = detectSandboxCapability as ReturnType<typeof vi.fn>
-const mockIsSandboxEnforced = opencodeServerManager.isSandboxEnforced as ReturnType<typeof vi.fn>
+const KVM_UNAVAILABLE_REASON = '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host'
 
-describe('Health Routes', () => {
-  let healthApp: ReturnType<typeof createHealthRoutes>
-  let mockDb: any
+const LifecycleStatusSchema = z.object({
+  state: z.enum(OPENCODE_LIFECYCLE_STATES),
+  healthy: z.boolean(),
+  port: z.number(),
+  lastError: z.string().nullable(),
+})
+
+const ProcessesResponseSchema = z.object({
+  opencode: z.object({
+    port: z.number(),
+    healthy: z.boolean(),
+    lifecycle: LifecycleStatusSchema.nullable(),
+  }),
+})
+
+const ErrorResponseSchema = z.object({ error: z.string() })
+
+function createOpenCodeStatus(overrides: Partial<HealthOpenCodeStatus> = {}): HealthOpenCodeStatus {
+  return {
+    checkHealth: async () => true,
+    getLastStartupError: () => null,
+    getPort: () => 5551,
+    getVersion: () => '1.0.0',
+    getMinVersion: () => '2.0.15',
+    isVersionSupported: () => true,
+    isRestartPending: () => false,
+    isSandboxEnforced: () => false,
+    ...overrides,
+  }
+}
+
+function createLifecycleStatus(overrides: Partial<OpenCodeLifecycleStatus> = {}): OpenCodeLifecycleStatus {
+  return {
+    state: 'healthy',
+    healthy: true,
+    port: 5551,
+    version: '1.0.0',
+    minVersion: '2.0.15',
+    versionSupported: true,
+    lastError: null,
+    activeRecoveryAction: null,
+    attemptedRecoveryActions: [],
+    nextRecoveryAction: null,
+    failureCount: 0,
+    watching: true,
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+function createSandboxProbes(overrides: Partial<SandboxCapabilityProbes> = {}): SandboxCapabilityProbes {
+  return {
+    isKvmAccessible: () => true,
+    readMsbVersion: () => ({ status: 0, stdout: 'msb 0.3.1\n', stderr: '' }),
+    resolveExecUserUid: () => null,
+    currentUid: () => 1000,
+    currentGid: () => 1000,
+    ...overrides,
+  }
+}
+
+describe('health routes', () => {
+  let db: Database
+  let restoreEnv: (() => void) | undefined
+  let binDirectory: string
+
+  function primeSandboxCapability(available: boolean): void {
+    resetSandboxCapabilityCache()
+    detectSandboxCapability(createSandboxProbes(available ? {} : { isKvmAccessible: () => false }))
+  }
+
+  function enableSandboxPreference(): void {
+    seedSettings(db, { sandbox: { ...DEFAULT_USER_PREFERENCES.sandbox, enabled: true } })
+  }
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockDetectSandboxCapability.mockReturnValue({ available: false, reason: '/dev/kvm is not available or not writable' })
-    mockIsSandboxEnforced.mockReturnValue(false)
-
-    const mockPrepareGet = vi.fn()
-    const mockQueryGet = vi.fn()
-    mockDb = {
-      prepare: vi.fn(() => ({
-        get: mockPrepareGet,
-      })),
-      query: vi.fn(() => ({
-        get: mockQueryGet,
-      })),
-    } as any
-    
-    healthApp = createHealthRoutes(mockDb)
+    db = createTestDatabase()
+    binDirectory = mkdtempSync(path.join(tmpdir(), 'ocm-health-msb-'))
+    const binary = path.join(binDirectory, 'msb')
+    writeFileSync(binary, '#!/bin/sh\necho "msb 0.3.1"\n', { mode: 0o755 })
+    chmodSync(binary, 0o755)
+    restoreEnv = applyTestEnv({ PATH: binDirectory })
+    overrideSandboxExecutableTrustValidator(() => true)
+    forceProcessAttestation(true)
+    resetSandboxCapabilityCache()
+    primeSandboxCapability(false)
   })
 
-  describe('GET /', () => {
-    it('should return healthy status when database and opencode are healthy', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
+  afterEach(() => {
+    resetSandboxCapabilityCache()
+    overrideSandboxExecutableTrustValidator(null)
+    forceProcessAttestation(null)
+    restoreEnv?.()
+    rmSync(binDirectory, { recursive: true, force: true })
+    db.close()
+  })
 
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+  it('reports healthy when the database and OpenCode are healthy', async () => {
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus())
 
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.database).toBe('connected')
-      expect(json.opencode).toBe('healthy')
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('healthy')
+    expect(body.database).toBe('connected')
+    expect(body.opencode).toBe('healthy')
+    expect(body.opencodePort).toBe(5551)
+  })
+
+  it('reports degraded when OpenCode is unhealthy without a startup error', async () => {
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus({ checkHealth: async () => false }))
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('degraded')
+    expect(body.opencode).toBe('unhealthy')
+  })
+
+  it('reports unhealthy with 503 when OpenCode is unhealthy and a startup error exists', async () => {
+    const app = createHealthRoutes(
+      db,
+      undefined,
+      createOpenCodeStatus({
+        checkHealth: async () => false,
+        getLastStartupError: () => 'Failed to start OpenCode server',
+      }),
+    )
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(503)
+    expect(body.status).toBe('unhealthy')
+    expect(body.error).toBe('Failed to start OpenCode server')
+  })
+
+  it('reports degraded when the database ping fails but OpenCode is healthy', async () => {
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus(), { pingDatabase: () => false })
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('degraded')
+    expect(body.database).toBe('disconnected')
+    expect(body.opencode).toBe('healthy')
+  })
+
+  it('includes the sandbox runtime availability, preference, and enforcement', async () => {
+    primeSandboxCapability(true)
+    enableSandboxPreference()
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus({ isSandboxEnforced: () => true }))
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('healthy')
+    expect(body.sandbox).toEqual({ available: true, enabled: true, enforced: true, msbVersion: 'msb 0.3.1' })
+  })
+
+  it('keeps the overall status healthy when the sandbox runtime is unavailable', async () => {
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus())
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('healthy')
+    expect(body.sandbox).toEqual({
+      available: false,
+      enabled: false,
+      enforced: false,
+      reason: KVM_UNAVAILABLE_REASON,
     })
+  })
 
-    it('should return degraded status when opencode is unhealthy but no startup error', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
+  it('reports an enabled sandbox that the running child has not adopted yet', async () => {
+    enableSandboxPreference()
+    const app = createHealthRoutes(db, undefined, createOpenCodeStatus())
 
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
 
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('degraded')
-      expect(json.opencode).toBe('unhealthy')
+    expect(body.status).toBe('healthy')
+    expect(body.sandbox).toEqual({
+      available: false,
+      enabled: true,
+      enforced: false,
+      reason: KVM_UNAVAILABLE_REASON,
     })
+  })
 
-    it('should return unhealthy status with 503 when startup error exists and opencode unhealthy', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce('Failed to start OpenCode server')
+  it.each([{ sandboxEnabled: false }, { sandboxEnabled: true }])(
+    'reports an enforced running child while the sandbox runtime is unavailable (preference enabled: $sandboxEnabled)',
+    async ({ sandboxEnabled }) => {
+      if (sandboxEnabled) enableSandboxPreference()
+      const app = createHealthRoutes(db, undefined, createOpenCodeStatus({ isSandboxEnforced: () => true }))
 
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const response = await app.request('/')
+      const body = await readJson(response, healthResponseSchema)
 
-      expect(res.status).toBe(503)
-      expect(json.status).toBe('unhealthy')
-      expect(json.error).toBe('Failed to start OpenCode server')
-    })
-
-    it('should return degraded status when database is disconnected but opencode healthy', async () => {
-      mockDb.prepare().get.mockReturnValue(null)
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('degraded')
-      expect(json.database).toBe('disconnected')
-    })
-
-    it('should include sandbox availability and enforcement in the payload', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockDetectSandboxCapability.mockReturnValue({ available: true, msbVersion: 'msb 0.3.1' })
-      mockIsSandboxEnforced.mockReturnValue(true)
-      mockDb.query().get.mockReturnValue({
-        preferences: JSON.stringify({ sandbox: { enabled: true } }),
-        updated_at: Date.now(),
-      })
-      forceProcessAttestation(true)
-      try {
-        const req = new Request('http://localhost/')
-        const res = await healthApp.fetch(req)
-        const json = await res.json() as Record<string, unknown>
-
-        expect(res.status).toBe(200)
-        expect(json.status).toBe('healthy')
-        expect(json.sandbox).toEqual({ available: true, enabled: true, enforced: true, msbVersion: 'msb 0.3.1' })
-      } finally {
-        forceProcessAttestation(null)
-      }
-    })
-
-    it('should keep the overall status unchanged when the sandbox runtime is unavailable', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({
+      expect(body.status).toBe('healthy')
+      expect(body.sandbox).toEqual({
         available: false,
-        enabled: false,
-        enforced: false,
-        reason: '/dev/kvm is not available or not writable',
-      })
-    })
-
-    it('reports enabled-but-not-enforced when the preference is enabled but the child has not restarted', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockDb.query().get.mockReturnValue({
-        preferences: JSON.stringify({ sandbox: { enabled: true } }),
-        updated_at: Date.now(),
-      })
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({
-        available: false,
-        enabled: true,
-        enforced: false,
-        reason: '/dev/kvm is not available or not writable',
-      })
-    })
-
-    it('reports an enforced running child even when the sandbox runtime is unavailable', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockIsSandboxEnforced.mockReturnValue(true)
-      mockDb.query().get.mockReturnValue({
-        preferences: JSON.stringify({ sandbox: { enabled: true } }),
-        updated_at: Date.now(),
-      })
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({
-        available: false,
-        enabled: true,
+        enabled: sandboxEnabled,
         enforced: true,
-        reason: '/dev/kvm is not available or not writable',
+        reason: KVM_UNAVAILABLE_REASON,
       })
+    },
+  )
+
+  it.each([{ enforced: false }, { enforced: true }])(
+    'keeps a safe sandbox status when the sandbox status lookup throws (enforced: $enforced)',
+    async ({ enforced }) => {
+      db.exec('DROP TABLE user_preferences')
+      const app = createHealthRoutes(db, undefined, createOpenCodeStatus({ isSandboxEnforced: () => enforced }))
+
+      const response = await app.request('/')
+      const body = await readJson(response, healthResponseSchema)
+
+      expect(response.status).toBe(200)
+      expect(body.status).toBe('healthy')
+      expect(body.sandbox?.available).toBe(false)
+      expect(body.sandbox?.enabled).toBe(false)
+      expect(body.sandbox?.enforced).toBe(enforced)
+      expect(body.sandbox?.reason).toContain('user_preferences')
+    },
+  )
+
+  it('reports unhealthy with 503 when the health check throws', async () => {
+    const closedDb = createTestDatabase()
+    closedDb.close()
+    const app = createHealthRoutes(closedDb, undefined, createOpenCodeStatus())
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(503)
+    expect(body.status).toBe('unhealthy')
+    expect(body.database).toBe('disconnected')
+    expect(body.opencode).toBe('unhealthy')
+    expect(body.opencodePort).toBe(5551)
+    expect(body.opencodeVersion).toBe('1.0.0')
+    expect(body.opencodeMinVersion).toBe('2.0.15')
+    expect(body.opencodeVersionSupported).toBe(true)
+    expect(body.opencodeManagerVersion).not.toBeUndefined()
+    expect(body.error).not.toBe('')
+  })
+
+  it('returns the full unhealthy body when the OpenCode health check throws', async () => {
+    const app = createHealthRoutes(
+      db,
+      undefined,
+      createOpenCodeStatus({
+        checkHealth: async () => {
+          throw new Error('connection refused')
+        },
+      }),
+    )
+
+    const response = await app.request('/')
+    const body = await readJson(response, healthResponseSchema)
+
+    expect(response.status).toBe(503)
+    expect(body.status).toBe('unhealthy')
+    expect(body.database).toBe('disconnected')
+    expect(body.opencode).toBe('unhealthy')
+    expect(body.opencodePort).toBe(5551)
+    expect(body.error).toBe('connection refused')
+  })
+
+  it('reads the supervisor status on both routes without triggering recovery', async () => {
+    const lifecycle = createLifecycleStatus()
+    const getStatus = vi.fn(() => lifecycle)
+    const checkNow = vi.fn(async () => lifecycle)
+    const supervisor: HealthSupervisor = { getStatus, checkNow }
+    const app = createHealthRoutes(db, supervisor, createOpenCodeStatus())
+
+    const healthResponse = await app.request('/')
+    const processesResponse = await app.request('/processes')
+    const healthBody = await readJson(healthResponse, healthResponseSchema)
+    const processesBody = await readJson(processesResponse, ProcessesResponseSchema)
+
+    expect(healthResponse.status).toBe(200)
+    expect(processesResponse.status).toBe(200)
+    expect(healthBody.opencodeLifecycle?.state).toBe('healthy')
+    expect(processesBody.opencode.lifecycle?.state).toBe('healthy')
+    expect(getStatus).toHaveBeenCalledTimes(2)
+    expect(checkNow).not.toHaveBeenCalled()
+  })
+
+  it('reports a 500 when the process status lookup throws', async () => {
+    const getStatus = vi.fn(() => {
+      throw new Error('supervisor unavailable')
     })
+    const supervisor: HealthSupervisor = { getStatus, checkNow: vi.fn(async () => createLifecycleStatus()) }
+    const app = createHealthRoutes(db, supervisor, createOpenCodeStatus())
 
-    it('reports an enforced running child while a disable-pending restart still runs it', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockIsSandboxEnforced.mockReturnValue(true)
+    const response = await app.request('/processes')
+    const body = await readJson(response, ErrorResponseSchema)
 
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.sandbox).toEqual({
-        available: false,
-        enabled: false,
-        enforced: true,
-        reason: '/dev/kvm is not available or not writable',
-      })
-    })
-
-    it('returns 200 with a safe sandbox status when the sandbox status lookup throws', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockDb.query.mockImplementationOnce(() => {
-        throw new Error('user_preferences table is unavailable')
-      })
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({
-        available: false,
-        enabled: false,
-        enforced: false,
-        reason: 'user_preferences table is unavailable',
-      })
-    })
-
-    it('keeps the running child enforcement in the fallback payload when the sandbox status lookup throws', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true)
-      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
-      mockIsSandboxEnforced.mockReturnValue(true)
-      mockDb.query.mockImplementationOnce(() => {
-        throw new Error('user_preferences table is unavailable')
-      })
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.status).toBe('healthy')
-      expect(json.sandbox).toEqual({
-        available: false,
-        enabled: false,
-        enforced: true,
-        reason: 'user_preferences table is unavailable',
-      })
-    })
-
-    it('should return 503 when health check throws an error', async () => {
-      mockDb.prepare().get.mockImplementationOnce(() => {
-        throw new Error('Database error')
-      })
-
-      const req = new Request('http://localhost/')
-      const res = await healthApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(503)
-      expect(json.status).toBe('unhealthy')
-      expect(json.error).toBe('Database error')
-    })
-
-    it('reads the supervisor status without triggering recovery', async () => {
-      mockDb.prepare().get.mockReturnValue({ 1: 1 })
-      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValue(true)
-      const supervisor = {
-        getStatus: vi.fn(() => ({
-          state: 'healthy',
-          healthy: true,
-          port: 5551,
-          version: '1.0.0',
-          minVersion: '2.0.15',
-          versionSupported: true,
-          lastError: null,
-          activeRecoveryAction: null,
-          attemptedRecoveryActions: [],
-          nextRecoveryAction: null,
-          failureCount: 0,
-          watching: true,
-          updatedAt: new Date().toISOString(),
-        })),
-        checkNow: vi.fn(),
-      } as unknown as OpenCodeSupervisor
-      healthApp = createHealthRoutes(mockDb, supervisor)
-
-      const res = await healthApp.fetch(new Request('http://localhost/'))
-      const processesRes = await healthApp.fetch(new Request('http://localhost/processes'))
-
-      expect(res.status).toBe(200)
-      expect(processesRes.status).toBe(200)
-      expect(supervisor.getStatus).toHaveBeenCalledTimes(2)
-      expect(supervisor.checkNow).not.toHaveBeenCalled()
-      expect(opencodeServerManager.checkHealth).toHaveBeenCalledTimes(2)
-    })
+    expect(response.status).toBe(500)
+    expect(body.error).toBe('supervisor unavailable')
   })
 })

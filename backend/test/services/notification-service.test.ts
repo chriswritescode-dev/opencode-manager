@@ -8,7 +8,6 @@ import { buildCreateSchedulePersistenceInput } from '../../src/services/schedule
 import { NotificationService, type ChatDirectoryResolver, type NotificationServerRegistry } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
 import { sseAggregator, type SSEEvent } from '../../src/services/sse-aggregator'
-import type { PushNotificationPayload } from '@opencode-manager/shared/types'
 import type { GoalState } from '@opencode-manager/shared/opencode'
 import type { SessionGoalOutcome } from '../../src/services/goal-outcomes'
 import { CreateScheduleJobRequestSchema, type ScheduleJob } from '@opencode-manager/shared/schemas'
@@ -124,7 +123,7 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     await service.handleSSEEvent(DIRECTORY, formCreatedEvent('ses_form'))
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Question')
     expect(payload.tag).toBe('form.created-ses_form')
     expect(payload.data?.sessionId).toBe('ses_form')
@@ -158,7 +157,7 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_perm'))
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.tag).toBe('permission.asked-ses_perm')
     expect(payload.data?.sessionId).toBe('ses_perm')
     expect(payload.data?.url).toBe('/repos/1/sessions/ses_perm')
@@ -172,16 +171,17 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     updateScheduleRunMetadata(db, 1, 5, run.id, { sessionId: 'ses_sched' })
     const send = vi.spyOn(service, 'sendToUser').mockResolvedValue(sendResult)
 
-    await service.handleSSEEvent(DIRECTORY, {
+    const idleEvent: SSEEvent = {
       id: 'evt_idle_1',
       created: 1700000000000,
       type: 'session.idle',
       location: { directory: DIRECTORY },
       data: { sessionID: 'ses_sched' },
-    } as SSEEvent)
+    }
+    await service.handleSSEEvent(DIRECTORY, idleEvent)
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_sched'))
 
-    const urls = send.mock.calls.map((call) => (call[1] as PushNotificationPayload).data?.url)
+    const urls = send.mock.calls.map((call) => call[1].data?.url)
     expect(urls).toEqual([`/schedules?scheduleTab=runs&runId=${run.id}`, '/repos/1/sessions/ses_sched'])
   })
 
@@ -229,7 +229,7 @@ describe('NotificationService.handleSSEEvent session routing', () => {
     expect(findByDirectory).toHaveBeenCalledTimes(1)
     expect(findByDirectory).toHaveBeenCalledWith(CHAT_DIRECTORY)
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.data?.url).toBe(`/chats/${CHAT_ID}/sessions/ses_chat`)
     expect(payload.body.startsWith('Chat · ')).toBe(true)
   })
@@ -245,7 +245,7 @@ describe('NotificationService quiet schedule announcements', () => {
       type: 'session.idle',
       location: { directory: DIRECTORY },
       data: { sessionID },
-    } as SSEEvent
+    }
   }
 
   function failedEvent(sessionID: string): SSEEvent {
@@ -253,9 +253,10 @@ describe('NotificationService quiet schedule announcements', () => {
       id: 'evt_failed_quiet_1',
       created: 1700000000000,
       type: 'session.execution.failed',
+      durable: { aggregateID: sessionID, seq: 1, version: 1 },
       location: { directory: DIRECTORY },
       data: { sessionID, error: { type: 'provider', message: 'boom' } },
-    } as SSEEvent
+    }
   }
 
   function remoteRegistry(): NotificationServerRegistry {
@@ -294,7 +295,7 @@ describe('NotificationService quiet schedule announcements', () => {
     await service.handleSSEEvent(DIRECTORY, failedEvent('ses_quiet'))
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Error')
     expect(payload.tag).toBe('session.execution.failed-ses_quiet')
   })
@@ -309,7 +310,7 @@ describe('NotificationService quiet schedule announcements', () => {
     await service.handleSSEEvent(DIRECTORY, idleEvent('ses_loud'))
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Session complete')
     expect(payload.data?.url).toBe(`/schedules?scheduleTab=runs&runId=${run.id}`)
   })
@@ -336,7 +337,7 @@ describe('NotificationService quiet schedule announcements', () => {
     await service.handleSSEEvent(DIRECTORY, idleEvent('ses_remote_loud'), REMOTE_SERVER_ID)
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.data?.serverId).toBe(REMOTE_SERVER_ID)
   })
 
@@ -350,7 +351,7 @@ describe('NotificationService quiet schedule announcements', () => {
     await service.handleSSEEvent(DIRECTORY, permissionAskedEvent('ses_quiet'))
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.data?.url).toBe('/repos/1/sessions/ses_quiet')
   })
 })
@@ -389,7 +390,7 @@ describe('NotificationService goal outcomes', () => {
     await service.notifyGoalOutcome(goalOutcome)
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Goal completed')
     expect(payload.body).toContain('Ship the feature')
     expect(payload.body).toContain('Objective achieved')
@@ -413,7 +414,7 @@ describe('NotificationService goal outcomes', () => {
     })
 
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.body).toContain('Kitchen')
     expect(payload.data?.serverId).toBe('srv_kitchen')
     expect(payload.data?.serverName).toBe('Kitchen')
@@ -433,7 +434,7 @@ describe('NotificationService goal outcomes', () => {
       },
     })
 
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.title).toBe('Goal paused')
     expect(payload.body).toContain('The server restarted while the goal was active')
   })
@@ -451,7 +452,7 @@ describe('NotificationService goal outcomes', () => {
       },
     })
 
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.body.length).toBeLessThanOrEqual(140)
     expect(payload.body).toContain('Objective achieved')
     expect(payload.body).toContain('…')
@@ -466,7 +467,7 @@ describe('NotificationService goal outcomes', () => {
       goal: { ...completedGoal, reason: undefined },
     })
 
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.body).toContain('Ship the feature')
     expect(payload.body).not.toContain(' — ')
   })
@@ -527,7 +528,7 @@ describe('NotificationService goal outcomes', () => {
 
     expect(findByDirectory).toHaveBeenCalledWith(CHAT_DIRECTORY)
     expect(send).toHaveBeenCalledTimes(1)
-    const payload = send.mock.calls[0]?.[1] as PushNotificationPayload
+    const payload = send.mock.calls[0]![1]
     expect(payload.data?.url).toBe(`/chats/${CHAT_ID}/sessions/ses_chat_goal`)
     expect(payload.body.startsWith('Chat · ')).toBe(true)
   })

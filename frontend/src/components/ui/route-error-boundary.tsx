@@ -4,34 +4,34 @@ import { Button } from '@/components/ui/button'
 import { NotFoundState } from '@/components/ui/not-found-state'
 import { parseNetworkError } from '@/lib/opencode-errors'
 
-function getErrorDetails(error: unknown) {
-  if (isRouteErrorResponse(error)) {
-    if (error.status === 401 || error.status === 403) {
+function getErrorDetails(cause: unknown) {
+  if (isRouteErrorResponse(cause)) {
+    if (cause.status === 401 || cause.status === 403) {
       return {
         title: 'Authentication Required',
         message: 'Please log in to access this page.',
         isRetryable: false,
-        statusCode: error.status,
+        statusCode: cause.status,
       }
     }
-    if (error.status === 404) {
+    if (cause.status === 404) {
       return {
         title: 'Page Not Found',
         message: 'The page you are looking for does not exist.',
         isRetryable: false,
-        statusCode: error.status,
+        statusCode: cause.status,
       }
     }
     return {
-      title: error.statusText || 'Error',
-      message: error.data?.message || error.status.toString(),
+      title: cause.statusText || 'Error',
+      message: cause.data?.message || cause.status.toString(),
       isRetryable: true,
-      statusCode: error.status,
+      statusCode: cause.status,
     }
   }
 
-  if (error instanceof Error) {
-    const networkParsed = parseNetworkError(error)
+  if (cause instanceof Error) {
+    const networkParsed = parseNetworkError(cause)
     if (networkParsed.title === 'Connection Failed') {
       return {
         ...networkParsed,

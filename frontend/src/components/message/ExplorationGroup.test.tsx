@@ -1,20 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen } from '@testing-library/react'
 import type { SessionMessageAssistantTool } from '@opencode-manager/shared/opencode'
 import { ExplorationGroup } from './ExplorationGroup'
-
-const mocks = vi.hoisted(() => ({
-  useSettings: vi.fn(),
-  useToolCallPermission: vi.fn(),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: mocks.useSettings,
-}))
-
-vi.mock('@/contexts/EventContext', () => ({
-  useToolCallPermission: mocks.useToolCallPermission,
-}))
+import { renderWithProviders } from '@/test/render'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
 
 const readTool = (id: string, status: 'completed' | 'running' | 'error'): SessionMessageAssistantTool => {
   if (status === 'completed') {
@@ -44,42 +33,55 @@ const readTool = (id: string, status: 'completed' | 'running' | 'error'): Sessio
   }
 }
 
-describe('ExplorationGroup', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useSettings.mockReturnValue({
-      preferences: { expandToolCalls: false },
-      isLoading: false,
-      updateSettings: vi.fn(),
-      isUpdating: false,
-    })
-    mocks.useToolCallPermission.mockReturnValue(null)
+function renderGroup(parts: SessionMessageAssistantTool[]) {
+  return renderWithProviders(<ExplorationGroup parts={parts} messageID="msg_1" />, {
+    auth: false,
+    theme: false,
+    toaster: false,
+    fetchRoutes: [
+      {
+        method: 'GET',
+        path: '/api/settings',
+        respond: () => ({ json: makeSettingsResponse({ preferences: makeUserPreferences({ expandToolCalls: false }) }) }),
+      },
+    ],
   })
+}
 
-  it('summarises a successful run and keeps the arrow marker', () => {
-    render(<ExplorationGroup parts={[readTool('r1', 'completed'), readTool('r2', 'completed')]} messageID="msg_1" />)
+describe('ExplorationGroup', () => {
+  it('summarises a successful run and keeps the arrow marker', async () => {
+    renderGroup([readTool('r1', 'completed'), readTool('r2', 'completed')])
 
-    const summary = screen.getByRole('button', { name: /Explored: 2 reads/ })
+    const summary = await screen.findByRole('button', { name: /Explored: 2 reads/ })
     expect(summary).toHaveTextContent('→')
     expect(summary).not.toHaveTextContent('✗')
   })
 
-  it('marks a run with a failed member and counts it in the label', () => {
-    render(<ExplorationGroup parts={[readTool('r1', 'completed'), readTool('r2', 'error')]} messageID="msg_1" />)
+  it('marks a run with a failed member and counts it in the label', async () => {
+    renderGroup([readTool('r1', 'completed'), readTool('r2', 'error')])
 
-    const summary = screen.getByRole('button', { name: /Explored: 2 reads, 1 failed/ })
+    const summary = await screen.findByRole('button', { name: /Explored: 2 reads, 1 failed/ })
     const marker = screen.getByText('✗')
     expect(marker).toHaveClass('text-destructive')
     expect(summary).not.toHaveTextContent('→')
   })
 
-  it('keeps the spinner while an exploration run is still in progress', () => {
-    const { container } = render(
-      <ExplorationGroup parts={[readTool('r1', 'error'), readTool('r2', 'running')]} messageID="msg_1" />,
-    )
+  it('keeps the spinner while an exploration run is still in progress', async () => {
+    const { container } = renderGroup([readTool('r1', 'error'), readTool('r2', 'running')])
 
-    expect(screen.getByRole('button', { name: /Exploring: 2 reads/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Exploring: 2 reads/ })).toBeInTheDocument()
     expect(screen.queryByText('✗')).not.toBeInTheDocument()
     expect(container.querySelector('.animate-spin')).not.toBeNull()
+  })
+
+  it('expands the members when the summary is clicked', async () => {
+    renderGroup([readTool('r1', 'completed'), readTool('r2', 'completed')])
+
+    const summary = await screen.findByRole('button', { name: /Explored: 2 reads/ })
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(summary)
+
+    expect(summary).toHaveAttribute('aria-expanded', 'true')
   })
 })

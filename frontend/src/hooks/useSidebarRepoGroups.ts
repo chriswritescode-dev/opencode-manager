@@ -19,7 +19,7 @@ export function useSidebarRepoGroups(input: {
   repos: Repo[]
   search?: string
   worktrees?: ReadonlyArray<ActiveWorktree>
-}): { groups: SidebarRepoGroup[]; isLoading: boolean; isError: boolean; hasMore: boolean } {
+}): SidebarRepoGroupsResult {
   const { repos, search, worktrees } = input
 
   const directories = useMemo(
@@ -74,7 +74,20 @@ export function useSidebarRepoGroups(input: {
   return { groups, isLoading, isError, hasMore: Boolean(hasNextPage) }
 }
 
-export function useNavigableRepos(enabled = true): { repos: Repo[]; isLoading: boolean; refetch: () => void } {
+interface SidebarRepoGroupsResult {
+  groups: SidebarRepoGroup[]
+  isLoading: boolean
+  isError: boolean
+  hasMore: boolean
+}
+
+interface NavigableReposResult {
+  repos: Repo[]
+  isLoading: boolean
+  refetch: () => void
+}
+
+export function useNavigableRepos(enabled = true): NavigableReposResult {
   const { data, isLoading, refetch } = useQuery({ queryKey: ['repos'], queryFn: listRepos, enabled })
   const repos = useMemo(() => selectNavigableRepos(data ?? []), [data])
   return { repos, isLoading, refetch: () => { void refetch() } }

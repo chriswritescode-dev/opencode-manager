@@ -14,11 +14,6 @@ export class SessionArtifactError extends ServiceError {
   }
 }
 
-/**
- * Validates that a resolved path is a regular `.html`/`.htm` file within the artifact size limit.
- * This is the single owner of the HTML artifact file rules; callers that already know the path is
- * contained pass the lexical display path for error messages.
- */
 export async function assertHtmlArtifactFile(filePath: string, displayPath: string): Promise<void> {
   const stats = await fs.stat(filePath).catch(() => {
     throw new SessionArtifactError(`Artifact file not found: ${displayPath}`, 404)
@@ -36,12 +31,6 @@ export async function assertHtmlArtifactFile(filePath: string, displayPath: stri
   }
 }
 
-/**
- * Resolves an `ocm` `show_artifact` path to the absolute path of a self-contained HTML file inside the session
- * directory, rejecting paths that escape it (including through symlinks), non-HTML files and oversized files.
- * Symlinks are resolved for validation only; the returned path stays lexical so callers can map it by the
- * session directory or repo prefix they were given.
- */
 export async function resolveSessionArtifactFile(
   openCodeClient: OpenCodeClient,
   sessionId: string,

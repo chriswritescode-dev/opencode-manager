@@ -1,13 +1,16 @@
 import path from 'path'
+import { z } from 'zod'
 import { promises as fs, mkdirSync, accessSync, constants, realpathSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 
 interface MkdirSafeOptions {
   mode?: number
 }
 
-function isPermissionError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code
-  return code === 'EACCES' || code === 'EPERM'
+const ErrorCodeSchema = z.object({ code: z.string().optional() })
+
+function isPermissionError(cause: unknown): boolean {
+  const parsed = ErrorCodeSchema.safeParse(cause)
+  return parsed.success && (parsed.data.code === 'EACCES' || parsed.data.code === 'EPERM')
 }
 
 export async function canonicalPath(target: string): Promise<string> {

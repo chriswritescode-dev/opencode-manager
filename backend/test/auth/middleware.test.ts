@@ -1,7 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
+import { z } from 'zod'
 import { createAuthMiddleware } from '../../src/auth/middleware'
-import type { AuthInstance, Session } from '../../src/auth'
+import type { AuthSessionReader } from '../../src/routes/auth'
+import type { Session } from '../../src/auth'
+import { readJson } from '../helpers/read-json'
+
+const ErrorSchema = z.object({ error: z.string() })
+const UserIdSchema = z.object({ userId: z.string() })
 
 function createSession(): Session {
   return {
@@ -25,49 +31,43 @@ function createSession(): Session {
   }
 }
 
-function createApp(getSession: (input: { headers: Headers }) => Promise<Session | null>) {
+function createApp(getSession: AuthSessionReader['getSession']) {
   const app = new Hono<{ Variables: { session: Session['session']; user: Session['user'] } }>()
-  app.use('/*', createAuthMiddleware({ api: { getSession } } as unknown as AuthInstance))
+  app.use('/*', createAuthMiddleware({ api: { getSession } }))
   app.get('/', (c) => c.json({ userId: c.get('user').id }))
   return app
 }
 
 describe('createAuthMiddleware', () => {
-  let getSession: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    getSession = vi.fn()
-  })
-
   it('returns 401 when no session is found', async () => {
-    getSession.mockResolvedValue(null)
-    const app = createApp(getSession)
+    const app = createApp(vi.fn(async () => null))
 
     const res = await app.request('/', { headers: { cookie: 'opencode.session=stale' } })
 
     expect(res.status).toBe(401)
-    expect(await res.json()).toEqual({ error: 'Unauthorized' })
+    expect(await readJson(res, ErrorSchema)).toEqual({ error: 'Unauthorized' })
   })
 
   it('attaches the session and user and continues to the route', async () => {
     const session = createSession()
-    getSession.mockResolvedValue(session)
+    const getSession = vi.fn<AuthSessionReader['getSession']>(async () => session)
     const app = createApp(getSession)
 
     const res = await app.request('/', { headers: { cookie: 'opencode.session=valid' } })
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ userId: 'user-1' })
+    expect(await readJson(res, UserIdSchema)).toEqual({ userId: 'user-1' })
     expect(getSession).toHaveBeenCalledTimes(1)
   })
 
   it('returns 500 when the session lookup throws', async () => {
-    getSession.mockRejectedValue(new Error('database unavailable'))
-    const app = createApp(getSession)
+    const app = createApp(vi.fn(async () => {
+      throw new Error('database unavailable')
+    }))
 
     const res = await app.request('/')
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'Internal Server Error' })
+    expect(await readJson(res, ErrorSchema)).toEqual({ error: 'Internal Server Error' })
   })
 })

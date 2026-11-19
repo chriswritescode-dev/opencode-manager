@@ -15,7 +15,7 @@ import { useSwipeBack } from '@/hooks/useMobile'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath, parseServerSessionRoute } from '@/lib/navigation'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
-import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useRouteOpenCodeServerId } from '@/contexts/opencode-server-context'
 
 interface MoreDrawerProps {
   isOpen: boolean

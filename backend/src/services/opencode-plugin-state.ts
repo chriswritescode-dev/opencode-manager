@@ -1,23 +1,7 @@
-/**
- * Process-wide global key under which the Managed OpenCode plugins share shell
- * sandbox state. Both plugins run inside the OpenCode process, so the key has to
- * be identical in their generated sources.
- */
 export const SANDBOX_SHELL_STATE_KEY = 'ocm-sandbox.shell-state.v3'
 
-/**
- * Prefix of the marker prepended to every command that must run in a sandboxed
- * shell. The sandbox plugin records a marked command as in flight, which is how
- * the gh-env plugin knows the spawn is sandboxed without a session identifier.
- */
 export const SANDBOX_SHELL_MARKER_PREFIX = 'ocm-sandbox-required-'
 
-/**
- * Generated JS for the process-wide secret-mask store. The gh-env plugin applies
- * the values it keeps and the sandbox plugin registers the values a sandbox plan
- * resolved, so both plugins interpolate this same source and share the state it
- * creates.
- */
 export const SECRET_MASK_STORE_SOURCE = `var MASK_STATE_KEY = Symbol.for('ocm-secret-masks.v1')
 
 function maskState() {

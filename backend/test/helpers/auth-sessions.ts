@@ -1,6 +1,5 @@
 import type { Database } from 'bun:sqlite'
 
-/** Creates the Better Auth session table for test databases that skip the migrations. */
 export function ensureAuthSessionTable(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS "session" (
@@ -16,7 +15,6 @@ export function ensureAuthSessionTable(db: Database): void {
   `)
 }
 
-/** Inserts a Better Auth session row that expires at the given time. */
 export function insertAuthSession(
   db: Database,
   id: string,

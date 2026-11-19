@@ -3,10 +3,6 @@ import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import { getOpenCodeLocation } from '@/api/opencode'
 import { serverScopedKey } from '@/lib/serverScope'
 
-/**
- * Query options for a repo directory's OpenCode project location, shared by the session picker and
- * the route-level prefetch so both read and write the same cache entry.
- */
 export function openCodeLocationQueryOptions(
   fullPath: string,
   serverId: string = LOCAL_OPENCODE_SERVER_ID,

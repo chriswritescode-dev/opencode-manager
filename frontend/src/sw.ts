@@ -1,18 +1,20 @@
-/// <reference lib="webworker" />
-
+import { PushNotificationPayloadSchema } from "@opencode-manager/shared/schemas";
 import type { PushNotificationPayload } from "@opencode-manager/shared/types";
+import { z } from "zod";
 
-const worker = self as unknown as ServiceWorkerGlobalScope & typeof globalThis;
+declare const self: ServiceWorkerGlobalScope;
 
-interface SwBuildGlobals {
-  __SW_BUILD_HASH__?: string;
-  __SW_PRECACHE__?: string[];
+declare global {
+  interface ServiceWorkerGlobalScope {
+    __SW_BUILD_HASH__?: string;
+    __SW_PRECACHE__?: string[];
+  }
 }
 
-const buildGlobals = worker as unknown as SwBuildGlobals;
+const worker = self;
 
-const BUILD_HASH = buildGlobals.__SW_BUILD_HASH__ ?? "dev";
-const PRECACHE_URLS = buildGlobals.__SW_PRECACHE__ ?? [];
+const BUILD_HASH = worker.__SW_BUILD_HASH__ ?? "dev";
+const PRECACHE_URLS = worker.__SW_PRECACHE__ ?? [];
 
 const APP_SHELL_CACHE = `app-shell-${BUILD_HASH}`;
 const RUNTIME_CACHE = `runtime-${BUILD_HASH}`;
@@ -97,16 +99,7 @@ type ShowNotificationOptions = NotificationOptions & {
 worker.addEventListener("push", (event) => {
   if (!event.data) return;
 
-  let payload: PushNotificationPayload;
-  try {
-    payload = event.data.json() as PushNotificationPayload;
-  } catch {
-    payload = {
-      title: "OpenCode Manager",
-      body: event.data.text(),
-      data: { eventType: "unknown" },
-    };
-  }
+  const payload = readPushPayload(event.data);
 
   const options: ShowNotificationOptions = {
     body: payload.body,
@@ -114,7 +107,7 @@ worker.addEventListener("push", (event) => {
     badge: payload.badge ?? "/icons/badge-96x96.png",
     tag: payload.tag,
     renotify: Boolean(payload.tag && payload.renotify),
-    ...(payload.timestamp !== undefined ? { timestamp: payload.timestamp } : {}),
+    timestamp: payload.timestamp,
     data: payload.data,
     requireInteraction: isHighPriority(payload.data?.eventType, payload.data?.priority),
   };
@@ -125,16 +118,39 @@ worker.addEventListener("push", (event) => {
 worker.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const url = typeof event.notification.data?.url === "string" ? event.notification.data.url : "/";
-
-  event.waitUntil(openOrFocusClient(url));
+  event.waitUntil(openOrFocusClient(readNotificationUrl(event.notification.data)));
 });
+
+const NotificationDataSchema = z.object({ url: z.string().optional() });
+
+function readNotificationUrl(data: NotificationOptions["data"]): string {
+  const parsed = NotificationDataSchema.safeParse(data);
+  return parsed.success ? parsed.data.url ?? "/" : "/";
+}
+
+function readPushPayload(data: PushMessageData): PushNotificationPayload {
+  try {
+    const parsed = PushNotificationPayloadSchema.safeParse(data.json());
+    if (parsed.success) return parsed.data;
+  } catch {
+    return {
+      title: "OpenCode Manager",
+      body: data.text(),
+      data: { eventType: "unknown" },
+    };
+  }
+  return {
+    title: "OpenCode Manager",
+    body: data.text(),
+    data: { eventType: "unknown" },
+  };
+}
 
 async function openOrFocusClient(url: string): Promise<void> {
   const clientList = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
   const clients = clientList.filter(
     (client) => new URL(client.url).origin === worker.location.origin
-  ) as WindowClient[];
+  );
   const targetPathname = new URL(url, worker.location.origin).pathname;
   const target =
     clients.find((client) => new URL(client.url).pathname === targetPathname) ??

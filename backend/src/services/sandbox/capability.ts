@@ -9,30 +9,55 @@ export type SandboxCapability = {
   msbVersion?: string
 }
 
+export interface MsbVersionProbeResult {
+  status: number | null
+  stdout: string
+  stderr: string
+  error?: Error
+}
+
+export interface SandboxCapabilityProbes {
+  isKvmAccessible: () => boolean
+  readMsbVersion: (executable: string) => MsbVersionProbeResult
+  resolveExecUserUid: () => number | null
+  currentUid: () => number | undefined
+  currentGid: () => number | undefined
+}
+
+export const sandboxCapabilityProbes: SandboxCapabilityProbes = {
+  isKvmAccessible: () => {
+    try {
+      accessSync('/dev/kvm', constants.R_OK | constants.W_OK)
+      return true
+    } catch {
+      return false
+    }
+  },
+  readMsbVersion: (executable) => spawnSync(executable, buildSandboxVersionArgs(), { encoding: 'utf8', timeout: 10000 }),
+  resolveExecUserUid: resolveSandboxExecUserUid,
+  currentUid: () => process.getuid?.(),
+  currentGid: () => process.getgid?.(),
+}
+
 let cachedCapability: SandboxCapability | null = null
 
-export function detectSandboxCapability(): SandboxCapability {
+export function detectSandboxCapability(probes: SandboxCapabilityProbes = sandboxCapabilityProbes): SandboxCapability {
   if (cachedCapability) {
     return cachedCapability
   }
 
-  try {
-    accessSync('/dev/kvm', constants.R_OK | constants.W_OK)
-  } catch {
+  if (!probes.isKvmAccessible()) {
     const reason = '/dev/kvm is not available or not writable; pass --device /dev/kvm and run on a KVM-capable Linux host'
     cachedCapability = { available: false, reason }
     logger.info(reason)
     return cachedCapability
   }
 
-  const execUserUid = resolveSandboxExecUserUid()
-  if (
-    execUserUid !== null &&
-    typeof process.getuid === 'function' &&
-    typeof process.getgid === 'function' &&
-    execUserUid !== process.getuid()
-  ) {
-    const reason = `SANDBOX_EXEC_USER resolves to uid ${execUserUid}, which does not match the Manager workspace owner uid ${process.getuid()}; sandboxed commands could not write to the mounted project roots. Set SANDBOX_EXEC_USER=${process.getuid()}:${process.getgid()} or leave it unset`
+  const execUserUid = probes.resolveExecUserUid()
+  const currentUid = probes.currentUid()
+  const currentGid = probes.currentGid()
+  if (execUserUid !== null && currentUid !== undefined && currentGid !== undefined && execUserUid !== currentUid) {
+    const reason = `SANDBOX_EXEC_USER resolves to uid ${execUserUid}, which does not match the Manager workspace owner uid ${currentUid}; sandboxed commands could not write to the mounted project roots. Set SANDBOX_EXEC_USER=${currentUid}:${currentGid} or leave it unset`
     cachedCapability = { available: false, reason }
     logger.info(reason)
     return cachedCapability
@@ -46,7 +71,7 @@ export function detectSandboxCapability(): SandboxCapability {
     return cachedCapability
   }
 
-  const result = spawnSync(executable, buildSandboxVersionArgs(), { encoding: 'utf8', timeout: 10000 })
+  const result = probes.readMsbVersion(executable)
   if (result.status !== 0 || result.error) {
     const detail = result.error
       ? result.error.message

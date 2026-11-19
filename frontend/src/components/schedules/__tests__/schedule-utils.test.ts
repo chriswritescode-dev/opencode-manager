@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { formatRunDuration, formatScheduleInbox, matchesScheduleJobSearch } from '@/components/schedules/schedule-utils'
 import type { ScheduleJob } from '@opencode-manager/shared/types'
+import { makeScheduleJob } from '@/test/fixtures/api'
 
 describe('formatRunDuration', () => {
   it('formats seconds, minutes, and hours', () => {
@@ -22,7 +23,10 @@ describe('formatScheduleInbox', () => {
 })
 
 describe('matchesScheduleJobSearch', () => {
-  const job = { name: 'Docs drift review', description: 'Check README drift', repoName: 'vllm' } as ScheduleJob & { repoName: string }
+  const job: ScheduleJob & { repoName: string } = {
+    ...makeScheduleJob({ name: 'Docs drift review', description: 'Check README drift', repoId: 3 }),
+    repoName: 'vllm',
+  }
 
   it('matches name, description, and repo case-insensitively', () => {
     expect(matchesScheduleJobSearch(job, 'DRIFT')).toBe(true)

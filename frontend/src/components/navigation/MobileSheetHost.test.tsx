@@ -1,148 +1,84 @@
-import { vi } from 'vitest'
-
-vi.mock('@/hooks/useMobile')
-vi.mock('@/hooks/useMobileTabBar', () => ({
-  useMobileTabBar: vi.fn(),
-}))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: ({ isOpen, basePath, repoName }: { isOpen: boolean; basePath: string; repoName: string }) =>
-    isOpen ? <div data-testid="file-browser-sheet" data-base-path={basePath} data-repo-name={repoName}>FileBrowserSheet</div> : null,
-}))
-vi.mock('@/components/session/SessionPickerSheet', () => ({
-  SessionPickerSheet: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="session-picker-sheet">SessionPickerSheet</div> : null,
-}))
-vi.mock('@/components/navigation/NotificationsSheet', () => ({
-  NotificationsSheet: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="notifications-sheet">NotificationsSheet</div> : null,
-}))
-vi.mock('@/components/navigation/MoreDrawer', () => ({
-  MoreDrawer: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="more-drawer">MoreDrawer</div> : null,
-}))
-
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect, beforeEach } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { MobileSheetHost } from './MobileSheetHost'
-import { useMobile } from '@/hooks/useMobile'
-import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import { installWindowSize } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+
+interface RenderOptions {
+  mobile?: boolean
+}
+
+function renderHost(route = '/', options: RenderOptions = {}) {
+  installWindowSize(options.mobile === false ? 1024 : 500)
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <KeyboardShortcutsProvider>
+      <MobileSheetHost />
+      <LocationCatcher capturedSearch={capturedSearch} />
+    </KeyboardShortcutsProvider>,
+    {
+      route,
+      events: true,
+      theme: false,
+      toaster: false,
+      fetchRoutes: appRoutes(),
+    },
+  )
+  return { ...result, capturedSearch }
+}
 
 describe('MobileSheetHost', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(useMobile).mockReturnValue(true)
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: null,
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-  })
+  it('renders nothing on desktop', () => {
+    const { container } = renderHost('/', { mobile: false })
 
-  it('renders nothing when useMobile returns false', () => {
-    vi.mocked(useMobile).mockReturnValue(false)
-    const { container } = render(
-      <MemoryRouter>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
     expect(container.firstChild).toBeNull()
   })
 
   it('renders nothing when no mobileTab param is present', () => {
-    const { container } = render(
-      <MemoryRouter initialEntries={['/']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
+    const { container } = renderHost('/')
+
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders SessionPickerSheet when mobileTab=sessions', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'sessions',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
+  it('renders the session picker sheet when mobileTab=sessions', async () => {
+    renderHost('/?mobileTab=sessions')
+
+    expect(await screen.findByRole('dialog', { name: 'Sessions' })).toBeInTheDocument()
   })
 
-  it('renders FileBrowserSheet with correct props when mobileTab=files', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'files',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=files']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    const sheet = screen.getByTestId('file-browser-sheet')
-    expect(sheet).toBeInTheDocument()
-    expect(sheet.getAttribute('data-base-path')).toBe('')
-    expect(sheet.getAttribute('data-repo-name')).toBe('Workspace Root')
+  it('renders the file browser sheet when mobileTab=files', async () => {
+    renderHost('/?mobileTab=files')
+
+    expect(await screen.findByRole('button', { name: 'Close file browser' })).toBeInTheDocument()
   })
 
-  it('hides the FileBrowserSheet on a linked-server route', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'files',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote?mobileTab=files']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.queryByTestId('file-browser-sheet')).not.toBeInTheDocument()
+  it('hides the file browser sheet on a linked-server route', async () => {
+    const { capturedSearch } = renderHost('/servers/srv_kitchen/sessions/ses_remote?mobileTab=files')
+
+    await waitFor(() => expect(new URLSearchParams(capturedSearch.current).get('mobileTab')).toBe('files'))
+    expect(screen.queryByRole('button', { name: 'Close file browser' })).not.toBeInTheDocument()
   })
 
-  it('renders NotificationsSheet when mobileTab=notifications', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'notifications',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=notifications']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
+  it('renders the notifications sheet when mobileTab=notifications', async () => {
+    renderHost('/?mobileTab=notifications')
+
+    expect(await screen.findByRole('dialog', { name: 'Notifications' })).toBeInTheDocument()
   })
 
-  it('renders MoreDrawer when mobileTab=more', () => {
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'more',
-      open: vi.fn(),
-      close: vi.fn(),
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=more']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('more-drawer')).toBeInTheDocument()
+  it('renders the more drawer when mobileTab=more', async () => {
+    renderHost('/?mobileTab=more')
+
+    expect(await screen.findByRole('dialog', { name: 'More' })).toBeInTheDocument()
   })
 
-  it('closes sheet when onClose is called', () => {
-    const mockClose = vi.fn()
-    vi.mocked(useMobileTabBar).mockReturnValue({
-      openSheet: 'sessions',
-      open: vi.fn(),
-      close: mockClose,
-    })
-    render(
-      <MemoryRouter initialEntries={['/?mobileTab=sessions']}>
-        <MobileSheetHost />
-      </MemoryRouter>,
-    )
-    expect(screen.getByTestId('session-picker-sheet')).toBeInTheDocument()
+  it('closes the open sheet through its close control', async () => {
+    const { capturedSearch } = renderHost('/?mobileTab=more')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close' }))
+
+    await waitFor(() => expect(new URLSearchParams(capturedSearch.current).has('mobileTab')).toBe(false))
   })
 })

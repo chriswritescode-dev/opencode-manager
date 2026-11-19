@@ -24,12 +24,6 @@ interface ComposerModelPillProps {
   onCompact: () => void
 }
 
-/**
- * Model selector trigger for the composer.
- *
- * Owns the context usage observer so transcript streaming flushes re-render only this pill instead of the
- * whole composer subtree.
- */
 export const ComposerModelPill = memo(function ComposerModelPill({
   directory,
   sessionID,

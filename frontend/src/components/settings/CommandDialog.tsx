@@ -50,22 +50,12 @@ interface CommandDialogProps {
   editingCommand?: { name: string; command: OpenCodeCommandConfig } | null;
 }
 
-/**
- * Renders the create/edit command dialog with name, template, description,
- * agent, model, and subagent fields, locking the name while editing an existing
- * command.
- */
 export function CommandDialog({
   open,
   onOpenChange,
   onSubmit,
   editingCommand,
 }: CommandDialogProps) {
-  /**
-   * Builds the form defaults for creating or editing a command, rendering any stored model
-   * reference in the `provider/model` display format and falling back to empty values when there is
-   * no command to edit.
-   */
   const getDefaultValues = (
     command?: { name: string; command: OpenCodeCommandConfig } | null,
   ): CommandFormValues => {
@@ -91,11 +81,6 @@ export function CommandDialog({
     }
   }, [open, editingCommand, form]);
 
-  /**
-   * Submits the validated command form as a patch that keeps the stored
-   * command's other fields, nulls emptied optional fields, and then resets and
-   * closes the dialog.
-   */
   const handleSubmit = (values: CommandFormValues) => {
     const command: OpenCodeCommandPatch = {
       ...editingCommand?.command,

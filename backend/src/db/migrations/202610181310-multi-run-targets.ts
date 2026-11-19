@@ -1,9 +1,5 @@
+import { selectTableColumns, type TableColumn } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-  notnull: number
-}
 
 const REBUILT_COLUMNS = `
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,7 +13,7 @@ const REBUILT_COLUMNS = `
   created_at INTEGER NOT NULL
 `
 
-function needsRebuild(columns: ColumnInfo[]): boolean {
+function needsRebuild(columns: TableColumn[]): boolean {
   if (columns.length === 0) return false
 
   const byName = new Map(columns.map((column) => [column.name, column]))
@@ -30,7 +26,7 @@ const migration: Migration = {
   id: '202610181310-multi-run-targets',
 
   up(db) {
-    const columns = db.prepare('PRAGMA table_info(multi_runs)').all() as ColumnInfo[]
+    const columns = selectTableColumns(db, 'multi_runs')
     if (!needsRebuild(columns)) return
 
     const names = new Set(columns.map((column) => column.name))
@@ -51,7 +47,7 @@ const migration: Migration = {
   },
 
   down(db) {
-    const columns = db.prepare('PRAGMA table_info(multi_runs)').all() as ColumnInfo[]
+    const columns = selectTableColumns(db, 'multi_runs')
     if (columns.length === 0) return
 
     const names = new Set(columns.map((column) => column.name))

@@ -1,7 +1,14 @@
 import type { ConfigEntry, ModelRef } from '@opencode/client'
+import { z } from 'zod'
 import type { OpenCodeConfigInfo } from './config'
 
 type ConfigDocumentModel = OpenCodeConfigInfo['model']
+
+const ConfigModelRefSchema = z.object({
+  providerID: z.string(),
+  model: z.string(),
+  variant: z.string().optional(),
+})
 
 export function parseOpenCodeModelRef(model: string): ModelRef | undefined {
   const providerEnd = model.indexOf('/')
@@ -16,7 +23,9 @@ export function parseOpenCodeModelRef(model: string): ModelRef | undefined {
     return undefined
   }
 
-  return { providerID, id, ...(variant ? { variant } : {}) }
+  const ref: ModelRef = { providerID, id }
+  if (variant) ref.variant = variant
+  return ref
 }
 
 export function formatOpenCodeModelRef(ref: ModelRef): string {
@@ -27,13 +36,15 @@ export function configModelRef(
   model: string | { providerID: string; model: string; variant?: string } | undefined | null,
 ): ModelRef | undefined {
   if (!model) return undefined
-  if (typeof model === 'string') return parseOpenCodeModelRef(model)
+  const text = z.string().safeParse(model)
+  if (text.success) return parseOpenCodeModelRef(text.data)
 
-  return {
-    providerID: model.providerID,
-    id: model.model,
-    ...(model.variant ? { variant: model.variant } : {}),
-  }
+  const configured = ConfigModelRefSchema.safeParse(model)
+  if (!configured.success) return undefined
+
+  const ref: ModelRef = { providerID: configured.data.providerID, id: configured.data.model }
+  if (configured.data.variant) ref.variant = configured.data.variant
+  return ref
 }
 
 export function selectConfiguredModelRef(entries: ConfigEntry[]): ModelRef | undefined {

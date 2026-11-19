@@ -1,127 +1,104 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
-import { act, render, screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
+import { useLocation } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
 import type { ScheduleJobWithRepo } from '@/api/schedules'
 import { RepoSchedulesContent } from './RepoSchedulesContent'
+import { renderWithProviders } from '@/test/render'
+import { installPointerCapture } from '@/test/browserFakes'
+import { makeHealthResponse, makeRepo, makeScheduleJobWithRepo } from '@/test/fixtures/api'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
 function createJob(id: number, name: string): ScheduleJobWithRepo {
-  return {
+  return makeScheduleJobWithRepo({
     id,
-    repoId: 1,
     name,
-    description: null,
-    enabled: true,
-    showInInbox: true,
-    scheduleMode: 'interval',
-    intervalMinutes: 60,
-    cronExpression: null,
-    timezone: null,
-    agentSlug: null,
+    repoId: 1,
     prompt: `${name} prompt`,
-    model: null,
-    skillMetadata: null,
-    permissionConfig: null,
-    mcpServers: [],
-    branch: null,
-    workspaceMode: 'worktree',
-    sandbox: null,
-    createdAt: 1,
-    updatedAt: 1,
-    lastRunAt: null,
-    nextRunAt: null,
     repoName: 'demo',
     repoPath: '/workspace/repos/demo',
-    repoUrl: '',
-    serverName: null,
-    lastRun: null,
-    retainedWorktreeCount: 0,
-  }
+  })
 }
 
-const store = vi.hoisted(() => ({
-  jobs: [] as ScheduleJobWithRepo[],
-  setJobs: null as ((jobs: ScheduleJobWithRepo[]) => void) | null,
-  deleteMutate: vi.fn(),
-  createMutate: vi.fn(),
-}))
-
-vi.mock('@/hooks/useSchedules', () => ({
-  useAllSchedules: () => ({ data: store.jobs, isLoading: false }),
-  useRepoSchedule: () => ({ data: undefined, isFetching: false }),
-  useRepoScheduleRuns: () => ({ data: [], isLoading: false }),
-  useScheduleWorktrees: () => ({ data: [] }),
-  useCreateRepoSchedule: () => ({ mutate: store.createMutate, isPending: false }),
-  useUpdateRepoSchedule: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteRepoSchedule: () => ({ mutate: store.deleteMutate, isPending: false }),
-  useRunRepoSchedule: () => ({ mutate: vi.fn(), isPending: false }),
-  useCancelRepoScheduleRun: () => ({ mutate: vi.fn(), isPending: false }),
-  useClearRepoScheduleRuns: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteRepoScheduleRun: () => ({ mutate: vi.fn(), isPending: false }),
-}))
-
-vi.mock('@/components/schedules', () => ({
-  ScheduleJobsTable: ({ jobs, onDelete }: { jobs: ScheduleJob[]; onDelete: (job: ScheduleJob) => void }) => (
-    <div>
-      {jobs.map((job) => (
-        <button key={job.id} onClick={() => onDelete(job)}>{`delete ${job.name}`}</button>
-      ))}
-    </div>
-  ),
-  ScheduleJobDialog: ({ open, onSubmit }: { open: boolean; onSubmit: (data: CreateScheduleJobRequest) => void }) => (
-    open ? <button onClick={() => onSubmit({} as CreateScheduleJobRequest)}>submit schedule</button> : null
-  ),
-  ScheduleListToolbar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  ScheduleTabMenu: () => null,
-  JobDetailTab: () => null,
-  RunHistoryTab: () => null,
-  ScheduleRunRemovalDialog: () => null,
-}))
-
-function Harness({ initialJobs }: { initialJobs: ScheduleJobWithRepo[] }) {
-  const [jobs, setJobs] = useState(initialJobs)
-  store.jobs = jobs
-  store.setJobs = setJobs
+function LocationProbe() {
   const location = useLocation()
+  return <span data-testid="search">{location.search}</span>
+}
 
+function Harness() {
   return (
     <div>
-      <span data-testid="search">{location.search}</span>
+      <LocationProbe />
       <RepoSchedulesContent repoId={1} embedded={false} />
     </div>
   )
 }
 
-function renderContent(initialJobs: ScheduleJobWithRepo[], initialEntry = '/repos/1/schedules') {
-  return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Harness initialJobs={initialJobs} />
-    </MemoryRouter>,
-  )
+interface ScheduleServer {
+  routes: FetchRoute[]
+  setJobs: (jobs: ScheduleJobWithRepo[]) => void
+}
+
+function createScheduleServer(initialJobs: ScheduleJobWithRepo[]): ScheduleServer {
+  let jobs = initialJobs
+  const jobsResponse = (): FetchRouteResult => ({ json: { jobs } })
+  return {
+    routes: [
+      { method: 'GET', path: '/api/schedules/all', respond: jobsResponse },
+      { method: 'GET', path: '/api/repos/1/schedules/:jobId', respond: () => ({ json: { job: jobs[0] } }) },
+      { method: 'GET', path: '/api/repos/1/schedules/:jobId/runs', respond: () => ({ json: { runs: [] } }) },
+      { method: 'GET', path: '/api/repos/1/schedules/:jobId/worktrees', respond: () => ({ json: { worktrees: [] } }) },
+      { method: 'GET', path: '/api/repos/1', respond: () => ({ json: makeRepo({ id: 1 }) }) },
+      { method: 'GET', path: '/api/repos/1/git/branches', respond: () => ({ json: { branches: [], status: { ahead: 0, behind: 0 } } }) },
+      { method: 'GET', path: '/api/prompt-templates', respond: () => ({ json: { templates: [] } }) },
+      { method: 'GET', path: '/api/health', respond: () => ({ json: makeHealthResponse() }) },
+      { method: 'GET', path: '/api/settings/skills', respond: () => ({ json: [] }) },
+      { method: 'GET', path: '/api/opencode/api/agent', respond: () => ({ json: { location: { directory: '/workspace/repos/demo' }, data: [] } }) },
+      { method: 'GET', path: '/api/opencode/api/mcp', respond: () => ({ json: { location: { directory: '/workspace/repos/demo' }, data: [] } }) },
+      { method: 'GET', path: '/api/opencode/api/provider', respond: () => ({ json: { location: { directory: '/workspace/repos/demo' }, data: [] } }) },
+      { method: 'GET', path: '/api/opencode/api/model', respond: () => ({ json: { location: { directory: '/workspace/repos/demo' }, data: [] } }) },
+    ],
+    setJobs: (nextJobs) => {
+      jobs = nextJobs
+    },
+  }
+}
+
+function renderContent(options: {
+  jobs: ScheduleJobWithRepo[]
+  initialEntry?: string
+  extraRoutes?: FetchRoute[]
+}) {
+  installPointerCapture()
+  const server = createScheduleServer(options.jobs)
+  const view = renderWithProviders(<Harness />, {
+    auth: false,
+    theme: false,
+    route: options.initialEntry ?? '/repos/1/schedules',
+    fetchRoutes: [...(options.extraRoutes ?? []), ...server.routes],
+  })
+  return { ...view, server }
+}
+
+async function deleteJob(user: ReturnType<typeof userEvent.setup>, name: string, confirm: boolean) {
+  const row = (await screen.findByRole('button', { name: `Open ${name}` })).closest('tr')
+  expect(row).not.toBeNull()
+  await user.click(within(row ?? document.body).getByRole('button', { name: 'More actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+  const dialog = await screen.findByRole('dialog')
+  if (confirm) {
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  }
+  return dialog
 }
 
 describe('RepoSchedulesContent dialogs', () => {
-  beforeEach(() => {
-    store.jobs = []
-    store.setJobs = null
-    store.deleteMutate.mockReset()
-    store.createMutate.mockReset()
-  })
-
   it('names the schedule in the delete confirmation', async () => {
     const user = userEvent.setup()
-    const alpha = createJob(1, 'Alpha')
-    const beta = createJob(2, 'Beta')
-    store.deleteMutate.mockImplementation(() => {})
+    renderContent({ jobs: [createJob(1, 'Alpha'), createJob(2, 'Beta')] })
 
-    renderContent([alpha, beta])
+    const dialog = await deleteJob(user, 'Beta', false)
 
-    await user.click(screen.getByRole('button', { name: 'delete Beta' }))
-
-    const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('Beta')).toBeInTheDocument()
     expect(within(dialog).getByText(/This will permanently delete/)).toBeInTheDocument()
   })
@@ -130,26 +107,27 @@ describe('RepoSchedulesContent dialogs', () => {
     const user = userEvent.setup()
     const alpha = createJob(1, 'Alpha')
     const beta = createJob(2, 'Beta')
-    store.deleteMutate.mockImplementation((_args: unknown, options: { onSuccess: () => void }) => {
-      store.setJobs?.([alpha])
-      options.onSuccess()
+    const { server } = renderContent({
+      jobs: [alpha, beta],
+      initialEntry: '/repos/1/schedules?jobId=2',
+      extraRoutes: [
+        {
+          method: 'DELETE',
+          path: '/api/repos/1/schedules/:jobId',
+          respond: () => {
+            server.setJobs([alpha])
+            return { status: 204 }
+          },
+        },
+      ],
     })
 
-    const { rerender } = renderContent([alpha, beta], '/repos/1/schedules?jobId=2')
+    await deleteJob(user, 'Beta', true)
 
-    await user.click(screen.getByRole('button', { name: 'delete Beta' }))
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
-
-    expect(screen.getByTestId('search').textContent).not.toContain('scheduleDialog')
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('scheduleDialog'))
     expect(screen.queryByRole('dialog')).toBeNull()
 
-    rerender(
-      <MemoryRouter initialEntries={['/repos/1/schedules?jobId=2']}>
-        <Harness initialJobs={[alpha, beta]} />
-      </MemoryRouter>,
-    )
-    act(() => { store.setJobs?.([alpha]) })
-
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain('jobId=1'))
     expect(screen.getByTestId('search').textContent).not.toContain('scheduleDialog')
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -157,20 +135,36 @@ describe('RepoSchedulesContent dialogs', () => {
   it('closes the New schedule dialog after creating the first schedule', async () => {
     const user = userEvent.setup()
     const created = createJob(4, 'Gamma')
-    store.createMutate.mockImplementation((_args: unknown, options: { onSuccess: (job: ScheduleJob) => void }) => {
-      store.setJobs?.([created])
-      options.onSuccess(created)
+    const { fetchFake, server } = renderContent({
+      jobs: [],
+      extraRoutes: [
+        {
+          method: 'POST',
+          path: '/api/repos/1/schedules',
+          respond: () => {
+            server.setJobs([created])
+            return { json: { job: created } }
+          },
+        },
+      ],
     })
 
-    renderContent([], '/repos/1/schedules')
+    await user.click(await screen.findByRole('button', { name: 'Create First Schedule' }))
+    await user.type(await screen.findByLabelText('Name'), 'Gamma')
+    await user.click(screen.getByRole('tab', { name: 'Prompt' }))
+    await user.type(screen.getByRole('textbox', { name: 'Prompt' }), 'Do the thing')
+    await user.click(screen.getByRole('button', { name: 'Create schedule' }))
 
-    await user.click(screen.getByRole('button', { name: 'Create First Schedule' }))
-    expect(screen.getByRole('button', { name: 'submit schedule' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'submit schedule' }))
-
-    expect(screen.getByTestId('search').textContent).not.toContain('scheduleDialog')
-    expect(screen.getByTestId('search').textContent).toContain('jobId=4')
-    expect(screen.queryByRole('button', { name: 'submit schedule' })).toBeNull()
+    await waitFor(() =>
+      expect(fetchFake.requests.map((request) => `${request.method} ${request.path}`)).toContain('POST /api/repos/1/schedules'),
+    )
+    expect(fetchFake.lastRequest('POST', '/api/repos/1/schedules')?.body).toMatchObject({
+      name: 'Gamma',
+      prompt: 'Do the thing',
+      scheduleMode: 'interval',
+    })
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('scheduleDialog'))
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain('jobId=4'))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Create schedule' })).toBeNull())
   })
 })

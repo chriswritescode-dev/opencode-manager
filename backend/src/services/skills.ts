@@ -10,6 +10,8 @@ import { getRepoById, getRepoName, listRepos } from '../db/queries'
 import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory, normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
 import type { OpenCodeClient } from './opencode/client'
+import { z } from 'zod'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
 import { logger } from '../utils/logger'
 import { githubFetchJson, githubFetchBinary, type GithubFetchFn } from '../utils/github'
 import { mkdirSafe } from '../utils/fs-safe'
@@ -48,7 +50,7 @@ function getSkillTargetRoot(db: Database, scope: SkillScope, repoId?: number): s
   return getProjectSkillsPath(repo)
 }
 
-function parseSkillMarkdown(content: string): { name: string; description: string; body: string } {
+function parseSkillMarkdown(content: string) {
   if (!content.startsWith('---\n')) {
     throw new Error('Skill markdown must start with a frontmatter block')
   }
@@ -97,12 +99,13 @@ function prepareSingleSkillFiles(files: SkillInstallFile[]): PreparedSkillFiles 
   const skillDir = path.dirname(skillMd.relativePath)
   const { name, description, body } = parseSkillMarkdown(skillMd.content.toString('utf-8'))
   const prefix = skillDir === '.' ? '' : skillDir + '/'
-  const strippedFiles = normalized
-    .filter(f => f.relativePath === skillMd.relativePath || f.relativePath.startsWith(prefix))
-    .map(f => ({
+  const strippedFiles = normalized.flatMap(f => {
+    if (f.relativePath !== skillMd.relativePath && !f.relativePath.startsWith(prefix)) return []
+    return [{
       ...f,
       relativePath: skillDir === '.' ? f.relativePath : f.relativePath.substring(prefix.length),
-    }))
+    }]
+  })
   for (const f of strippedFiles) {
     const checkPath = normalizeUploadRelativePath(f.relativePath)
     if (checkPath.startsWith('..')) {
@@ -190,12 +193,14 @@ interface GithubTreeSource {
   path: string
 }
 
-interface GithubContentEntry {
-  name: string
-  path: string
-  type: 'file' | 'dir'
-  download_url?: string | null
-}
+const githubContentEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(['file', 'dir']),
+  download_url: z.string().nullish(),
+})
+
+type GithubContentEntry = z.infer<typeof githubContentEntrySchema>
 
 function parseGithubTreeUrl(url: string): GithubTreeSource {
   let parsed: URL
@@ -236,14 +241,18 @@ async function fetchGithubSkillFiles(
   fetchFn: GithubFetchFn = fetch,
 ): Promise<SkillInstallFile[]> {
   const apiUrl = githubContentsApiUrl(source, source.path)
-  const data = await githubFetchJson(apiUrl, {}, fetchFn)
+  const data = await githubFetchJson(apiUrl, JsonValueSchema, {}, fetchFn)
 
   if (!Array.isArray(data)) {
-    const entry = data as GithubContentEntry
-    if (entry.name !== 'SKILL.md') {
+    const entry = githubContentEntrySchema.safeParse(data)
+    if (!entry.success || entry.data.name !== 'SKILL.md') {
       throw new Error('GitHub tree URL must point to a skill folder containing SKILL.md')
     }
-    const buffer = await githubFetchBinary(entry.download_url!, {}, fetchFn)
+    const downloadUrl = entry.data.download_url
+    if (!downloadUrl) {
+      throw new Error('GitHub tree URL must point to a skill folder containing SKILL.md')
+    }
+    const buffer = await githubFetchBinary(downloadUrl, {}, fetchFn)
     const content = Buffer.from(buffer)
     if (content.length > FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES) {
       throw new Error('Skill files exceed maximum upload size')
@@ -258,14 +267,15 @@ async function fetchGithubSkillFiles(
     const dirEntries = entries.filter((entry) => entry.type === 'dir')
     const nested = await Promise.all(
       dirEntries.map(async (dir) => {
-        const dirData = await githubFetchJson(githubContentsApiUrl(source, dir.path), {}, fetchFn)
-        return Array.isArray(dirData) ? collectFileEntries(dirData as GithubContentEntry[]) : []
+        const dirData = await githubFetchJson(githubContentsApiUrl(source, dir.path), JsonValueSchema, {}, fetchFn)
+        const nestedEntries = githubContentEntrySchema.array().safeParse(dirData)
+        return nestedEntries.success ? collectFileEntries(nestedEntries.data) : []
       }),
     )
     return [...fileEntries, ...nested.flat()]
   }
 
-  const collected = await collectFileEntries(data as GithubContentEntry[])
+  const collected = await collectFileEntries(githubContentEntrySchema.array().parse(data))
 
   if (collected.length > MAX_FILES) {
     throw new Error(`Skill contains too many files (max ${MAX_FILES})`)

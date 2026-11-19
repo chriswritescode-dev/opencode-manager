@@ -1,581 +1,285 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import * as fs from 'fs/promises'
-
-vi.mock('fs/promises', () => ({
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
-  stat: vi.fn(),
-  unlink: vi.fn(),
-}))
-
-vi.mock('../../src/utils/fs-safe', () => ({
-  mkdirSafe: vi.fn().mockResolvedValue(undefined),
-  mkdirSyncSafe: vi.fn(),
-}))
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(),
-}))
-
-const mockGetSettings = vi.fn()
-const mockUpdateSettings = vi.fn()
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: mockGetSettings,
-    updateSettings: mockUpdateSettings,
-  })),
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: () => '/test/workspace',
-  ENV: {
-    WORKSPACE: {
-      BASE_PATH: '/test/workspace',
-    },
-  },
-}))
-
-const mockReadFile = fs.readFile as any
-const mockWriteFile = fs.writeFile as any
-const mockStat = fs.stat as any
-const mockUnlink = fs.unlink as any
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readdir, stat, utimes } from 'fs/promises'
+import { join } from 'path'
+import { z } from 'zod'
+import type { Database } from 'bun:sqlite'
+import type { STTConfig } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { createSTTRoutes } from '../../src/routes/stt'
+import { SettingsService } from '../../src/services/settings'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-describe('STT Routes', () => {
-  let mockDb: any
-  let sttApp: ReturnType<typeof createSTTRoutes>
+const StatusResponseSchema = z.object({
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  provider: z.string(),
+  model: z.string(),
+})
+const TranscriptionResponseSchema = z.object({ text: z.string() })
+const ErrorResponseSchema = z.object({ error: z.string() })
+const ErrorDetailsResponseSchema = z.object({ error: z.string(), details: z.string() })
+const ModelsResponseSchema = z.object({ models: z.array(z.string()), cached: z.boolean() })
+
+const TRANSCRIPTION_URL = 'https://api.openai.com/v1/audio/transcriptions'
+const MODEL_CACHE_TTL_MS = 60 * 60 * 1000
+
+function createSttConfig(overrides: Partial<STTConfig> = {}): STTConfig {
+  return {
+    enabled: true,
+    provider: 'external',
+    apiKey: 'test-api-key',
+    endpoint: 'https://api.openai.com',
+    model: 'whisper-1',
+    language: 'en-US',
+    ...overrides,
+  }
+}
+
+function audioFormData(): FormData {
+  const formData = new FormData()
+  formData.append('audio', new File(['fake audio data'], 'audio.webm', { type: 'audio/webm' }))
+  return formData
+}
+
+function transcribeRequest(app: ReturnType<typeof createSTTRoutes>, formData?: FormData): Promise<Response> {
+  return Promise.resolve(app.request('/transcribe?userId=test', {
+    method: 'POST',
+    body: formData ?? audioFormData(),
+  }))
+}
+
+function jsonResponse(body: JsonValue, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+describe('STT routes', () => {
+  let workspace: TempWorkspace
+  let db: Database
+  let settings: SettingsService
+  let app: ReturnType<typeof createSTTRoutes>
+
+  function configureStt(overrides: Partial<STTConfig> = {}): STTConfig {
+    const stt = createSttConfig(overrides)
+    settings.updateSettings({ stt }, 'test')
+    return stt
+  }
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockDb = {} as any
-    
-    mockGetSettings.mockReturnValue({
-      preferences: {
-        stt: {
-          enabled: true,
-          provider: 'external',
-          apiKey: 'test-api-key',
-          endpoint: 'https://api.openai.com',
-          model: 'whisper-1',
-          language: 'en-US',
-        },
-      },
-    })
-    
-    sttApp = createSTTRoutes(mockDb)
+    workspace = createTempWorkspace('stt-test-')
+    db = createTestDatabase()
+    settings = new SettingsService(db)
+    app = createSTTRoutes(db)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    db.close()
+    workspace.restore()
   })
 
   describe('GET /status', () => {
-    it('should return status with correct structure', async () => {
-      const req = new Request('http://localhost/status?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    it.each([
+      [
+        'a configured external provider',
+        { enabled: true, provider: 'external' },
+        { enabled: true, configured: true, provider: 'external', model: 'whisper-1' },
+      ],
+      [
+        'a disabled builtin provider',
+        { enabled: false, provider: 'builtin' },
+        { enabled: false, configured: true, provider: 'builtin', model: 'whisper-1' },
+      ],
+    ] as const)('reports %s', async (_label, overrides, expected) => {
+      configureStt(overrides)
+
+      const res = await app.request('/status?userId=test')
 
       expect(res.status).toBe(200)
-      expect(json).toHaveProperty('enabled')
-      expect(json).toHaveProperty('configured')
-      expect(json).toHaveProperty('provider')
-      expect(json).toHaveProperty('model')
+      await expect(readJson(res, StatusResponseSchema)).resolves.toEqual(expected)
     })
 
-    it('should return enabled true when STT is enabled', async () => {
-      const req = new Request('http://localhost/status?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(json.enabled).toBe(true)
-      expect(json.configured).toBe(true)
-      expect(json.provider).toBe('external')
-      expect(json.model).toBe('whisper-1')
-    })
-
-    it('should return enabled false when STT is disabled', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: false,
-            provider: 'builtin',
-            apiKey: '',
-            endpoint: '',
-            model: '',
-            language: 'en-US',
-          },
-        },
-      })
-
-      const req = new Request('http://localhost/status?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(json.enabled).toBe(false)
-      expect(json.configured).toBe(false)
-    })
-
-    it('should handle missing STT config gracefully', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {},
-      })
-
-      const req = new Request('http://localhost/status?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    it('uses the default STT preferences when the user has none stored', async () => {
+      const res = await app.request('/status?userId=test')
 
       expect(res.status).toBe(200)
-      expect(json.enabled).toBe(false)
-      expect(json.provider).toBe('builtin')
+      await expect(readJson(res, StatusResponseSchema)).resolves.toEqual({
+        enabled: false,
+        configured: true,
+        provider: 'builtin',
+        model: 'whisper-1',
+      })
     })
   })
 
   describe('POST /transcribe', () => {
-    it('should reject when STT is disabled', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: false,
-            provider: 'external',
-            apiKey: 'test-key',
-            endpoint: 'https://api.openai.com',
-            model: 'whisper-1',
-          },
-        },
-      })
+    it.each([
+      ['STT is disabled', { enabled: false }, 'STT is not enabled'],
+      ['the provider is builtin', { provider: 'builtin' }, 'External STT provider is not selected'],
+      ['the endpoint is missing', { endpoint: '' }, 'STT endpoint is not configured'],
+    ] as const)('rejects when %s', async (_label, overrides, expectedError) => {
+      configureStt(overrides)
 
-      const audioBlob = new Blob(['fake audio'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'test.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await transcribeRequest(app)
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('STT is not enabled')
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: expectedError })
     })
 
-    it('should reject when provider is builtin', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'builtin',
-            apiKey: 'test-key',
-            endpoint: 'https://api.openai.com',
-            model: 'whisper-1',
-          },
-        },
-      })
+    it('rejects when no audio file is uploaded', async () => {
+      configureStt()
 
-      const audioBlob = new Blob(['fake audio'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'test.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await transcribeRequest(app, new FormData())
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('External STT provider is not selected')
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'No audio file provided' })
     })
 
-    it('should reject when endpoint is missing', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: 'test-key',
-            endpoint: '',
-            model: 'whisper-1',
-          },
-        },
-      })
+    it('transcribes audio through the configured provider', async () => {
+      configureStt()
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ text: 'Hello, world!' }))
 
-      const audioBlob = new Blob(['fake audio'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'test.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('STT endpoint is not configured')
-    })
-
-    it('should reject when no audio file provided', async () => {
-      const formData = new FormData()
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(400)
-      expect(json.error).toBe('No audio file provided')
-    })
-
-    it('should successfully transcribe when API returns success', async () => {
-      const originalFetch = globalThis.fetch
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ text: 'Hello, world!' }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await transcribeRequest(app)
 
       expect(res.status).toBe(200)
-      expect(json.text).toBe('Hello, world!')
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.openai.com/v1/audio/transcriptions',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer test-api-key',
-          },
-        })
-      )
+      await expect(readJson(res, TranscriptionResponseSchema)).resolves.toEqual({ text: 'Hello, world!' })
 
-      globalThis.fetch = originalFetch
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(TRANSCRIPTION_URL)
+      const init = fetchMock.mock.calls[0]?.[1]
+      expect(init?.method).toBe('POST')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-api-key')
+      expect(init?.body).toBeInstanceOf(FormData)
+      const body = init?.body
+      if (!(body instanceof FormData)) throw new Error('expected a multipart body')
+      expect(body.get('model')).toBe('whisper-1')
+      expect(body.get('language')).toBe('en')
     })
 
-    it('should handle API errors gracefully', async () => {
-      const originalFetch = globalThis.fetch
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 401,
-        text: async () => JSON.stringify({ error: { message: 'Invalid API key' } }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
+    it('omits the Authorization header when no API key is configured', async () => {
+      configureStt({ apiKey: '' })
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ text: 'Hello, world!' }))
 
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
+      const res = await transcribeRequest(app)
 
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
+      expect(res.status).toBe(200)
+      expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).has('Authorization')).toBe(false)
+    })
 
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+    it('maps an upstream failure to the same status and reports its message', async () => {
+      configureStt()
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+        JSON.stringify({ error: { message: 'Invalid API key' } }),
+        { status: 401 },
+      ))
+
+      const res = await transcribeRequest(app)
 
       expect(res.status).toBe(401)
-      expect(json.error).toBe('STT API request failed')
-      expect(json.details).toBe('Invalid API key')
-
-      globalThis.fetch = originalFetch
+      await expect(readJson(res, ErrorDetailsResponseSchema)).resolves.toEqual({
+        error: 'STT API request failed',
+        details: 'Invalid API key',
+      })
     })
 
-    it('should handle response with missing text field', async () => {
-      const originalFetch = globalThis.fetch
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: 'test-api-key',
-            endpoint: 'https://api.openai.com',
-            model: 'whisper-1',
-            language: 'en-US',
-          },
-        },
-      })
+    it('returns 500 when the upstream response has no text', async () => {
+      configureStt()
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ error: 'some error' }))
 
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ error: 'some error', text: undefined }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await transcribeRequest(app)
 
       expect(res.status).toBe(500)
-      expect(json.error).toBe('STT API returned invalid response')
-      expect(json.details).toContain('Response missing text field')
-
-      globalThis.fetch = originalFetch
+      const body = await readJson(res, ErrorDetailsResponseSchema)
+      expect(body.error).toBe('STT API returned invalid response')
+      expect(body.details).toContain('Response missing text field')
     })
 
-    it('should successfully transcribe without API key', async () => {
-      const originalFetch = globalThis.fetch
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: '',
-            endpoint: 'https://api.openai.com',
-            model: 'whisper-1',
-            language: 'en-US',
-          },
-        },
-      })
+    it.each([
+      'https://api.openai.com',
+      'https://api.openai.com/',
+      'https://api.openai.com/v1',
+      'https://api.openai.com/v1/audio/transcriptions',
+    ])('normalizes the configured endpoint %s to the transcription path', async (endpoint) => {
+      configureStt({ endpoint })
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ text: 'Test' }))
 
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ text: 'Hello, world!' }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
+      await transcribeRequest(app)
 
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.text).toBe('Hello, world!')
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.openai.com/v1/audio/transcriptions',
-        expect.objectContaining({
-          headers: expect.not.objectContaining({
-            'Authorization': expect.any(String),
-          }),
-        })
-      )
-
-      globalThis.fetch = originalFetch
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(TRANSCRIPTION_URL)
     })
   })
 
   describe('GET /models', () => {
-    it('should reject when STT not configured', async () => {
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: '',
-            endpoint: '',
-            model: '',
-          },
-        },
-      })
+    it('returns 400 when the endpoint is not configured', async () => {
+      configureStt({ endpoint: '' })
 
-      const req = new Request('http://localhost/models?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await app.request('/models?userId=test')
 
       expect(res.status).toBe(400)
-      expect(json.error).toBe('STT not configured')
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'STT not configured' })
     })
 
-    it('should return cached models when available', async () => {
-      mockStat.mockResolvedValue({
-        mtimeMs: Date.now() - 1000,
-      })
-      mockReadFile.mockResolvedValue(JSON.stringify(['whisper-1', 'whisper-large']))
+    it('discovers whisper models from the provider and caches them', async () => {
+      configureStt()
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({
+        data: [{ id: 'whisper-1' }, { id: 'gpt-4' }, { id: 'whisper-large-v3' }],
+      }))
 
-      const req = new Request('http://localhost/models?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await app.request('/models?userId=test')
 
       expect(res.status).toBe(200)
-      expect(json.models).toEqual(['whisper-1', 'whisper-large'])
-      expect(json.cached).toBe(true)
+      await expect(readJson(res, ModelsResponseSchema)).resolves.toEqual({
+        models: ['whisper-1', 'whisper-large-v3'],
+        cached: false,
+      })
+      expect(settings.getSettings('test').preferences.stt?.availableModels).toEqual(['whisper-1', 'whisper-large-v3'])
+
+      const cachedRes = await app.request('/models?userId=test')
+
+      await expect(readJson(cachedRes, ModelsResponseSchema)).resolves.toEqual({
+        models: ['whisper-1', 'whisper-large-v3'],
+        cached: true,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
-    it('should fetch models from API when cache is expired', async () => {
-      const originalFetch = globalThis.fetch
-      mockStat.mockResolvedValue({
-        mtimeMs: Date.now() - 2 * 60 * 60 * 1000,
-      })
-      mockUnlink.mockResolvedValue(undefined)
-      mockWriteFile.mockResolvedValue(undefined)
+    it('refreshes an expired model cache', async () => {
+      configureStt()
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ data: [{ id: 'whisper-1' }] }))
+      await app.request('/models?userId=test')
 
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          data: [
-            { id: 'whisper-1' },
-            { id: 'gpt-4' },
-            { id: 'whisper-large-v3' },
-          ],
-        }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
+      const cacheDir = join(workspace.path, 'cache', 'discovery')
+      const cacheFile = (await readdir(cacheDir))[0]
+      if (cacheFile === undefined) throw new Error('expected a cached model file')
+      const expired = new Date(Date.now() - MODEL_CACHE_TTL_MS - 60_000)
+      await utimes(join(cacheDir, cacheFile), expired, expired)
 
-      const req = new Request('http://localhost/models?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
+      const res = await app.request('/models?userId=test')
+
+      await expect(readJson(res, ModelsResponseSchema)).resolves.toEqual({ models: ['whisper-1'], cached: false })
+      await expect(stat(join(cacheDir, cacheFile))).resolves.toBeDefined()
+    })
+
+    it('refetches when refresh is requested even with a fresh cache', async () => {
+      configureStt()
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ data: [{ id: 'whisper-1' }] }))
+      await app.request('/models?userId=test')
+
+      const res = await app.request('/models?userId=test&refresh=true')
+
+      await expect(readJson(res, ModelsResponseSchema)).resolves.toEqual({ models: ['whisper-1'], cached: false })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('falls back to the default model when the provider cannot be reached', async () => {
+      configureStt()
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'))
+
+      const res = await app.request('/models?userId=test')
 
       expect(res.status).toBe(200)
-      expect(json.models).toEqual(['whisper-1', 'whisper-large-v3'])
-      expect(json.cached).toBe(false)
-
-      globalThis.fetch = originalFetch
-    })
-
-    it('should return default model when API fetch fails', async () => {
-      const originalFetch = globalThis.fetch
-      mockStat.mockRejectedValue(new Error('File not found'))
-      mockWriteFile.mockResolvedValue(undefined)
-
-      const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'))
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const req = new Request('http://localhost/models?userId=test')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.models).toEqual(['whisper-1'])
-
-      globalThis.fetch = originalFetch
-    })
-
-    it('should force refresh when refresh=true', async () => {
-      const originalFetch = globalThis.fetch
-      mockWriteFile.mockResolvedValue(undefined)
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          data: [{ id: 'whisper-1' }],
-        }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const req = new Request('http://localhost/models?userId=test&refresh=true')
-      const res = await sttApp.fetch(req)
-      const json = await res.json() as Record<string, unknown>
-
-      expect(res.status).toBe(200)
-      expect(json.cached).toBe(false)
-      expect(mockFetch).toHaveBeenCalled()
-
-      globalThis.fetch = originalFetch
-    })
-  })
-
-  describe('URL normalization', () => {
-    it('should normalize endpoint with trailing path', async () => {
-      const originalFetch = globalThis.fetch
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: 'test-api-key',
-            endpoint: 'https://api.openai.com/v1/audio/transcriptions',
-            model: 'whisper-1',
-            language: 'en-US',
-          },
-        },
-      })
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ text: 'Test' }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-
-      await sttApp.fetch(req)
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.openai.com/v1/audio/transcriptions',
-        expect.anything()
-      )
-
-      globalThis.fetch = originalFetch
-    })
-
-    it('should handle endpoint with trailing slash', async () => {
-      const originalFetch = globalThis.fetch
-      mockGetSettings.mockReturnValue({
-        preferences: {
-          stt: {
-            enabled: true,
-            provider: 'external',
-            apiKey: 'test-api-key',
-            endpoint: 'https://api.openai.com/',
-            model: 'whisper-1',
-            language: 'en-US',
-          },
-        },
-      })
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ text: 'Test' }),
-      })
-      globalThis.fetch = mockFetch as unknown as typeof fetch
-
-      const audioBlob = new Blob(['fake audio data'], { type: 'audio/webm' })
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'audio.webm')
-
-      const req = new Request('http://localhost/transcribe?userId=test', {
-        method: 'POST',
-        body: formData,
-      })
-
-      await sttApp.fetch(req)
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.openai.com/v1/audio/transcriptions',
-        expect.anything()
-      )
-
-      globalThis.fetch = originalFetch
+      await expect(readJson(res, ModelsResponseSchema)).resolves.toEqual({ models: ['whisper-1'], cached: false })
     })
   })
 })

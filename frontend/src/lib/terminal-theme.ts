@@ -7,6 +7,19 @@ const BASE_TOKENS = {
   selectionBackground: 'accent',
 } as const
 
+const ANSI_NAMES = [
+  'black',
+  'red',
+  'green',
+  'yellow',
+  'blue',
+  'magenta',
+  'cyan',
+  'white',
+] as const satisfies readonly (keyof ITheme)[]
+
+type AnsiName = (typeof ANSI_NAMES)[number]
+
 const ANSI_TOKENS = {
   black: 'muted',
   red: 'destructive',
@@ -16,9 +29,18 @@ const ANSI_TOKENS = {
   magenta: 'highlight',
   cyan: 'syntax-property',
   white: 'foreground',
-} as const
+} as const satisfies Record<AnsiName, string>
 
-type AnsiName = keyof typeof ANSI_TOKENS
+const ANSI_BRIGHT_KEYS = {
+  black: 'brightBlack',
+  red: 'brightRed',
+  green: 'brightGreen',
+  yellow: 'brightYellow',
+  blue: 'brightBlue',
+  magenta: 'brightMagenta',
+  cyan: 'brightCyan',
+  white: 'brightWhite',
+} as const satisfies Record<AnsiName, keyof ITheme>
 
 function collectTokenColors(root: HTMLElement): Map<string, string> {
   const tokens = new Set<string>([
@@ -48,12 +70,12 @@ function collectTokenColors(root: HTMLElement): Map<string, string> {
   return colors
 }
 
-function ansiTheme(colors: Map<string, string>): Record<AnsiName | `bright${Capitalize<AnsiName>}`, string | undefined> {
-  const theme = {} as Record<AnsiName | `bright${Capitalize<AnsiName>}`, string | undefined>
-  for (const name of Object.keys(ANSI_TOKENS) as AnsiName[]) {
+function ansiTheme(colors: Map<string, string>): Partial<ITheme> {
+  const theme: Partial<ITheme> = {}
+  for (const name of ANSI_NAMES) {
     const color = colors.get(ANSI_TOKENS[name])
     theme[name] = color
-    theme[`bright${name[0].toUpperCase()}${name.slice(1)}` as `bright${Capitalize<AnsiName>}`] = color
+    theme[ANSI_BRIGHT_KEYS[name]] = color
   }
   return theme
 }

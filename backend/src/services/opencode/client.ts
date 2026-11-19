@@ -8,6 +8,10 @@ import { getOpenCodeUpstreamBaseUrl, withDefaultOpenCodeDirectory } from './upst
 
 const FORWARD_EXCLUDED_HEADERS: ReadonlySet<string> = new Set(['cookie'])
 
+function resolveHostString(host: OpenCodeClientHost): string {
+  return host instanceof Function ? host() : host
+}
+
 export interface OpenCodeClient {
   readonly api: OpenCodeApi
   forwardRaw(request: Request): Promise<Response>
@@ -29,7 +33,10 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   constructor(private readonly config: FetchOpenCodeClientConfig) {
     this.api = createOpenCodeApi({
       baseUrl: this.resolveBaseUrl(),
-      fetch: ((input, init) => this.fetchWithResolvedAuth(input, init)) as typeof fetch,
+      fetch: Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => this.fetchWithResolvedAuth(input, init),
+        { preconnect: fetch.preconnect },
+      ),
     })
   }
 
@@ -38,7 +45,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 
   private resolveBaseUrl(): string {
-    return typeof this.config.baseUrl === 'function' ? this.config.baseUrl() : this.config.baseUrl
+    return resolveHostString(this.config.baseUrl)
   }
 
   private async getBasicAuth(): Promise<string> {
@@ -64,10 +71,6 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.fetchFn(input, { ...init, headers })
   }
 
-  /**
-   * Proxies a raw request to the OpenCode server, dropping the `/api/opencode` prefix and applying the
-   * directory header and basic auth. Upstream failures become a `502` JSON response instead of a throw.
-   */
   async forwardRaw(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const path = url.pathname.replace(/^\/api\/opencode/, '') + url.search
@@ -104,10 +107,10 @@ export function createOpenCodeClient(
   passwordOverride?: string | OpenCodePasswordResolver,
   host?: OpenCodeClientHost,
 ): OpenCodeClient {
-  const resolveConfiguredHost = typeof host === 'function' ? host : () => (host ?? ENV.OPENCODE.HOST)
+  const resolveConfiguredHost = host instanceof Function ? host : () => (host ?? ENV.OPENCODE.HOST)
   const baseUrl: OpenCodeClientHost = () => getOpenCodeUpstreamBaseUrl(resolveConfiguredHost())
-  const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
-  const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
+  const passwordResolver = passwordOverride instanceof Function ? passwordOverride : undefined
+  const password = passwordOverride instanceof Function ? ENV.OPENCODE.SERVER_PASSWORD : passwordOverride
   const basicAuth = password ? getOpenCodeBasicAuthHeader(password) : null
 
   return new FetchOpenCodeClient({ baseUrl, basicAuth, passwordResolver })

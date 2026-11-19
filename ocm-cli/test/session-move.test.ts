@@ -15,7 +15,7 @@ function makeTransfer(messages: SessionMessageInfo[] = [], directory = '/Users/x
       location: { directory },
     },
     messages,
-  } as unknown as SessionTransferData
+  }
 }
 
 function userWithFile(uri: string): SessionMessageInfo {
@@ -25,7 +25,7 @@ function userWithFile(uri: string): SessionMessageInfo {
     type: 'user',
     text: 'hi',
     files: [{ data: '', mime: 'image/png', source: { type: 'uri', uri } }],
-  } as unknown as SessionMessageInfo
+  }
 }
 
 function assistantWithToolFile(uri: string): SessionMessageInfo {
@@ -44,7 +44,24 @@ function assistantWithToolFile(uri: string): SessionMessageInfo {
         time: { created: 2 },
       },
     ],
-  } as unknown as SessionMessageInfo
+  }
+}
+
+function userFileUri(transfer: SessionTransferData, index = 0): string | null {
+  const message = transfer.messages[index]
+  if (message?.type !== 'user') return null
+  const source = message.files?.[0]?.source
+  return source?.type === 'uri' ? source.uri : null
+}
+
+function assistantFileUri(transfer: SessionTransferData, index = 0): string | null {
+  const message = transfer.messages[index]
+  if (message?.type !== 'assistant') return null
+  const part = message.content[0]
+  if (part?.type !== 'tool') return null
+  if (part.state.status !== 'completed') return null
+  const file = part.state.content[0]
+  return file.type === 'file' ? file.uri : null
 }
 
 describe('rewriteTransferForRemote', () => {
@@ -63,59 +80,51 @@ describe('rewriteTransferForRemote', () => {
   it('rewrites a user file attachment uri under the local root', () => {
     const result = rewriteTransferForRemote(makeTransfer([userWithFile('/Users/x/repo/src/img.png')]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe('/workspace/repos/repo/src/img.png')
+    expect(userFileUri(result)).toBe('/workspace/repos/repo/src/img.png')
   })
 
   it('rewrites an assistant tool file uri under the local root', () => {
     const result = rewriteTransferForRemote(makeTransfer([assistantWithToolFile('/Users/x/repo/out.png')]), ctx)
 
-    const content = (result.messages[0] as unknown as { content: { state: { content: { uri: string }[] } }[] }).content
-    expect(content[0]!.state.content[0]!.uri).toBe('/workspace/repos/repo/out.png')
+    expect(assistantFileUri(result)).toBe('/workspace/repos/repo/out.png')
   })
 
   it('leaves uris outside the local root untouched', () => {
     const result = rewriteTransferForRemote(makeTransfer([userWithFile('/elsewhere/img.png')]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe('/elsewhere/img.png')
+    expect(userFileUri(result)).toBe('/elsewhere/img.png')
   })
 
   it('rewrites a file:// user attachment uri under the local root, preserving encoding', () => {
     const result = rewriteTransferForRemote(makeTransfer([userWithFile('file:///Users/x/repo/a%20b.png')]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe('file:///workspace/repos/repo/a%20b.png')
+    expect(userFileUri(result)).toBe('file:///workspace/repos/repo/a%20b.png')
   })
 
   it('rewrites a file:// assistant tool file uri under the local root', () => {
     const result = rewriteTransferForRemote(makeTransfer([assistantWithToolFile('file:///Users/x/repo/out.png')]), ctx)
 
-    const content = (result.messages[0] as unknown as { content: { state: { content: { uri: string }[] } }[] }).content
-    expect(content[0]!.state.content[0]!.uri).toBe('file:///workspace/repos/repo/out.png')
+    expect(assistantFileUri(result)).toBe('file:///workspace/repos/repo/out.png')
   })
 
   it('preserves file:// query and hash when relocating', () => {
     const result = rewriteTransferForRemote(makeTransfer([userWithFile('file:///Users/x/repo/a.png?v=1#frag')]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe('file:///workspace/repos/repo/a.png?v=1#frag')
+    expect(userFileUri(result)).toBe('file:///workspace/repos/repo/a.png?v=1#frag')
   })
 
   it('leaves a file:// uri outside the local root untouched', () => {
     const uri = 'file:///elsewhere/img.png'
     const result = rewriteTransferForRemote(makeTransfer([userWithFile(uri)]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe(uri)
+    expect(userFileUri(result)).toBe(uri)
   })
 
   it('does not relocate a file:// uri that only shares a prefix with the local root', () => {
     const uri = 'file:///Users/x/repo-other/img.png'
     const result = rewriteTransferForRemote(makeTransfer([userWithFile(uri)]), ctx)
 
-    const files = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe(uri)
+    expect(userFileUri(result)).toBe(uri)
   })
 
   it('leaves data uris and external http urls untouched', () => {
@@ -123,23 +132,15 @@ describe('rewriteTransferForRemote', () => {
     const httpUri = 'https://example.com/img.png'
     const result = rewriteTransferForRemote(makeTransfer([userWithFile(dataUri), userWithFile(httpUri)]), ctx)
 
-    const dataFiles = (result.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    const httpFiles = (result.messages[1] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(dataFiles[0]!.source.uri).toBe(dataUri)
-    expect(httpFiles[0]!.source.uri).toBe(httpUri)
+    expect(userFileUri(result, 0)).toBe(dataUri)
+    expect(userFileUri(result, 1)).toBe(httpUri)
   })
 
-  it('does not mutate a file:// input transfer', () => {
-    const input = makeTransfer([userWithFile('file:///Users/x/repo/a%20b.png')])
-    const frozen = structuredClone(input)
-
-    rewriteTransferForRemote(input, ctx)
-
-    expect(input).toEqual(frozen)
-  })
-
-  it('does not mutate the input transfer', () => {
-    const input = makeTransfer([userWithFile('/Users/x/repo/src/img.png')])
+  it.each([
+    ['file://', 'file:///Users/x/repo/a%20b.png'],
+    ['path', '/Users/x/repo/src/img.png'],
+  ])('does not mutate a %s input transfer', (_label, uri) => {
+    const input = makeTransfer([userWithFile(uri)])
     const frozen = structuredClone(input)
 
     rewriteTransferForRemote(input, ctx)
@@ -157,8 +158,8 @@ describe('transferSession', () => {
     const progress: [number, number][] = []
 
     const deps: TransferDeps = {
-      exportSession: vi.fn().mockResolvedValue(data),
-      importSession: vi.fn().mockImplementation(async (directory: string, transferred: SessionTransferData) => {
+      exportSession: vi.fn<TransferDeps['exportSession']>().mockResolvedValue(data),
+      importSession: vi.fn<TransferDeps['importSession']>().mockImplementation(async (directory, transferred) => {
         importCalls.push({ directory, data: transferred })
         return { sessionID: 'ses_a' }
       }),
@@ -172,15 +173,14 @@ describe('transferSession', () => {
     expect(importCalls).toHaveLength(1)
     expect(importCalls[0]!.directory).toBe('/workspace/repos/repo')
     expect(importCalls[0]!.data.info.location.directory).toBe('/workspace/repos/repo')
-    const files = (importCalls[0]!.data.messages[0] as unknown as { files: { source: { uri: string } }[] }).files
-    expect(files[0]!.source.uri).toBe('/workspace/repos/repo/src/img.png')
+    expect(userFileUri(importCalls[0]!.data)).toBe('/workspace/repos/repo/src/img.png')
     expect(progress).toEqual([[0, 1], [1, 1]])
   })
 
   it('returns the imported session id rather than the local one', async () => {
     const deps: TransferDeps = {
-      exportSession: vi.fn().mockResolvedValue(makeTransfer()),
-      importSession: vi.fn().mockResolvedValue({ sessionID: 'ses_remote' }),
+      exportSession: vi.fn<TransferDeps['exportSession']>().mockResolvedValue(makeTransfer()),
+      importSession: vi.fn<TransferDeps['importSession']>().mockResolvedValue({ sessionID: 'ses_remote' }),
     }
 
     const result = await transferSession(input, deps)
@@ -190,8 +190,8 @@ describe('transferSession', () => {
 
   it('reports an export failure without importing', async () => {
     const deps: TransferDeps = {
-      exportSession: vi.fn().mockRejectedValue(new Error('export failed')),
-      importSession: vi.fn(),
+      exportSession: vi.fn<TransferDeps['exportSession']>().mockRejectedValue(new Error('export failed')),
+      importSession: vi.fn<TransferDeps['importSession']>(),
     }
 
     const result = await transferSession(input, deps)
@@ -202,8 +202,8 @@ describe('transferSession', () => {
 
   it('reports an import failure', async () => {
     const deps: TransferDeps = {
-      exportSession: vi.fn().mockResolvedValue(makeTransfer()),
-      importSession: vi.fn().mockRejectedValue(new Error('import diverged')),
+      exportSession: vi.fn<TransferDeps['exportSession']>().mockResolvedValue(makeTransfer()),
+      importSession: vi.fn<TransferDeps['importSession']>().mockRejectedValue(new Error('import diverged')),
     }
 
     const result = await transferSession(input, deps)

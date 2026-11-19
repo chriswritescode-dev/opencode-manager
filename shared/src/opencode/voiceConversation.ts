@@ -2,18 +2,11 @@ import type { SessionMessageInfo, SessionStatus } from '@opencode/client'
 
 import { assistantText } from './content'
 
-/** Key under which the voice conversation instructions are stored on a session. */
 export const VOICE_MODE_INSTRUCTION_KEY = 'voice-mode'
 
-/** Session instructions that make every assistant reply suitable for reading aloud. */
 export const VOICE_MODE_INSTRUCTIONS =
   'Every reply will be read aloud in full by text-to-speech. Write plain, conversational spoken sentences. Never include file paths, filenames, line numbers, URLs, code, commands, markdown, lists, tables or symbols; describe code by what it does instead. Say numbers naturally. Lead with the outcome and keep it to a few sentences unless asked for detail. End with a direct question when you need input. This changes only how replies are written, not how thoroughly you work or use tools, and it takes precedence over other formatting guidance while active.'
 
-/**
- * The stage a hands-free voice conversation is currently in. `recording`
- * captures a message that is added to the session queue while the agent keeps
- * working, so it is separate from the `listening` stage that opens a new turn.
- */
 export type VoicePhase =
   | 'off'
   | 'listening'
@@ -23,40 +16,21 @@ export type VoicePhase =
   | 'recording'
   | 'paused'
 
-/** Why a paused voice conversation stopped listening. */
 export type VoicePauseReason = 'user' | 'background' | 'no-speech' | 'error'
 
-/**
- * Where a failure came from, which decides what the user must fix before a
- * retry can succeed. A failed capture usually means the microphone, while a
- * failed send or reading can succeed on a plain retry.
- */
 export type VoiceFailureSource = 'capture' | 'send' | 'playback'
 
-/** The reported status of a session, as a session transcript carries it. */
 export type VoiceSessionStatus = SessionStatus['type']
 
-/** Everything needed to resume or label a hands-free voice conversation. */
 export interface VoiceConversationState {
-  /** Current stage of the conversation loop. */
   phase: VoicePhase
-  /** Why the conversation is paused, or null when it is not paused. */
   pauseReason: VoicePauseReason | null
-  /** Message shown to the user after a failure, or null when there is none. */
   error: string | null
-  /** Where the failure came from, or null when there is no failure. */
   failureSource: VoiceFailureSource | null
-  /**
-   * Id of the transcript message whose successors the conversation reads
-   * aloud, or null when the whole transcript is in scope. Replies after it are
-   * read one by one, including replies to messages queued during the turn.
-   */
   baselineId: string | null
-  /** Whether the session has reported being busy since the current turn was sent. */
   sawBusy: boolean
 }
 
-/** State of a voice conversation that is not running. */
 export const INITIAL_VOICE_CONVERSATION_STATE: VoiceConversationState = {
   phase: 'off',
   pauseReason: null,
@@ -66,7 +40,6 @@ export const INITIAL_VOICE_CONVERSATION_STATE: VoiceConversationState = {
   sawBusy: false,
 }
 
-/** A signal from the voice conversation controller or the session. */
 export type VoiceConversationEvent =
   | { type: 'start'; busy: boolean; baselineId: string | null }
   | { type: 'transcript'; text: string }
@@ -87,59 +60,31 @@ export type VoiceConversationEvent =
   | { type: 'error'; message: string; source: VoiceFailureSource }
   | { type: 'exit' }
 
-/** An assistant message the conversation reads aloud. */
 export interface VoiceSpokenMessage {
-  /** Id of the assistant message. */
   id: string
-  /** Trimmed spoken text of the message, which is never empty. */
   text: string
 }
 
-/** Session data used to decide whether the current turn is finished. */
 export interface VoiceTurnCompletionInput {
-  /** Reported session status for the active session. */
   status: VoiceSessionStatus
-  /** Whether the session has reported being busy since the current turn started. */
   sawBusy: boolean
-  /** Whether a message of the current turn was read aloud. */
   spoke: boolean
-  /** Whether the session still holds prompts queued by the user. */
   hasPendingPrompts: boolean
-  /** Whether an assistant message after the baseline is still streaming. */
   hasIncomplete: boolean
 }
 
-/** Inputs that determine the text shown for the voice conversation. */
 export interface VoiceConversationLabelInput {
-  /** Current stage of the conversation loop. */
   phase: VoicePhase
-  /** Why the conversation is paused, or null when it is not paused. */
   pauseReason: VoicePauseReason | null
-  /** Whether the session is waiting for the user to approve a tool. */
   pendingApproval: boolean
-  /** Whether the current recording has stopped and is being finalized. */
   isEndpointing: boolean
-  /** Whether a reading is held mid-reply after a pause. */
   isPlaybackPaused: boolean
-  /** Whether the session is still working on the current turn. */
   sessionBusy: boolean
-  /** Message shown to the user after a failure, or null when there is none. */
   error?: string | null
-  /** Where the failure came from, which decides how the user can recover. */
   failureSource?: VoiceFailureSource | null
-  /** Whether the microphone was asked to start but has not begun capturing yet. */
   isStartingCapture?: boolean
 }
 
-/**
- * Applies one voice conversation event to the loop state. Events that do not
- * apply to the current phase are ignored, and the previous state object is
- * returned unchanged so callers can skip re-rendering on no-ops.
- *
- * @param state The current conversation state.
- * @param event The event to apply.
- * @returns The next state, or the same state object when the event does not apply.
- */
 export function reduceVoiceConversation(
   state: VoiceConversationState,
   event: VoiceConversationEvent,
@@ -258,15 +203,6 @@ export function reduceVoiceConversation(
   }
 }
 
-/**
- * Returns the index of the first message the conversation may read. Messages at
- * or before the baseline are excluded; a null or unknown baseline leaves the
- * whole transcript in scope.
- *
- * @param messages The session transcript, oldest first.
- * @param baselineId Id of the message the turn starts after.
- * @returns The index of the first message in scope.
- */
 function spokenWindowStart(
   messages: readonly SessionMessageInfo[],
   baselineId: string | null,
@@ -276,17 +212,6 @@ function spokenWindowStart(
   return baselineIndex === -1 ? 0 : baselineIndex + 1
 }
 
-/**
- * Lists every completed assistant message with text that the conversation has
- * not read yet, oldest first. Messages are read in the order they arrive, so a
- * user message inside the window does not end the scan: replies to prompts
- * queued during the turn are read as well.
- *
- * @param messages The session transcript, oldest first.
- * @param baselineId Id of the message the turn starts after.
- * @param spokenIds Ids of the messages already read aloud.
- * @returns The unread messages, oldest first.
- */
 export function listUnspokenMessages(
   messages: readonly SessionMessageInfo[],
   baselineId: string | null,
@@ -305,15 +230,6 @@ export function listUnspokenMessages(
   return unspoken
 }
 
-/**
- * Finds the message the conversation reads next: the oldest unread message that
- * has already completed.
- *
- * @param messages The session transcript, oldest first.
- * @param baselineId Id of the message the turn starts after.
- * @param spokenIds Ids of the messages already read aloud.
- * @returns The next message to read, or null when there is nothing to read.
- */
 export function findNextUnspokenMessage(
   messages: readonly SessionMessageInfo[],
   baselineId: string | null,
@@ -322,15 +238,6 @@ export function findNextUnspokenMessage(
   return listUnspokenMessages(messages, baselineId, spokenIds)[0] ?? null
 }
 
-/**
- * Decides whether any message of the current turn has been read aloud, which
- * lets a turn that produced a reply finish without ever reporting itself busy.
- *
- * @param messages The session transcript, oldest first.
- * @param baselineId Id of the message the turn starts after.
- * @param spokenIds Ids of the messages already read aloud.
- * @returns Whether a message after the baseline has been read.
- */
 export function hasSpokenMessage(
   messages: readonly SessionMessageInfo[],
   baselineId: string | null,
@@ -341,14 +248,6 @@ export function hasSpokenMessage(
     .some((message) => spokenIds.has(message.id))
 }
 
-/**
- * Reports whether the turn still produces an assistant message, which keeps the
- * turn open so the rest of a just-finished reply can still be read.
- *
- * @param messages The session transcript, oldest first.
- * @param baselineId Id of the message the turn starts after.
- * @returns Whether an assistant message after the baseline is still streaming.
- */
 export function hasIncompleteAssistant(
   messages: readonly SessionMessageInfo[],
   baselineId: string | null,
@@ -358,17 +257,6 @@ export function hasIncompleteAssistant(
     .some((message) => message.type === 'assistant' && message.time.completed === undefined)
 }
 
-/**
- * Decides whether the session has finished the current turn. The turn is over
- * only when the session is idle, holds no prompt the user queued during it, and
- * has no reply still streaming, and when the turn showed activity — a busy
- * report or a message that was read aloud. Callers only ask once every eligible
- * message has been read, so an unread message keeps the turn open by
- * construction.
- *
- * @param input The session status and the turn's queued, streaming and spoken state.
- * @returns Whether the turn is over.
- */
 export function isVoiceTurnComplete(input: VoiceTurnCompletionInput): boolean {
   return (
     input.status === 'idle' &&
@@ -378,14 +266,6 @@ export function isVoiceTurnComplete(input: VoiceTurnCompletionInput): boolean {
   )
 }
 
-/**
- * Produces the short status text shown on the status line while a voice
- * conversation is active. The text never names the next action, so a single
- * line describes the phase without growing or shifting the bar.
- *
- * @param input The current phase, pause reason and session signals.
- * @returns The status to display, or an empty string when voice mode is off.
- */
 export function voiceConversationLabel(input: VoiceConversationLabelInput): string {
   const { phase, pauseReason, pendingApproval, error, isStartingCapture } = input
 
@@ -411,13 +291,6 @@ export function voiceConversationLabel(input: VoiceConversationLabelInput): stri
   }
 }
 
-/**
- * Produces the action hint shown directly under the conversation orb, which
- * names what a tap does in the current phase and state.
- *
- * @param input The current phase, pause reason and session signals.
- * @returns The hint to display, or an empty string when the orb has no action.
- */
 export function voiceConversationHint(input: VoiceConversationLabelInput): string {
   const {
     phase,

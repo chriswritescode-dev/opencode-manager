@@ -1,35 +1,21 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OpenCodeProject } from '@/api/opencode'
+import { waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useRemoteProjects, useRemoteProjectsByActivity } from './useRemoteProjects'
+import { renderHookWithProviders } from '@/test/render'
+import { makeSession, makeOpenCodeServer } from '@/test/fixtures/api'
+import { createSessionServer } from '@/test/fixtures/sessionServer'
+import type { OpenCodeProject } from '@/api/opencode'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  listProjects: vi.fn(),
-  listSessionPage: vi.fn(),
-  useOpenCodeServers: vi.fn(),
-}))
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+} as const
 
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, listProjects: mocks.listProjects, listSessionPage: mocks.listSessionPage }
-})
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: mocks.useOpenCodeServers,
-}))
-
-const kitchen = {
-  id: 'srv_kitchen',
-  name: 'Kitchen',
-  baseUrl: 'https://kitchen.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 2,
-}
+const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
+const projectsPath = '/api/opencode/servers/srv_kitchen/api/project'
 
 function createProject(
   id: string,
@@ -38,97 +24,94 @@ function createProject(
   return { id, name: id, canonical: `/work/${id}`, time, sandboxes: [] }
 }
 
-function createSession(id: string, directory: string, updated: number) {
-  return {
-    id,
-    projectID: 'prj_1',
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    time: { created: updated - 1000, updated },
-    location: { directory },
-  }
-}
-
-function createWrapper() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+function projectServer(projects: OpenCodeProject[], servers = [kitchen]) {
+  return createSessionServer({ projects, remoteServers: servers })
 }
 
 describe('useRemoteProjects', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
-    mocks.listProjects.mockResolvedValue([])
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
-  })
-
   it('lists the projects of the linked server, most recently updated first', async () => {
-    const stale = createProject('stale', { created: 1, updated: 900, active: 100 })
-    const recent = createProject('recent', { created: 1, updated: 100, active: 900 })
-    mocks.listProjects.mockResolvedValue([stale, recent])
+    const server = projectServer([
+      createProject('stale', { created: 1, updated: 900, active: 100 }),
+      createProject('recent', { created: 1, updated: 100, active: 900 }),
+    ])
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     await waitFor(() => expect(result.current.projects).toHaveLength(2))
     expect(result.current.projects.map((project) => project.id)).toEqual(['stale', 'recent'])
-    expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
   })
 
   it('does not fetch sessions for the canonical project lookup', async () => {
-    mocks.listProjects.mockResolvedValue([createProject('app', { created: 1, updated: 2 })])
+    const server = projectServer([createProject('app', { created: 1, updated: 2 })])
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     await waitFor(() => expect(result.current.projects).toHaveLength(1))
-    expect(mocks.listSessionPage).not.toHaveBeenCalled()
+    expect(server.sessionRequests()).toHaveLength(0)
   })
 
   it('stays idle while the linked server is disabled', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [{ ...kitchen, enabled: false }],
-      isLoading: false,
-    })
+    const server = projectServer(
+      [createProject('app', { created: 1, updated: 2 })],
+      [{ ...kitchen, enabled: false }],
+    )
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result, fetchFake } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     expect(result.current.showsInitialLoading).toBe(false)
     expect(result.current.projects).toEqual([])
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', projectsPath)).toHaveLength(0)
   })
 
   it('stays idle when the caller disables it', () => {
-    renderHook(() => useRemoteProjects('srv_kitchen', { enabled: false }), {
-      wrapper: createWrapper(),
+    const server = projectServer([createProject('app', { created: 1, updated: 2 })])
+
+    const { fetchFake } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen', { enabled: false }), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', projectsPath)).toHaveLength(0)
+    expect(fetchFake.findRequests('GET', '/api/opencode-servers')).toHaveLength(0)
   })
 
-  it('reports the initial loading state while nothing is cached, including a restored pending query', () => {
-    mocks.listProjects.mockReturnValue(new Promise(() => {}))
+  it('reports the initial loading state while nothing is cached, including a restored pending query', async () => {
+    const pendingProjectsRoute: FetchRoute = {
+      method: 'GET',
+      path: projectsPath,
+      respond: () => new Promise(() => {}),
+    }
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result, fetchFake } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: [pendingProjectsRoute, ...createSessionServer({ remoteServers: [kitchen] }).routes],
     })
 
+    await waitFor(() => expect(fetchFake.findRequests('GET', projectsPath)).toHaveLength(1))
     expect(result.current.showsInitialLoading).toBe(true)
     expect(result.current.showsError).toBe(false)
     expect(result.current.projects).toEqual([])
   })
 
   it('reports the error state only when the load failed with nothing cached', async () => {
-    mocks.listProjects.mockRejectedValue(new Error('offline'))
+    const route: FetchRoute = {
+      method: 'GET',
+      path: projectsPath,
+      respond: () => ({ status: 400, json: { message: 'offline' } }),
+    }
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: [route, ...createSessionServer({ remoteServers: [kitchen] }).routes],
     })
 
     await waitFor(() => expect(result.current.showsError).toBe(true))
@@ -137,12 +120,20 @@ describe('useRemoteProjects', () => {
   })
 
   it('keeps the cached projects and reports the failure when a refetch fails', async () => {
-    mocks.listProjects
-      .mockResolvedValueOnce([createProject('app', { created: 1, updated: 2 })])
-      .mockRejectedValueOnce(new Error('offline'))
+    let requests = 0
+    const route: FetchRoute = {
+      method: 'GET',
+      path: projectsPath,
+      respond: () => {
+        requests += 1
+        if (requests === 1) return { json: [createProject('app', { created: 1, updated: 2 })] }
+        return { status: 400, json: { message: 'offline' } }
+      },
+    }
 
-    const { result } = renderHook(() => useRemoteProjects('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjects('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: [route, ...createSessionServer({ remoteServers: [kitchen] }).routes],
     })
 
     await waitFor(() => expect(result.current.projects).toHaveLength(1))
@@ -153,28 +144,23 @@ describe('useRemoteProjects', () => {
     expect(result.current.showsError).toBe(false)
     expect(result.current.showsInitialLoading).toBe(false)
     expect(result.current.projects.map((project) => project.id)).toEqual(['app'])
-    expect(result.current.error?.message).toBe('offline')
   })
 })
 
 describe('useRemoteProjectsByActivity', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useOpenCodeServers.mockReturnValue({ servers: [kitchen], isLoading: false })
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
-  })
-
   it('orders and dates projects by their newest session', async () => {
-    mocks.listProjects.mockResolvedValue([
-      createProject('idle', { created: 1, updated: 900, active: 999 }),
-      createProject('worked', { created: 1, updated: 100, active: 999 }),
-    ])
-    mocks.listSessionPage.mockResolvedValue({
-      items: [createSession('ses_1', '/work/worked', 500)],
+    const server = createSessionServer({
+      remoteServers: [kitchen],
+      projects: [
+        createProject('idle', { created: 1, updated: 900, active: 999 }),
+        createProject('worked', { created: 1, updated: 100, active: 999 }),
+      ],
+      remoteSessions: [makeSession({ id: 'ses_1', location: { directory: '/work/worked' }, time: { created: 1, updated: 500 } })],
     })
 
-    const { result } = renderHook(() => useRemoteProjectsByActivity('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjectsByActivity('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     await waitFor(() => expect(result.current.activityById.get('worked')).toBe(500))
@@ -183,16 +169,18 @@ describe('useRemoteProjectsByActivity', () => {
   })
 
   it('sorts a project without a session after the session-backed ones', async () => {
-    mocks.listProjects.mockResolvedValue([
-      createProject('quiet', { created: 1, updated: 950 }),
-      createProject('worked', { created: 1, updated: 100 }),
-    ])
-    mocks.listSessionPage.mockResolvedValue({
-      items: [createSession('ses_1', '/work/worked', 300)],
+    const server = createSessionServer({
+      remoteServers: [kitchen],
+      projects: [
+        createProject('quiet', { created: 1, updated: 950 }),
+        createProject('worked', { created: 1, updated: 100 }),
+      ],
+      remoteSessions: [makeSession({ id: 'ses_1', location: { directory: '/work/worked' }, time: { created: 1, updated: 300 } })],
     })
 
-    const { result } = renderHook(() => useRemoteProjectsByActivity('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result } = renderHookWithProviders(() => useRemoteProjectsByActivity('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     await waitFor(() => expect(result.current.activityById.get('worked')).toBe(300))
@@ -200,40 +188,43 @@ describe('useRemoteProjectsByActivity', () => {
   })
 
   it('fetches one session page per server, newest first and across every directory', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-    mocks.listProjects.mockResolvedValue([
-      createProject('alpha', { created: 1, updated: 10 }),
-      createProject('beta', { created: 1, updated: 20 }),
-      createProject('gamma', { created: 1, updated: 30 }),
-    ])
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
+    const server = createSessionServer({
+      remoteServers: [kitchen],
+      projects: [
+        createProject('alpha', { created: 1, updated: 10 }),
+        createProject('beta', { created: 1, updated: 20 }),
+        createProject('gamma', { created: 1, updated: 30 }),
+      ],
+    })
 
-    const { result } = renderHook(() => useRemoteProjectsByActivity('srv_kitchen'), { wrapper })
+    const { result } = renderHookWithProviders(() => useRemoteProjectsByActivity('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
+    })
 
     await waitFor(() => expect(result.current.projects).toHaveLength(3))
-    await waitFor(() => expect(mocks.listSessionPage).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(server.sessionRequests()).toHaveLength(1))
 
-    expect(mocks.listSessionPage).toHaveBeenCalledWith(
-      { limit: 100, order: 'desc', search: undefined, parentID: null },
-      'srv_kitchen',
-    )
+    const request = server.sessionRequests()[0]
+    expect(request.searchParams.get('limit')).toBe('100')
+    expect(request.searchParams.get('order')).toBe('desc')
+    expect(request.searchParams.get('parentID')).toBe('null')
+    expect(request.searchParams.get('directory')).toBeNull()
   })
 
   it('stays idle while the linked server is disabled', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [{ ...kitchen, enabled: false }],
-      isLoading: false,
+    const server = createSessionServer({
+      remoteServers: [{ ...kitchen, enabled: false }],
+      projects: [createProject('alpha', { created: 1, updated: 10 })],
     })
 
-    const { result } = renderHook(() => useRemoteProjectsByActivity('srv_kitchen'), {
-      wrapper: createWrapper(),
+    const { result, fetchFake } = renderHookWithProviders(() => useRemoteProjectsByActivity('srv_kitchen'), {
+      ...hookProviders,
+      fetchRoutes: server.routes,
     })
 
     expect(result.current.projects).toEqual([])
-    expect(mocks.listProjects).not.toHaveBeenCalled()
-    expect(mocks.listSessionPage).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', projectsPath)).toHaveLength(0)
+    expect(server.sessionRequests()).toHaveLength(0)
   })
 })

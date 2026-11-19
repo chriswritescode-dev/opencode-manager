@@ -1,53 +1,60 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { z } from 'zod'
+import { JsonObjectSchema, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 
 type UrlHistoryMode = 'push' | 'replace'
 
 const URL_PARAM_HISTORY_KEY = 'urlParamHistory'
 
-interface UrlParamHistoryState {
-  previousSearch: string
-}
+const previousSearchStateSchema = z.object({ previousSearch: z.string() })
 
 interface UseUrlParamsReturn {
   search: string
   searchParams: URLSearchParams
   updateParams: (updater: (params: URLSearchParams) => void, mode?: UrlHistoryMode) => void
-  /**
-   * Closes params that an opener pushed: goes back in history when the current entry was pushed by
-   * `updateParams`, so closing leaves no duplicate entry, and replaces the entry otherwise so a
-   * deep link cannot send Back out of the app.
-   */
   closePushedParams: (updater: (params: URLSearchParams) => void) => void
 }
 
-function splitSearch(params: URLSearchParams): { search: string; locationSearch: string } {
+interface SplitSearch {
+  search: string
+  locationSearch: string
+}
+
+interface ReplaceNavigateOptions {
+  replace: true
+  state?: JsonValue
+}
+
+function splitSearch(params: URLSearchParams): SplitSearch {
   const search = params.toString()
   return { search, locationSearch: search ? `?${search}` : '' }
 }
 
-function withPreviousSearch(state: unknown, previousSearch: string): Record<string, unknown> {
-  const base = state !== null && typeof state === 'object' ? state : {}
-  return { ...base, [URL_PARAM_HISTORY_KEY]: { previousSearch } satisfies UrlParamHistoryState }
+function withPreviousSearch(state: JsonValue | undefined, previousSearch: string): JsonObject {
+  const parsedBase = JsonObjectSchema.safeParse(state)
+  const history: JsonObject = { previousSearch }
+  const next: JsonObject = parsedBase.success ? { ...parsedBase.data } : {}
+  next[URL_PARAM_HISTORY_KEY] = history
+  return next
 }
 
-function replaceOptions(state: unknown): { replace: true; state?: unknown } {
-  return state == null ? { replace: true } : { replace: true, state }
+function replaceOptions(state: JsonValue | undefined): ReplaceNavigateOptions {
+  return state === null || state === undefined ? { replace: true } : { replace: true, state }
 }
 
-function readPreviousSearch(state: unknown): string | null {
-  if (state === null || typeof state !== 'object') return null
-  const entry = (state as Record<string, unknown>)[URL_PARAM_HISTORY_KEY]
-  if (entry === null || typeof entry !== 'object') return null
-  const previousSearch = (entry as UrlParamHistoryState).previousSearch
-  return typeof previousSearch === 'string' ? previousSearch : null
+function readPreviousSearch(state: JsonValue | undefined): string | null {
+  const stateObject = JsonObjectSchema.safeParse(state)
+  if (!stateObject.success) return null
+  const entry = previousSearchStateSchema.safeParse(stateObject.data[URL_PARAM_HISTORY_KEY])
+  return entry.success ? entry.data.previousSearch : null
 }
 
 export function useUrlParams(): UseUrlParamsReturn {
   const navigate = useNavigate()
   const location = useLocation()
   const searchRef = useRef(location.search)
-  const stateRef = useRef(location.state)
+  const stateRef = useRef<JsonValue>(location.state)
 
   useEffect(() => {
     searchRef.current = location.search

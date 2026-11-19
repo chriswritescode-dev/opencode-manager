@@ -8,8 +8,12 @@ function formatOmittedSize(size: number): string {
     : `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** Returns the last `maxLines` lines of `text` and how many leading lines were dropped. */
-export function tailLines(text: string, maxLines: number): { hiddenCount: number; text: string } {
+export interface ClippedLines {
+  hiddenCount: number
+  text: string
+}
+
+export function tailLines(text: string, maxLines: number): ClippedLines {
   const trimmed = text.endsWith('\n') ? text.slice(0, -1) : text
   if (trimmed === '') return { hiddenCount: 0, text: '' }
   const lines = trimmed.split('\n')

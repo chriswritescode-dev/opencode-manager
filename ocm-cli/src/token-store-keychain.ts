@@ -1,4 +1,5 @@
 import { execFile } from 'child_process'
+import { z } from 'zod'
 import type { TokenStore, TokenStoreDescription } from './token-store.js'
 import { TokenStoreError } from './token-store.js'
 
@@ -15,7 +16,32 @@ export interface SecurityResult {
 
 export type SecurityRunner = (args: string[]) => Promise<SecurityResult>
 
-type ExecFileFailure = Error & { code?: number | string }
+export interface SecurityStdin {
+  on(event: 'error', listener: () => void): void
+  end(command: string): void
+}
+
+export interface SecurityExecChild {
+  stdin?: SecurityStdin | null
+}
+
+export interface SecurityExecError {
+  message: string
+  code?: number | string | null
+}
+
+export interface SecurityExecOptions {
+  encoding: 'utf-8'
+}
+
+export type SecurityExecCallback = (error: SecurityExecError | null, stdout: string, stderr: string) => void
+
+export type SecurityExec = (
+  bin: string,
+  args: string[],
+  options: SecurityExecOptions,
+  callback: SecurityExecCallback,
+) => SecurityExecChild
 
 export function formatSecurityCommand(args: string[]): string {
   const quoted = args.map((arg) => {
@@ -27,21 +53,30 @@ export function formatSecurityCommand(args: string[]): string {
   return `${quoted.join(' ')}\n`
 }
 
-function runSecurity(args: string[]): Promise<SecurityResult> {
-  return new Promise<SecurityResult>((resolve, reject) => {
-    const command = formatSecurityCommand(args)
-    const child = execFile(SECURITY_BIN, ['-i'], { encoding: 'utf-8' }, (err, stdout, stderr) => {
-      const exitCode = (err as ExecFileFailure | null)?.code ?? (err ? null : 0)
-      if (typeof exitCode !== 'number') {
-        reject(new TokenStoreError(`cannot run the macOS 'security' CLI: ${(err as Error).message}`, 'keychain'))
-        return
-      }
-      resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code: exitCode })
-    })
-    child.stdin?.on('error', () => undefined)
-    child.stdin?.end(command)
-  })
+function runExecFile(bin: string, args: string[], options: SecurityExecOptions, callback: SecurityExecCallback): SecurityExecChild {
+  return execFile(bin, args, options, callback)
 }
+
+export function createSecurityRunner(exec: SecurityExec = runExecFile): SecurityRunner {
+  return (args: string[]): Promise<SecurityResult> => {
+    return new Promise<SecurityResult>((resolve, reject) => {
+      const command = formatSecurityCommand(args)
+      const child = exec(SECURITY_BIN, ['-i'], { encoding: 'utf-8' }, (err, stdout, stderr) => {
+        const exitCode = err?.code ?? (err ? null : 0)
+        const code = z.number().safeParse(exitCode)
+        if (!code.success) {
+          reject(new TokenStoreError(`cannot run the macOS 'security' CLI: ${err?.message ?? 'unknown error'}`, 'keychain'))
+          return
+        }
+        resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code: code.data })
+      })
+      child.stdin?.on('error', () => undefined)
+      child.stdin?.end(command)
+    })
+  }
+}
+
+const runSecurity = createSecurityRunner()
 
 function describeFailure(res: SecurityResult): string {
   const stderr = res.stderr.trim()

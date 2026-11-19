@@ -2,15 +2,18 @@ import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vites
 import { Hono } from 'hono'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { createChatTerminalRoutes, createChatTerminalSocketRoutes } from '../../src/routes/chat-terminals'
-import { TerminalNotFoundError } from '../../src/services/terminal'
-import type { TerminalService } from '../../src/services/terminal'
-import type { ChatService } from '../../src/services/chats'
+import { TerminalNotFoundError, TerminalService } from '../../src/services/terminal'
+import { ChatService } from '../../src/services/chats'
+import type { WebSocketBridge } from '../../src/utils/websocket-bridge'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
 
 const CHAT_ID = '20260304-050607-abcdef'
 const UNKNOWN_CHAT_ID = '20260304-050607-aaaaaa'
 const chatDirectory = '/tmp/chat'
+const STUB_BASE_URL = 'http://127.0.0.1:5551'
 const TRUSTED_ORIGIN = 'http://localhost:5003'
 
 const chat = {
@@ -28,24 +31,41 @@ const shellTerminal = {
   status: 'running',
 } as const
 
-function createChatService(overrides: { resolve?: ReturnType<typeof vi.fn> } = {}): ChatService {
-  return {
-    resolve:
-      overrides.resolve ??
-      vi.fn(async (chatId: string) => (chatId === CHAT_ID ? chat : null)),
-  } as unknown as ChatService
+const bridge: WebSocketBridge = { send: () => undefined, close: () => undefined }
+
+type ChatServiceMethods = Pick<ChatService, 'resolve'>
+type TerminalServiceMethods = Pick<
+  TerminalService,
+  'list' | 'create' | 'requireTerminal' | 'resize' | 'remove' | 'connect'
+>
+
+function createChatService(): ChatService {
+  const service = new ChatService(createStubOpenCodeClient(), { removeAll: async () => undefined }, () => chatDirectory)
+  Object.assign(service, {
+    resolve: vi.fn<ChatService['resolve']>(async (chatId) => (chatId === CHAT_ID ? chat : null)),
+  } satisfies ChatServiceMethods)
+  return service
 }
 
-function createService(overrides: Partial<TerminalService> = {}): TerminalService {
+function createTerminalMethods(): TerminalServiceMethods {
   return {
-    list: vi.fn(async () => []),
-    create: vi.fn(async () => shellTerminal),
-    requireTerminal: vi.fn(async () => shellTerminal),
-    resize: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined),
-    removeAll: vi.fn(async () => undefined),
-    ...overrides,
-  } as unknown as TerminalService
+    list: vi.fn<TerminalService['list']>(async () => []),
+    create: vi.fn<TerminalService['create']>(async () => shellTerminal),
+    requireTerminal: vi.fn<TerminalService['requireTerminal']>(async () => shellTerminal),
+    resize: vi.fn<TerminalService['resize']>(async () => undefined),
+    remove: vi.fn<TerminalService['remove']>(async () => undefined),
+    connect: vi.fn<TerminalService['connect']>(async () => bridge),
+  }
+}
+
+function createService(overrides: Partial<TerminalServiceMethods> = {}): TerminalService {
+  const service = new TerminalService(
+    { client: createStubOpenCodeClient(), baseUrl: () => STUB_BASE_URL, includeLocalEnv: false },
+    { getGhCliEnv: () => ({}) },
+    createStubRepoEnvService(),
+  )
+  Object.assign(service, createTerminalMethods(), overrides)
+  return service
 }
 
 function createApp(chatService: ChatService, service: TerminalService): Hono {
@@ -241,8 +261,7 @@ describe('Chat Terminal Routes', () => {
 })
 
 describe('Chat Terminal Socket Route', () => {
-  const connect = vi.fn(async () => ({ send: vi.fn(), close: vi.fn() }))
-  const resolve = vi.fn(async (chatId: string) => (chatId === CHAT_ID ? chat : null))
+  const connect = vi.fn<TerminalService['connect']>(async () => bridge)
 
   let server: WebSocketTestServer
   let binding: ReturnType<typeof createNodeWebSocket>
@@ -254,8 +273,8 @@ describe('Chat Terminal Socket Route', () => {
     app.route(
       '/',
       createChatTerminalSocketRoutes(
-        { resolve } as unknown as ChatService,
-        { connect } as unknown as TerminalService,
+        createChatService(),
+        createService({ connect }),
         binding.upgradeWebSocket,
         [TRUSTED_ORIGIN],
       ),
@@ -271,7 +290,6 @@ describe('Chat Terminal Socket Route', () => {
 
   beforeEach(() => {
     connect.mockClear()
-    resolve.mockClear()
   })
 
   function connectPath(chatId = CHAT_ID, query = ''): string {

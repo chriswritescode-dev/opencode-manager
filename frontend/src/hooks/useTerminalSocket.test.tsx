@@ -1,50 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useTerminalSocket } from './useTerminalSocket'
-
-class FakeWebSocket {
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
-  static instances: FakeWebSocket[] = []
-
-  url: string
-  binaryType = 'blob'
-  readyState = FakeWebSocket.CONNECTING
-  sent: string[] = []
-  onopen: ((event: Event) => void) | null = null
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onclose: ((event: CloseEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
-
-  constructor(url: string) {
-    this.url = url
-    FakeWebSocket.instances.push(this)
-  }
-
-  send(data: string) {
-    this.sent.push(data)
-  }
-
-  close() {
-    this.readyState = FakeWebSocket.CLOSED
-  }
-
-  open() {
-    this.readyState = FakeWebSocket.OPEN
-    this.onopen?.(new Event('open'))
-  }
-
-  message(data: string | ArrayBuffer) {
-    this.onmessage?.({ data } as MessageEvent)
-  }
-
-  serverClose(code: number) {
-    this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.({ code } as CloseEvent)
-  }
-}
+import { installWebSocket, type WebSocketFake } from '@/test/browserFakes'
 
 function metaFrame(cursor: number): ArrayBuffer {
   const payload = new TextEncoder().encode(JSON.stringify({ cursor }))
@@ -69,34 +26,40 @@ function renderSocket(overrides: Partial<Parameters<typeof useTerminalSocket>[0]
 }
 
 describe('useTerminalSocket', () => {
+  let sockets: WebSocketFake
+
+  function connection(index: number) {
+    const socket = sockets.instances[index]
+    if (!socket) throw new Error(`no websocket at index ${index}`)
+    return socket
+  }
+
   beforeEach(() => {
-    FakeWebSocket.instances = []
-    vi.stubGlobal('WebSocket', FakeWebSocket)
+    sockets = installWebSocket()
     vi.useFakeTimers()
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
   })
 
   it('includes the directory in the connection url', () => {
     renderSocket()
-    const url = new URL(FakeWebSocket.instances[0].url)
+    const url = new URL(connection(0).url)
     expect(url.pathname).toBe('/api/repos/1/terminals/pty-1/connect')
     expect(url.searchParams.get('directory')).toBe('/work/repo')
   })
 
   it('builds the connection url for a linked server target', () => {
     renderSocket({ target: { kind: 'server', serverId: 'srv_kitchen' } })
-    const url = new URL(FakeWebSocket.instances[0].url)
+    const url = new URL(connection(0).url)
     expect(url.pathname).toBe('/api/opencode-servers/srv_kitchen/terminals/pty-1/connect')
     expect(url.searchParams.get('directory')).toBe('/work/repo')
   })
 
   it('accumulates the cursor and sends it when reconnecting after 1006', () => {
     renderSocket()
-    const first = FakeWebSocket.instances[0]
+    const first = connection(0)
 
     act(() => {
       first.open()
@@ -108,13 +71,13 @@ describe('useTerminalSocket', () => {
       first.serverClose(1006)
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sockets.instances).toHaveLength(1)
     act(() => {
       vi.advanceTimersByTime(1000)
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(2)
-    const second = new URL(FakeWebSocket.instances[1].url)
+    expect(sockets.instances).toHaveLength(2)
+    const second = new URL(connection(1).url)
     expect(second.searchParams.get('cursor')).toBe('8')
     expect(second.searchParams.get('directory')).toBe('/work/repo')
   })
@@ -124,14 +87,14 @@ describe('useTerminalSocket', () => {
     renderSocket({ onExit })
 
     act(() => {
-      FakeWebSocket.instances[0].serverClose(4404)
+      connection(0).serverClose(4404)
     })
     act(() => {
       vi.advanceTimersByTime(60000)
     })
 
     expect(onExit).toHaveBeenCalledTimes(1)
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(sockets.instances).toHaveLength(1)
   })
 
   it('exhausts the retry budget when upstream connections keep failing after open', () => {
@@ -139,7 +102,7 @@ describe('useTerminalSocket', () => {
     const delays = [1000, 2000, 5000, 5000, 5000]
 
     for (const delay of delays) {
-      const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+      const socket = connection(sockets.instances.length - 1)
       act(() => {
         socket.open()
         socket.serverClose(1011)
@@ -150,49 +113,49 @@ describe('useTerminalSocket', () => {
       })
     }
 
-    const finalSocket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
+    const finalSocket = connection(sockets.instances.length - 1)
     act(() => {
       finalSocket.open()
       finalSocket.serverClose(1011)
     })
 
     expect(result.current.status).toBe('closed')
-    expect(FakeWebSocket.instances).toHaveLength(6)
+    expect(sockets.instances).toHaveLength(6)
 
     act(() => {
       vi.advanceTimersByTime(60000)
     })
-    expect(FakeWebSocket.instances).toHaveLength(6)
+    expect(sockets.instances).toHaveLength(6)
   })
 
   it('resets the retry budget only after a healthy upstream session', () => {
     const { result } = renderSocket()
 
     act(() => {
-      FakeWebSocket.instances[0].open()
-      FakeWebSocket.instances[0].message(metaFrame(0))
-      FakeWebSocket.instances[0].serverClose(1011)
+      connection(0).open()
+      connection(0).message(metaFrame(0))
+      connection(0).serverClose(1011)
     })
     act(() => {
       vi.advanceTimersByTime(1000)
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(sockets.instances).toHaveLength(2)
     act(() => {
-      FakeWebSocket.instances[1].open()
-      FakeWebSocket.instances[1].serverClose(1011)
+      connection(1).open()
+      connection(1).serverClose(1011)
     })
     expect(result.current.status).toBe('reconnecting')
     act(() => {
       vi.advanceTimersByTime(2000)
     })
 
-    expect(FakeWebSocket.instances).toHaveLength(3)
+    expect(sockets.instances).toHaveLength(3)
   })
 
   it('forwards send to the open socket', () => {
     const { result } = renderSocket()
-    const socket = FakeWebSocket.instances[0]
+    const socket = connection(0)
 
     act(() => {
       socket.open()
@@ -206,6 +169,6 @@ describe('useTerminalSocket', () => {
 
   it('does not connect when disabled', () => {
     renderSocket({ enabled: false })
-    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(sockets.instances).toHaveLength(0)
   })
 })

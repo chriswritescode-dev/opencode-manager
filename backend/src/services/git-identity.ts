@@ -21,12 +21,6 @@ interface GitConfigValue {
   value: string
 }
 
-interface ExecuteCommandResult {
-  exitCode: number
-  stdout: string
-  stderr: string
-}
-
 let managerConfigWriteChain: Promise<unknown> = Promise.resolve()
 
 function serializeManagerConfigWrite<T>(run: () => Promise<T>): Promise<T> {
@@ -37,12 +31,6 @@ function serializeManagerConfigWrite<T>(run: () => Promise<T>): Promise<T> {
 
 export function getManagerGitConfigPath(): string {
   return path.join(getOpenCodeConfigHome(), 'git', 'config')
-}
-
-function gitConfigResult(result: string | ExecuteCommandResult): ExecuteCommandResult {
-  if (typeof result === 'string') return { exitCode: 0, stdout: result, stderr: '' }
-  if (result !== null && typeof result === 'object' && typeof result.exitCode === 'number') return result
-  return { exitCode: 1, stdout: '', stderr: '' }
 }
 
 function parseGitConfigValue(output: string): GitConfigValue | null {
@@ -70,10 +58,10 @@ function isRepositoryScope(scope: string): boolean {
 }
 
 async function readGitConfigValue(directory: string, key: string): Promise<GitConfigValue | null> {
-  const result = gitConfigResult(await executeCommand(
+  const result = await executeCommand(
     ['git', '-C', directory, 'config', '--show-scope', '--show-origin', '--get', key],
     { ignoreExitCode: true, silent: true, env: { XDG_CONFIG_HOME: getOpenCodeConfigHome() } },
-  ))
+  )
   if (result.exitCode !== 0) return null
   return parseGitConfigValue(result.stdout)
 }
@@ -84,20 +72,20 @@ async function writeManagerConfigValue(key: string, value: string): Promise<void
 
 async function unsetManagerConfigValue(key: string): Promise<void> {
   if (!existsSync(getManagerGitConfigPath())) return
-  const result = gitConfigResult(await executeCommand(
+  const result = await executeCommand(
     ['git', 'config', '--file', getManagerGitConfigPath(), '--unset', key],
     { ignoreExitCode: true, silent: true },
-  ))
+  )
   if (result.exitCode !== 0 && result.exitCode !== 5) {
     throw new Error(`git config --unset ${key} failed with code ${result.exitCode}: ${result.stderr}`)
   }
 }
 
 async function unsetLocalConfigValue(repoPath: string, key: string): Promise<void> {
-  const result = gitConfigResult(await executeCommand(
+  const result = await executeCommand(
     ['git', '-C', repoPath, 'config', '--local', '--unset', key],
     { ignoreExitCode: true, silent: true },
-  ))
+  )
   if (result.exitCode !== 0 && result.exitCode !== 5) {
     throw new Error(`git config --local --unset ${key} failed with code ${result.exitCode}: ${result.stderr}`)
   }
@@ -109,12 +97,6 @@ function findPresetId(database: Database, name: string | null, email: string | n
   return identities.find((identity) => identity.name === name && identity.email === email)?.id ?? null
 }
 
-/**
- * Resolves the Manager default identity and mirrors it into the Manager-owned
- * global git config file so every Manager git command and the OpenCode process
- * resolve the same default. Writes are serialized to avoid git's config lock,
- * and failures are reported rather than thrown so callers can stay best-effort.
- */
 export async function syncManagerGitIdentityConfig(database: Database): Promise<SyncManagerGitIdentityResult> {
   let identity: GitIdentity | null = null
   try {
@@ -149,12 +131,6 @@ export async function syncManagerGitIdentityConfig(database: Database): Promise<
   }
 }
 
-/**
- * Resolves the effective commit identity for a directory using git itself, so a
- * repository-local identity set by the user is respected. Classifies where the
- * values come from and surfaces the matching saved preset when the values are
- * repository-scoped.
- */
 export async function getEffectiveGitIdentity(directory: string, database: Database): Promise<RepoGitIdentity> {
   const [nameValue, emailValue] = await Promise.all([
     readGitConfigValue(directory, 'user.name'),

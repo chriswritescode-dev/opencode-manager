@@ -1,20 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ManagerLogEntry, ManagerLogsResponse } from '@opencode-manager/shared/schemas'
 import { LogsViewer } from './LogsViewer'
-import { useManagerLogs } from '@/hooks/useManagerLogs'
-import { useServerHealth, type HealthResponse } from '@/hooks/useServerHealth'
-import type { ManagerLogEntry } from '@opencode-manager/shared/schemas'
-
-vi.mock('@/hooks/useManagerLogs')
-vi.mock('@/hooks/useServerHealth', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useServerHealth')>()),
-  useServerHealth: vi.fn(),
-}))
-
-function mockHealth(health: Partial<HealthResponse> | undefined) {
-  vi.mocked(useServerHealth).mockReturnValue({ data: health } as ReturnType<typeof useServerHealth>)
-}
+import { renderWithProviders } from '@/test/render'
+import { makeHealthResponse } from '@/test/fixtures/api'
+import type { HealthResponse } from '@/hooks/useServerHealth'
+import type { FetchRoute } from '@/test/fetchFake'
 
 const entries: ManagerLogEntry[] = [
   {
@@ -33,68 +25,92 @@ const entries: ManagerLogEntry[] = [
   },
 ]
 
-function mockLogs(overrides: Partial<ReturnType<typeof useManagerLogs>> = {}) {
-  vi.mocked(useManagerLogs).mockReturnValue({
-    entries,
-    dropped: 0,
-    isLoading: false,
-    error: null,
-    clear: vi.fn(),
-    ...overrides,
-  } as ReturnType<typeof useManagerLogs>)
+interface LogsServerOptions {
+  entries?: ManagerLogEntry[]
+  dropped?: number
+  health?: Partial<HealthResponse>
+}
+
+function logsResponse(options: LogsServerOptions): ManagerLogsResponse {
+  const captured = options.entries ?? entries
+  return {
+    entries: captured,
+    instanceId: 'instance-1',
+    latestSeq: captured.at(-1)?.seq ?? 0,
+    oldestSeq: captured[0]?.seq ?? 0,
+    dropped: options.dropped ?? 0,
+    capacity: 1000,
+  }
+}
+
+async function renderLogs(options: LogsServerOptions = {}) {
+  const fetchRoutes: FetchRoute[] = [
+    { method: 'GET', path: '/api/logs', respond: () => ({ json: logsResponse(options) }) },
+    {
+      method: 'GET',
+      path: '/api/health',
+      respond: () => ({ json: makeHealthResponse(options.health) }),
+    },
+  ]
+  const result = renderWithProviders(<LogsViewer />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
+  })
+  await screen.findByLabelText('Log level filter')
+  return result
 }
 
 describe('LogsViewer', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockLogs()
-    mockHealth({ opencode: 'healthy', status: 'healthy' })
-  })
+  it('does not render a server issue panel while OpenCode is healthy', async () => {
+    await renderLogs({ health: { opencode: 'healthy', status: 'healthy' } })
 
-  it('does not render a server issue panel while OpenCode is healthy', () => {
-    render(<LogsViewer />)
-
+    expect(await screen.findByText('Server started on port 5003')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('renders the startup failure, attempted recovery and an errors-only shortcut', async () => {
     const user = userEvent.setup()
-    mockHealth({
-      opencode: 'unhealthy',
-      status: 'unhealthy',
-      opencodeLifecycle: {
-        state: 'failed',
-        healthy: false,
-        port: 5551,
-        version: null,
-        minVersion: '2.0.15',
-        versionSupported: false,
-        lastError: 'OpenCode server exited with code 1: invalid config',
-        activeRecoveryAction: null,
-        attemptedRecoveryActions: ['restart', 'rollback_last_known_good'],
-        nextRecoveryAction: null,
-        failureCount: 3,
-        watching: true,
-        updatedAt: '2026-01-01T00:00:00.000Z',
+    const { fetchFake } = await renderLogs({
+      health: {
+        opencode: 'unhealthy',
+        status: 'unhealthy',
+        opencodeLifecycle: {
+          state: 'failed',
+          healthy: false,
+          port: 5551,
+          version: null,
+          minVersion: '2.0.15',
+          versionSupported: false,
+          lastError: 'OpenCode server exited with code 1: invalid config',
+          activeRecoveryAction: null,
+          attemptedRecoveryActions: ['restart', 'rollback_last_known_good'],
+          nextRecoveryAction: null,
+          failureCount: 3,
+          watching: true,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
       },
     })
-    render(<LogsViewer />)
 
-    const alert = screen.getByRole('alert')
+    const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('OpenCode server failed')
     expect(alert).toHaveTextContent('OpenCode server exited with code 1: invalid config')
     expect(alert).toHaveTextContent('Recovery attempted: restart, rollback last known good')
 
     await user.click(screen.getByRole('button', { name: 'Show errors only' }))
 
-    expect(vi.mocked(useManagerLogs).mock.lastCall?.[0]).toMatchObject({ level: 'error', source: undefined })
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('GET', '/api/logs')?.searchParams.get('level')).toBe('error'),
+    )
     expect(screen.queryByRole('button', { name: 'Show errors only' })).not.toBeInTheDocument()
   })
 
-  it('renders entries with their message, level and source', () => {
-    render(<LogsViewer />)
+  it('renders entries with their message, level and source', async () => {
+    await renderLogs()
 
-    expect(screen.getByText('Server started on port 5003')).toBeInTheDocument()
+    expect(await screen.findByText('Server started on port 5003')).toBeInTheDocument()
     expect(screen.getByText('Connection refused while dialing upstream')).toBeInTheDocument()
     expect(screen.getAllByText(/^(info|error)$/i)).toHaveLength(2)
     expect(screen.getByText('Manager')).toBeInTheDocument()
@@ -103,7 +119,8 @@ describe('LogsViewer', () => {
 
   it('hides rows that do not match the search text', async () => {
     const user = userEvent.setup()
-    render(<LogsViewer />)
+    await renderLogs()
+    await screen.findByText('Server started on port 5003')
 
     await user.type(screen.getByLabelText('Search log messages'), 'refused')
 
@@ -111,38 +128,37 @@ describe('LogsViewer', () => {
     expect(screen.getByText('Connection refused while dialing upstream')).toBeInTheDocument()
   })
 
-  it('re-invokes the hook paused and switches the button to Resume', async () => {
+  it('pauses live capture and switches the button to Resume', async () => {
     const user = userEvent.setup()
-    render(<LogsViewer />)
+    await renderLogs()
+    await screen.findByText('Server started on port 5003')
 
     await user.click(screen.getByRole('button', { name: /pause/i }))
 
-    expect(vi.mocked(useManagerLogs).mock.lastCall?.[0]).toMatchObject({ paused: true })
     expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument()
+    expect(screen.getByText('Connection refused while dialing upstream')).toBeInTheDocument()
   })
 
-  it('clears the displayed entries through the hook', async () => {
+  it('clears the displayed entries', async () => {
     const user = userEvent.setup()
-    const clear = vi.fn()
-    mockLogs({ clear })
-    render(<LogsViewer />)
+    await renderLogs()
+    await screen.findByText('Server started on port 5003')
 
     await user.click(screen.getByRole('button', { name: /clear/i }))
 
-    expect(clear).toHaveBeenCalled()
-  })
-
-  it('renders the empty-state copy when no entries are captured', () => {
-    mockLogs({ entries: [] })
-    render(<LogsViewer />)
-
     expect(screen.getByText('No log entries captured yet.')).toBeInTheDocument()
+    expect(screen.queryByText('Server started on port 5003')).not.toBeInTheDocument()
   })
 
-  it('renders the dropped-entries note when entries were dropped', () => {
-    mockLogs({ dropped: 3 })
-    render(<LogsViewer />)
+  it('renders the empty-state copy when no entries are captured', async () => {
+    await renderLogs({ entries: [] })
 
-    expect(screen.getByText(/3 earlier entries dropped \(buffer holds \d+\)/)).toBeInTheDocument()
+    expect(await screen.findByText('No log entries captured yet.')).toBeInTheDocument()
+  })
+
+  it('renders the dropped-entries note when entries were dropped', async () => {
+    await renderLogs({ dropped: 3 })
+
+    expect(await screen.findByText(/3 earlier entries dropped \(buffer holds \d+\)/)).toBeInTheDocument()
   })
 })

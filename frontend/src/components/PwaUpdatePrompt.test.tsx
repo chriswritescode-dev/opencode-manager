@@ -1,52 +1,61 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { PwaUpdatePrompt } from './PwaUpdatePrompt'
 
-const mocks = vi.hoisted(() => ({
-  onServiceWorkerUpdate: vi.fn(),
-  offServiceWorkerUpdate: vi.fn(),
-}))
+const originalLocation = window.location
 
-vi.mock('@/lib/serviceWorker', () => ({
-  onServiceWorkerUpdate: mocks.onServiceWorkerUpdate,
-  offServiceWorkerUpdate: mocks.offServiceWorkerUpdate,
-}))
+function installUpdateSignal() {
+  let listener: (() => void) | null = null
+  const unsubscribe = vi.fn()
+  const props = {
+    subscribeToUpdate: (callback: () => void) => {
+      listener = callback
+    },
+    unsubscribeFromUpdate: unsubscribe,
+  }
+  return {
+    ...props,
+    unsubscribe,
+    signalUpdate: () => {
+      if (!listener) throw new Error('update listener was not registered')
+      act(() => listener?.())
+    },
+  }
+}
 
-function triggerUpdate() {
-  const callback = mocks.onServiceWorkerUpdate.mock.calls[0]?.[0]
-  if (typeof callback !== 'function') throw new Error('update callback was not registered')
-  act(() => callback())
+function installReloadSpy() {
+  const reload = vi.fn()
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    writable: true,
+    value: { ...originalLocation, reload },
+  })
+  return reload
 }
 
 describe('PwaUpdatePrompt', () => {
-  let reloadMock: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    mocks.onServiceWorkerUpdate.mockReset()
-    mocks.offServiceWorkerUpdate.mockReset()
-    reloadMock = vi.fn()
+  afterEach(() => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       writable: true,
-      value: { ...window.location, reload: reloadMock },
+      value: originalLocation,
     })
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it('renders nothing until an update is signalled', () => {
-    const { container } = render(<PwaUpdatePrompt />)
+    const signal = installUpdateSignal()
+    const { container } = render(<PwaUpdatePrompt {...signal} />)
 
     expect(container).toBeEmptyDOMElement()
     expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('shows a status bar with a Reload button when an update is signalled', () => {
-    render(<PwaUpdatePrompt />)
+    const signal = installUpdateSignal()
+    render(<PwaUpdatePrompt {...signal} />)
 
-    triggerUpdate()
+    signal.signalUpdate()
 
     expect(screen.getByRole('status')).toHaveTextContent(
       'A new version of OpenCode Manager is available.',
@@ -54,20 +63,24 @@ describe('PwaUpdatePrompt', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
   })
 
-  it('reloads the page when Reload is clicked', () => {
-    render(<PwaUpdatePrompt />)
+  it('reloads the page when Reload is clicked', async () => {
+    const reload = installReloadSpy()
+    const user = userEvent.setup()
+    const signal = installUpdateSignal()
+    render(<PwaUpdatePrompt {...signal} />)
 
-    triggerUpdate()
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    signal.signalUpdate()
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
 
-    expect(reloadMock).toHaveBeenCalledTimes(1)
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('unsubscribes from updates on unmount', () => {
-    const { unmount } = render(<PwaUpdatePrompt />)
+  it('stops listening for updates on unmount', () => {
+    const signal = installUpdateSignal()
+    const { unmount } = render(<PwaUpdatePrompt {...signal} />)
 
     unmount()
 
-    expect(mocks.offServiceWorkerUpdate).toHaveBeenCalledTimes(1)
+    expect(signal.unsubscribe).toHaveBeenCalledTimes(1)
   })
 })

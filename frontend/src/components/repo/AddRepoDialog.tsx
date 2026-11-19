@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
+import { z } from 'zod'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { listRepos, createRepo, discoverRepos } from '@/api/repos'
 import { Button } from '@/components/ui/button'
@@ -13,13 +14,17 @@ import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
 
+const repoTypeSchema = z.enum(['remote', 'local', 'folder'])
+
+type RepoType = z.infer<typeof repoTypeSchema>
+
 interface AddRepoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
-  const [repoType, setRepoType] = useState<'remote' | 'local' | 'folder'>('remote')
+  const [repoType, setRepoType] = useState<RepoType>('remote')
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
   const [folderPath, setFolderPath] = useState('')
@@ -167,7 +172,10 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         <form onSubmit={handleSubmit} className="space-y-4 px-4 sm:px-6">
           <div className="space-y-2">
             <label className="text-sm text-muted-foreground">Repository Type</label>
-            <Tabs value={repoType} onValueChange={(value) => setRepoType(value as 'remote' | 'local' | 'folder')}>
+            <Tabs value={repoType} onValueChange={(value) => {
+              const parsed = repoTypeSchema.safeParse(value)
+              if (parsed.success) setRepoType(parsed.data)
+            }}>
               <TabsList className="grid w-full grid-cols-3 bg-muted">
                 <TabsTrigger value="remote">Remote</TabsTrigger>
                 <TabsTrigger value="local">Local</TabsTrigger>

@@ -1,220 +1,80 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ScheduleJobDialog } from './ScheduleJobDialog'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { renderScheduleJobDialog, makeScheduleJobFixture } from '@/test/scheduleJobDialog'
+import { makeAgent } from '@/test/promptInput'
 
-// jsdom does not implement scrollIntoView
-Element.prototype.scrollIntoView = vi.fn()
-
-const mocks = vi.hoisted(() => ({
-  templates: [] as Array<{ id: number; title: string; description: string; category: string; cadenceHint: string; suggestedName: string; suggestedDescription: string; prompt: string }>,
-  useDeletePromptTemplateMutate: vi.fn(),
-  useAgents: vi.fn((..._args: unknown[]) => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/usePromptTemplates', () => ({
-  usePromptTemplates: () => ({ data: mocks.templates, isLoading: false }),
-  useCreatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdatePromptTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeletePromptTemplate: () => ({ mutate: mocks.useDeletePromptTemplateMutate, isPending: false }),
-}))
-
-vi.mock('@/api/providers', () => ({
-  getProviders: () => Promise.resolve({ providers: [], models: [] }),
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useAgents: mocks.useAgents,
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    listManagedSkills: () => Promise.resolve([]),
-  },
-}))
-
-vi.mock('@/api/repos', () => ({
-  listRepos: () => Promise.resolve([]),
-  listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
-  getRepo: () => Promise.reject(new Error('not used')),
-  getAssistantModeStatus: () => Promise.resolve({ directory: '/workspace/repos/assistant' }),
-  initializeAssistantMode: () => Promise.resolve(),
-}))
-
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
-}
+const assistantAgents = { '/workspace/repos/assistant': [makeAgent({ id: 'build', name: 'Build', mode: 'primary' })] }
 
 describe('ScheduleJobDialog — assistant create guard', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('renders Assistant as the first repository option', async () => {
-    const onRepoChange = vi.fn()
-    const onSubmit = vi.fn()
-    const onOpenChange = vi.fn()
     const user = userEvent.setup()
+    await renderScheduleJobDialog({ showRepoSelector: true })
 
-    render(
-      <ScheduleJobDialog
-        open
-        onOpenChange={onOpenChange}
-        showRepoSelector
-        repoId={undefined}
-        onRepoChange={onRepoChange}
-        onSubmit={onSubmit}
-        isSaving={false}
-      />,
-      { wrapper: createWrapper() },
-    )
+    await user.click(screen.getByPlaceholderText('Select a repository'))
 
-    // Open the repo combobox by clicking the chevron/input
-    const repoInput = screen.getByPlaceholderText('Select a repository')
-    await user.click(repoInput)
-
-    // The dropdown should open and show "Assistant" as an option
-    await waitFor(() => {
-      expect(screen.getByText('Assistant')).toBeInTheDocument()
-    })
-    // Assistant description should also be visible
+    expect(await screen.findByText('Assistant')).toBeInTheDocument()
     expect(screen.getByText('Built-in assistant')).toBeInTheDocument()
   })
 
   it('disables submit when no repo is selected, enables when Assistant repo is selected', async () => {
-    const onRepoChange = vi.fn()
-    const onSubmit = vi.fn()
     const user = userEvent.setup()
+    const dialog = await renderScheduleJobDialog({ showRepoSelector: true })
 
-    const { rerender } = render(
-      <ScheduleJobDialog
-        open
-        onOpenChange={vi.fn()}
-        showRepoSelector
-        repoId={undefined}
-        onRepoChange={onRepoChange}
-        onSubmit={onSubmit}
-        isSaving={false}
-      />,
-      { wrapper: createWrapper() },
-    )
+    await waitFor(() => expect(screen.getByRole('button', { name: /Create schedule/i })).toBeDisabled())
 
-    // Wait for queries to settle
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Create schedule/i })).toBeDisabled()
-    })
+    await user.type(screen.getByLabelText('Name'), 'Test Assistant Job')
+    await user.click(screen.getByRole('tab', { name: 'Prompt' }))
+    await user.type(screen.getByRole('textbox', { name: 'Prompt' }), 'Run a test analysis')
 
-    // Fill in required name field
-    const nameInput = screen.getByLabelText('Name')
-    await user.type(nameInput, 'Test Assistant Job')
+    expect(screen.getByRole('button', { name: /Create schedule/i })).toBeDisabled()
 
-    // Switch to Prompt tab to fill prompt
-    const promptTab = screen.getByRole('tab', { name: 'Prompt' })
-    await user.click(promptTab)
+    await dialog.rerenderWith({ repoId: ASSISTANT_REPO_ID })
 
-    // Fill in required prompt field
-    const promptInput = screen.getByRole('textbox', { name: 'Prompt' })
-    await user.type(promptInput, 'Run a test analysis')
-
-    // Submit button should still be disabled (repoId is undefined)
-    const submitButton = screen.getByRole('button', { name: /Create schedule/i })
-    expect(submitButton).toBeDisabled()
-
-    // Re-render with repoId={0} (Assistant selected) — name and prompt state persists
-    rerender(
-      <ScheduleJobDialog
-        open
-        onOpenChange={vi.fn()}
-        showRepoSelector
-        repoId={0}
-        onRepoChange={onRepoChange}
-        onSubmit={onSubmit}
-        isSaving={false}
-      />,
-    )
-
-    // Submit button should now be enabled
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Create schedule/i })).not.toBeDisabled()
-    })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Create schedule/i })).not.toBeDisabled())
   })
 
   it('lists agents from the selected repo directory instead of the default workspace', async () => {
-    render(
-      <ScheduleJobDialog
-        open
-        onOpenChange={vi.fn()}
-        showRepoSelector
-        repoId={0}
-        onRepoChange={vi.fn()}
-        onSubmit={vi.fn()}
-        isSaving={false}
-      />,
-      { wrapper: createWrapper() },
-    )
-
-    expect(mocks.useAgents).not.toHaveBeenCalledWith(undefined, { enabled: true })
-    await waitFor(() => {
-      expect(mocks.useAgents).toHaveBeenLastCalledWith('/workspace/repos/assistant', { enabled: true })
+    const dialog = await renderScheduleJobDialog({
+      showRepoSelector: true,
+      repoId: ASSISTANT_REPO_ID,
+      agents: assistantAgents,
     })
+
+    await waitFor(() => {
+      expect(dialog.fetchFake.lastRequest('GET', '/api/opencode/api/agent')?.searchParams.get('location[directory]')).toBe(
+        '/workspace/repos/assistant',
+      )
+    })
+    expect(dialog.fetchFake.findRequests('GET', '/api/opencode/api/agent')[0]?.searchParams.get('location[directory]')).toBe(
+      '/workspace/repos/assistant',
+    )
   })
 
   it.each([
     { storedAgent: 'assistant', savedAgent: undefined },
     { storedAgent: 'build', savedAgent: 'build' },
   ])('saves agent $savedAgent when the stored agent is $storedAgent', async ({ storedAgent, savedAgent }) => {
-    mocks.useAgents.mockImplementation((...args: unknown[]) => (
-      args[0] ? { data: [{ id: 'build', name: 'Build', mode: 'primary' }], isSuccess: true } : { data: [] }
-    ) as never)
     const user = userEvent.setup()
-    const onSubmit = vi.fn()
-
-    render(
-      <ScheduleJobDialog
-        open
-        onOpenChange={vi.fn()}
-        job={{
-          id: 1,
-          repoId: 0,
-          name: 'Assistant job',
-          description: null,
-          enabled: true,
-          scheduleMode: 'interval',
-          intervalMinutes: 60,
-          cronExpression: null,
-          timezone: null,
-          agentSlug: storedAgent,
-          prompt: 'Run a test analysis',
-          model: null,
-          skillMetadata: null,
-          permissionConfig: null,
-          branch: null,
-          createdAt: 1,
-          updatedAt: 1,
-          lastRunAt: null,
-          nextRunAt: null,
-        }}
-        repoId={0}
-        onSubmit={onSubmit}
-        isSaving={false}
-      />,
-      { wrapper: createWrapper() },
-    )
+    const dialog = await renderScheduleJobDialog({
+      job: makeScheduleJobFixture({
+        repoId: ASSISTANT_REPO_ID,
+        name: 'Assistant job',
+        agentSlug: storedAgent,
+        prompt: 'Run a test analysis',
+      }),
+      agents: assistantAgents,
+    })
 
     await waitFor(() => {
-      expect(mocks.useAgents).toHaveBeenLastCalledWith('/workspace/repos/assistant', { enabled: true })
+      expect(dialog.fetchFake.lastRequest('GET', '/api/opencode/api/agent')?.searchParams.get('location[directory]')).toBe(
+        '/workspace/repos/assistant',
+      )
     })
+
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ agentSlug: savedAgent }))
+    expect(dialog.onSubmit.mock.calls[0][0].agentSlug).toBe(savedAgent)
   })
 })

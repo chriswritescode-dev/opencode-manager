@@ -1,22 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import type { OpenCodeLifecycleStatus, OpenCodeRecoveryAction } from '@opencode-manager/shared/opencode'
+import type { OpenCodeRecoveryAction } from '@opencode-manager/shared/opencode'
+import { healthResponseSchema, type HealthResponse } from '@opencode-manager/shared/schemas'
 import { fetchWrapper } from '@/api/fetchWrapper'
 
-export interface HealthResponse {
-  status: 'healthy' | 'degraded' | 'unhealthy'
-  timestamp: string
-  database: 'connected' | 'disconnected'
-  opencode: 'healthy' | 'unhealthy'
-  opencodePort: number
-  opencodeVersion: string | null
-  opencodeMinVersion: string
-  opencodeVersionSupported: boolean
-  opencodeManagerVersion: string | null
-  opencodeRestartPending?: boolean
-  opencodeLifecycle?: OpenCodeLifecycleStatus
-  sandbox?: { available: boolean; enabled: boolean; enforced: boolean; reason?: string; msbVersion?: string }
-  error?: string
-}
+export type { HealthResponse }
 
 export interface OpenCodeServerIssue {
   state: 'failed' | 'recovering' | 'unhealthy'
@@ -27,24 +14,22 @@ export interface OpenCodeServerIssue {
 const DEFAULT_ISSUE_MESSAGE = 'OpenCode server is not responding'
 
 async function fetchHealth(): Promise<HealthResponse> {
-  return fetchWrapper<HealthResponse>('/api/health', { acceptedStatuses: [503] })
+  return fetchWrapper('/api/health', healthResponseSchema, { acceptedStatuses: [503] })
 }
 
-/**
- * Derives the current OpenCode server problem from a health payload, preferring
- * the supervisor lifecycle (which distinguishes in-progress recovery from a
- * terminal failure) and falling back to the raw health probe.
- */
 export function getOpenCodeServerIssue(health: HealthResponse | undefined): OpenCodeServerIssue | null {
   if (!health) return null
   const lifecycle = health.opencodeLifecycle
   if (lifecycle) {
-    if (lifecycle.state !== 'failed' && lifecycle.state !== 'recovering' && lifecycle.state !== 'unhealthy') return null
-    return {
-      state: lifecycle.state,
-      message: lifecycle.lastError ?? health.error ?? DEFAULT_ISSUE_MESSAGE,
-      attemptedRecoveryActions: lifecycle.attemptedRecoveryActions,
+    const state = lifecycle.state
+    if (state === 'failed' || state === 'recovering' || state === 'unhealthy') {
+      return {
+        state,
+        message: lifecycle.lastError ?? health.error ?? DEFAULT_ISSUE_MESSAGE,
+        attemptedRecoveryActions: lifecycle.attemptedRecoveryActions,
+      }
     }
+    if (state !== 'idle') return null
   }
   if (health.opencode === 'healthy') return null
   return {

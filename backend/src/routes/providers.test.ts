@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { getOpenCodeModelStatePath } from '@opencode-manager/shared/config/env'
+import { JsonObjectSchema } from '@opencode-manager/shared/utils'
+import type { JsonObject, JsonValue } from '@opencode-manager/shared/utils'
 import { createProvidersRoutes } from './providers'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { FetchOpenCodeClient } from '../services/opencode/client'
@@ -11,35 +14,23 @@ import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { ClientError } from '@opencode-manager/shared/opencode'
 import type { IntegrationInfo } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
-import type { ModelPreferenceDocument } from '@opencode-manager/shared/opencode'
-
-const modelStatePaths = vi.hoisted(() => ({ file: '' }))
-
-vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@opencode-manager/shared/config/env')>()
-  return {
-    ...actual,
-    getOpenCodeModelStatePath: () => modelStatePaths.file,
-  }
-})
-
-const modelStateMock = vi.hoisted(() => ({
-  readOpenCodeModelState: vi.fn(),
-  updateOpenCodeModelState: vi.fn(),
-  actual: undefined as unknown,
-}))
-
-vi.mock('../services/opencode-model-state', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../services/opencode-model-state')>()
-  modelStateMock.actual = actual
-  return {
-    ...actual,
-    readOpenCodeModelState: modelStateMock.readOpenCodeModelState,
-    updateOpenCodeModelState: modelStateMock.updateOpenCodeModelState,
-  }
-})
+import { createTempWorkspace, type TempWorkspace } from '../../test/helpers/test-env'
+import { readJson } from '../../test/helpers/read-json'
 
 const LOCATION = { directory: '/tmp/repo' }
+
+const ModelSelectionBodySchema = z.object({ providerID: z.string(), modelID: z.string() })
+
+const ModelPreferenceResponseSchema = z.object({
+  recent: z.array(ModelSelectionBodySchema),
+  favorite: z.array(ModelSelectionBodySchema),
+  variant: z.record(z.string(), z.string().optional()),
+})
+
+const CredentialListResponseSchema = z.object({ providers: z.array(z.string()) })
+const CredentialStatusResponseSchema = z.object({ hasCredentials: z.boolean() })
+const SuccessResponseSchema = z.object({ success: z.boolean() })
+const ErrorResponseSchema = z.object({ error: z.string(), code: z.string().optional() })
 
 function integrationFixture(overrides: Partial<IntegrationInfo> = {}): IntegrationInfo {
   return {
@@ -71,189 +62,139 @@ function createCredentialApp(client: OpenCodeClient): Hono {
   return app
 }
 
+async function postModelState(app: Hono, body: JsonValue): Promise<Response> {
+  return app.request('/providers/model-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 describe('providers routes', () => {
   let app: Hono
-  let storedState: ModelPreferenceDocument
+  let workspace: TempWorkspace
+  let modelStatePath: string
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    storedState = { recent: [], favorite: [], variant: {} }
-    modelStateMock.readOpenCodeModelState.mockImplementation(async () => storedState)
-    modelStateMock.updateOpenCodeModelState.mockImplementation(
-      async (mutate: (state: ModelPreferenceDocument) => ModelPreferenceDocument) => {
-        storedState = mutate(storedState)
-        return storedState
-      },
-    )
+    workspace = createTempWorkspace('providers-model-state-')
+    modelStatePath = getOpenCodeModelStatePath()
     app = createTestApp()
   })
 
+  afterEach(() => {
+    workspace.restore()
+  })
+
   describe('GET /model-state', () => {
-    it('returns the state owned by the service', async () => {
+    it('returns the empty state when no file has been written', async () => {
       const res = await app.request('/providers/model-state')
+
       expect(res.status).toBe(200)
-      const data = (await res.json()) as { recent: unknown[]; favorite: unknown[]; variant: Record<string, unknown> }
-      expect(data).toEqual({ recent: [], favorite: [], variant: {} })
-      expect(modelStateMock.readOpenCodeModelState).toHaveBeenCalledTimes(1)
+      expect(await readJson(res, ModelPreferenceResponseSchema)).toEqual({
+        recent: [],
+        favorite: [],
+        variant: {},
+      })
     })
   })
 
   describe('POST /model-state', () => {
     it('with recent returns 200 with recent[0] set', async () => {
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recent: { providerID: 'anthropic', modelID: 'claude' } }),
-      })
+      const res = await postModelState(app, { recent: { providerID: 'anthropic', modelID: 'claude' } })
+
       expect(res.status).toBe(200)
-      const data = (await res.json()) as { recent: Array<{ providerID: string; modelID: string }> }
+      const data = await readJson(res, ModelPreferenceResponseSchema)
       expect(data.recent).toHaveLength(1)
       expect(data.recent[0]).toEqual({ providerID: 'anthropic', modelID: 'claude' })
     })
 
     it('with removeRecent removes the model', async () => {
-      storedState = {
-        recent: [{ providerID: 'openai', modelID: 'gpt-4' }],
-        favorite: [],
-        variant: {},
-      }
+      await postModelState(app, { recent: { providerID: 'openai', modelID: 'gpt-4' } })
 
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ removeRecent: { providerID: 'openai', modelID: 'gpt-4' } }),
-      })
+      const res = await postModelState(app, { removeRecent: { providerID: 'openai', modelID: 'gpt-4' } })
 
       expect(res.status).toBe(200)
-      const data = (await res.json()) as { recent: Array<{ providerID: string; modelID: string }> }
-      expect(data.recent).toHaveLength(0)
+      expect((await readJson(res, ModelPreferenceResponseSchema)).recent).toHaveLength(0)
     })
 
     it('with favorite toggles favorite (add then remove)', async () => {
       const body = { favorite: { providerID: 'openai', modelID: 'gpt-4' } }
 
-      const res1 = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res1 = await postModelState(app, body)
       expect(res1.status).toBe(200)
-      const data1 = (await res1.json()) as { favorite: Array<{ providerID: string; modelID: string }> }
-      expect(data1.favorite).toHaveLength(1)
+      expect((await readJson(res1, ModelPreferenceResponseSchema)).favorite).toHaveLength(1)
 
-      const res2 = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res2 = await postModelState(app, body)
       expect(res2.status).toBe(200)
-      const data2 = (await res2.json()) as { favorite: Array<{ providerID: string; modelID: string }> }
-      expect(data2.favorite).toHaveLength(0)
+      expect((await readJson(res2, ModelPreferenceResponseSchema)).favorite).toHaveLength(0)
     })
 
     it('with variant persists the named variant', async () => {
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          variant: { model: { providerID: 'anthropic', modelID: 'claude' }, value: 'high' },
-        }),
+      const res = await postModelState(app, {
+        variant: { model: { providerID: 'anthropic', modelID: 'claude' }, value: 'high' },
       })
 
       expect(res.status).toBe(200)
-      const data = (await res.json()) as { variant: Record<string, string | undefined> }
-      expect(data.variant).toEqual({ 'anthropic/claude': 'high' })
+      expect((await readJson(res, ModelPreferenceResponseSchema)).variant).toEqual({ 'anthropic/claude': 'high' })
     })
 
-    it('with variant value omitted or null persists default', async () => {
-      const model = { providerID: 'anthropic', modelID: 'claude' }
+    const variantCases: Array<{ label: string; variant: JsonObject }> = [
+      { label: 'omitted', variant: { model: { providerID: 'anthropic', modelID: 'claude' } } },
+      { label: 'explicitly null', variant: { model: { providerID: 'anthropic', modelID: 'claude' }, value: null } },
+    ]
 
-      const omitted = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variant: { model } }),
-      })
-      expect(omitted.status).toBe(200)
-      expect(((await omitted.json()) as { variant: Record<string, string | undefined> }).variant).toEqual({
-        'anthropic/claude': 'default',
-      })
+    it.each(variantCases)('with variant value $label persists default', async ({ variant }) => {
+      const res = await postModelState(app, { variant })
 
-      const explicitNull = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variant: { model, value: null } }),
-      })
-      expect(explicitNull.status).toBe(200)
-      expect(((await explicitNull.json()) as { variant: Record<string, string | undefined> }).variant).toEqual({
+      expect(res.status).toBe(200)
+      expect((await readJson(res, ModelPreferenceResponseSchema)).variant).toEqual({
         'anthropic/claude': 'default',
       })
     })
 
-    it('with invalid body returns 400', async () => {
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invalid: 'data' }),
-      })
+    it('with invalid body returns 400 and leaves the state untouched', async () => {
+      const res = await postModelState(app, { invalid: 'data' })
+
       expect(res.status).toBe(400)
-      const data = (await res.json()) as { error: string }
-      expect(data.error).toBe('Invalid request data')
-      expect(modelStateMock.updateOpenCodeModelState).not.toHaveBeenCalled()
+      expect((await readJson(res, ErrorResponseSchema)).error).toBe('Invalid request data')
+      const state = await app.request('/providers/model-state')
+      expect(await readJson(state, ModelPreferenceResponseSchema)).toEqual({
+        recent: [],
+        favorite: [],
+        variant: {},
+      })
     })
 
-    it('returns 500 when the service rejects', async () => {
-      modelStateMock.updateOpenCodeModelState.mockRejectedValueOnce(new Error('disk full'))
+    it('returns 500 when the state file cannot be written', async () => {
+      await mkdir(modelStatePath, { recursive: true })
 
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recent: { providerID: 'test', modelID: 'test' } }),
-      })
+      const res = await postModelState(app, { recent: { providerID: 'test', modelID: 'test' } })
 
       expect(res.status).toBe(500)
-      const data = (await res.json()) as { error: string }
-      expect(data.error).toBe('Failed to update OpenCode model state')
+      expect((await readJson(res, ErrorResponseSchema)).error).toBe('Failed to update OpenCode model state')
     })
   })
 
   describe('model-state response contract', () => {
-    let workDir: string
-
     beforeEach(async () => {
-      workDir = await mkdtemp(path.join(tmpdir(), 'providers-model-state-'))
-      modelStatePaths.file = path.join(workDir, 'model.json')
-      const actual = modelStateMock.actual as typeof import('../services/opencode-model-state')
-      modelStateMock.readOpenCodeModelState.mockImplementation(actual.readOpenCodeModelState)
-      modelStateMock.updateOpenCodeModelState.mockImplementation(actual.updateOpenCodeModelState)
-      await writeFile(
-        modelStatePaths.file,
-        JSON.stringify({ recent: [], favorite: [], variant: {}, extra: 1 }),
-        'utf8',
-      )
-    })
-
-    afterEach(async () => {
-      await rm(workDir, { recursive: true, force: true })
+      await mkdir(path.dirname(modelStatePath), { recursive: true })
+      await writeFile(modelStatePath, JSON.stringify({ recent: [], favorite: [], variant: {}, extra: 1 }), 'utf8')
     })
 
     it('GET omits unknown root keys', async () => {
       const res = await app.request('/providers/model-state')
 
       expect(res.status).toBe(200)
-      const data = (await res.json()) as Record<string, unknown>
+      const data = await readJson(res, ModelPreferenceResponseSchema)
       expect(data).toEqual({ recent: [], favorite: [], variant: {} })
       expect(data).not.toHaveProperty('extra')
     })
 
     it('POST omits unknown root keys from the response but preserves them in the file', async () => {
-      const res = await app.request('/providers/model-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recent: { providerID: 'anthropic', modelID: 'claude' } }),
-      })
+      const res = await postModelState(app, { recent: { providerID: 'anthropic', modelID: 'claude' } })
 
       expect(res.status).toBe(200)
-      const data = (await res.json()) as Record<string, unknown>
+      const data = await readJson(res, ModelPreferenceResponseSchema)
       expect(data).toEqual({
         recent: [{ providerID: 'anthropic', modelID: 'claude' }],
         favorite: [],
@@ -261,7 +202,7 @@ describe('providers routes', () => {
       })
       expect(data).not.toHaveProperty('extra')
 
-      const file = JSON.parse(await readFile(modelStatePaths.file, 'utf8')) as { extra: unknown }
+      const file = JsonObjectSchema.parse(JSON.parse(await readFile(modelStatePath, 'utf8')))
       expect(file.extra).toBe(1)
     })
   })
@@ -280,7 +221,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/credentials')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ providers: ['anthropic'] })
+      expect(await readJson(res, CredentialListResponseSchema)).toEqual({ providers: ['anthropic'] })
     })
 
     it('maps a declared upstream error to 502 with the upstream message', async () => {
@@ -292,7 +233,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/credentials')
 
       expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: 'upstream exploded' })
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'upstream exploded' })
     })
 
     it('maps an unreachable upstream to 502', async () => {
@@ -302,7 +243,10 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/credentials')
 
       expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: 'Failed to list provider credentials', code: 'ClientError' })
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({
+        error: 'Failed to list provider credentials',
+        code: 'ClientError',
+      })
     })
   })
 
@@ -317,7 +261,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/anthropic/credentials/status')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ hasCredentials: true })
+      expect(await readJson(res, CredentialStatusResponseSchema)).toEqual({ hasCredentials: true })
     })
 
     it('reports false when the integration only has env connections', async () => {
@@ -330,7 +274,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/anthropic/credentials/status')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ hasCredentials: false })
+      expect(await readJson(res, CredentialStatusResponseSchema)).toEqual({ hasCredentials: false })
     })
 
     it('retries once after a loading integration becomes available', async () => {
@@ -345,7 +289,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/anthropic/credentials/status')
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ hasCredentials: true })
+      expect(await readJson(res, CredentialStatusResponseSchema)).toEqual({ hasCredentials: true })
       expect(get).toHaveBeenCalledTimes(3)
     })
 
@@ -362,7 +306,7 @@ describe('providers routes', () => {
         const res = await pending
 
         expect(res.status).toBe(404)
-        expect(await res.json()).toEqual({
+        expect(await readJson(res, ErrorResponseSchema)).toEqual({
           error: 'Integration not found: nope',
           code: 'IntegrationNotFoundError',
         })
@@ -373,7 +317,7 @@ describe('providers routes', () => {
   })
 
   describe('POST /:id/credentials', () => {
-    function connectRequest(app: Hono, providerId = 'anthropic', body: unknown = { apiKey: 'sk-test' }) {
+    function connectRequest(app: Hono, providerId: string = 'anthropic', body: JsonValue = { apiKey: 'sk-test' }) {
       return app.request(`/providers/${providerId}/credentials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -388,7 +332,7 @@ describe('providers routes', () => {
       const res = await connectRequest(createCredentialApp(client))
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
       expect(connectKey).toHaveBeenCalledWith({ integrationID: 'anthropic', key: 'sk-test' })
     })
 
@@ -402,7 +346,7 @@ describe('providers routes', () => {
       })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
       expect(connectKey).toHaveBeenCalledWith({
         integrationID: 'azure',
         key: 'az-test',
@@ -427,7 +371,7 @@ describe('providers routes', () => {
       const res = await connectRequest(createCredentialApp(client))
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
       expect(connectKey).toHaveBeenCalledTimes(2)
       expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'anthropic' })
     })
@@ -445,7 +389,7 @@ describe('providers routes', () => {
         const res = await pending
 
         expect(res.status).toBe(404)
-        expect(await res.json()).toEqual({
+        expect(await readJson(res, ErrorResponseSchema)).toEqual({
           error: 'Integration not found: nope',
           code: 'IntegrationNotFoundError',
         })
@@ -464,7 +408,7 @@ describe('providers routes', () => {
       const res = await connectRequest(createCredentialApp(client))
 
       expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({
+      expect(await readJson(res, ErrorResponseSchema)).toEqual({
         error: 'Missing required form field: account',
         code: 'InvalidRequestError',
       })
@@ -485,7 +429,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/anthropic/credentials', { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
       expect(remove).toHaveBeenCalledTimes(2)
       expect(remove).toHaveBeenCalledWith({ credentialID: 'cred_1' })
       expect(remove).toHaveBeenCalledWith({ credentialID: 'cred_2' })
@@ -516,7 +460,7 @@ describe('providers routes', () => {
       const res = await createCredentialApp(client).request('/providers/anthropic/credentials', { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ success: true })
+      expect(await readJson(res, SuccessResponseSchema)).toEqual({ success: true })
       expect(vi.mocked(client.api.credential.remove)).toHaveBeenCalledWith({ credentialID: 'cred_1' })
       expect(get).toHaveBeenCalledTimes(3)
     })
@@ -534,7 +478,7 @@ describe('providers routes', () => {
         const res = await pending
 
         expect(res.status).toBe(404)
-        expect(await res.json()).toEqual({
+        expect(await readJson(res, ErrorResponseSchema)).toEqual({
           error: 'Integration not found: nope',
           code: 'IntegrationNotFoundError',
         })
@@ -569,11 +513,11 @@ describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 ser
 
       const statusResponse = await app.request('/providers/anthropic/credentials/status')
       expect(statusResponse.status).toBe(200)
-      expect(await statusResponse.json()).toEqual({ hasCredentials: true })
+      expect(await readJson(statusResponse, CredentialStatusResponseSchema)).toEqual({ hasCredentials: true })
 
       const listResponse = await app.request('/providers/credentials')
       expect(listResponse.status).toBe(200)
-      const { providers } = (await listResponse.json()) as { providers: string[] }
+      const { providers } = await readJson(listResponse, CredentialListResponseSchema)
       expect(providers).toContain('anthropic')
     } finally {
       await serve.stop()
@@ -598,7 +542,7 @@ describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 ser
         body: JSON.stringify({ apiKey: 'az-binary-test' }),
       })
       expect(rejected.status).toBe(502)
-      expect(await rejected.json()).toEqual({
+      expect(await readJson(rejected, ErrorResponseSchema)).toEqual({
         error: 'Missing required form field: resourceName',
         code: 'InvalidRequestError',
       })
@@ -612,7 +556,7 @@ describe.skipIf(!openCodeBinary)('providers routes against a real OpenCode 2 ser
 
       const statusResponse = await app.request('/providers/azure/credentials/status')
       expect(statusResponse.status).toBe(200)
-      expect(await statusResponse.json()).toEqual({ hasCredentials: true })
+      expect(await readJson(statusResponse, CredentialStatusResponseSchema)).toEqual({ hasCredentials: true })
     } finally {
       await serve.stop()
     }

@@ -43,11 +43,6 @@ function createOption(provider: Provider, model: Model, value: string): ModelOpt
   }
 }
 
-/**
- * Groups the models of every provider into the Default, Favorites, Recent, and per-provider
- * sections of the model picker. A model pinned as the default or a favorite is removed from its
- * provider section, and sections left empty are dropped.
- */
 export function buildModelSections(
   providers: Provider[],
   modelState: OpenCodeModelState | undefined,
@@ -99,19 +94,16 @@ export function buildModelSections(
   return sections.filter((section) => section.options.length > 0)
 }
 
-/** Keeps the first option for each value, so a favorite that is also the default lists once under Default. */
 function uniqueModelSections(sections: ModelSection[]): ModelSection[] {
   const seen = new Set<string>()
-  return sections
-    .map((section) => ({
-      ...section,
-      options: section.options.filter((option) => {
-        if (seen.has(option.value)) return false
-        seen.add(option.value)
-        return true
-      }),
-    }))
-    .filter((section) => section.options.length > 0)
+  return sections.flatMap((section): ModelSection[] => {
+    const options = section.options.filter((option) => {
+      if (seen.has(option.value)) return false
+      seen.add(option.value)
+      return true
+    })
+    return options.length > 0 ? [{ ...section, options }] : []
+  })
 }
 
 function compareSearchMatches(a: ModelOption, b: ModelOption): number {

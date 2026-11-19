@@ -1,3 +1,4 @@
+import { selectTableColumns } from '../rows'
 import type { Database } from 'bun:sqlite'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { Migration } from '../migration-runner'
@@ -6,27 +7,18 @@ const SERVER_ID_COLUMN = 'server_id'
 const PERMISSION_MODES_TABLE = 'session_permission_modes'
 const PERMISSION_MODES_REBUILD_TABLE = 'session_permission_modes_rebuild'
 
-interface ColumnInfo {
-  name: string
-  pk: number
-}
-
 function tableExists(db: Database, table: string): boolean {
   return Boolean(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
   )
 }
 
-function tableColumns(db: Database, table: string): ColumnInfo[] {
-  return db.prepare(`PRAGMA table_info(${table})`).all() as ColumnInfo[]
-}
-
 function hasColumn(db: Database, table: string, column: string): boolean {
-  return tableColumns(db, table).some((entry) => entry.name === column)
+  return selectTableColumns(db, table).some((entry) => entry.name === column)
 }
 
 function primaryKeyColumns(db: Database, table: string): string[] {
-  return tableColumns(db, table)
+  return selectTableColumns(db, table)
     .filter((column) => column.pk > 0)
     .sort((left, right) => left.pk - right.pk)
     .map((column) => column.name)

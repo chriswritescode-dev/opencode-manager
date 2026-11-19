@@ -1,41 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, act, waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
+import { z } from 'zod'
+import type { UserPreferences } from '@/api/types/settings'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
+import type { FetchFake } from '@/test/fetchFake'
+import { renderWithProviders } from '@/test/render'
 import { TTSProvider } from './TTSContext'
 import { useTTS } from '@/hooks/useTTS'
 import type { SpeakMessageOptions, TTSConfig, TTSContextValue } from './tts-context'
-import type { WebSpeechSynthesizer } from '@/lib/webSpeechSynthesizer'
 
-const mocks = vi.hoisted(() => ({
-  useSettings: vi.fn(),
-}))
-
-const webSpeech = vi.hoisted(() => ({
-  stop: vi.fn(),
-  pause: vi.fn(),
-  resume: vi.fn(),
-  clearCallbacks: vi.fn(),
-  waitForVoices: vi.fn(() => Promise.resolve()),
-  onEnd: vi.fn(),
-  onError: vi.fn(),
-  speakChunked: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: mocks.useSettings,
-}))
-
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({ isAuthenticated: true }),
-}))
-
-vi.mock('@/lib/webSpeechSynthesizer', () => ({
-  getWebSpeechSynthesizer: () => webSpeech as unknown as WebSpeechSynthesizer,
-  isWebSpeechSupported: () => true,
-}))
+interface ValueRef<T> {
+  current: T
+}
 
 class FakeAudio {
   static instances: FakeAudio[] = []
-  static nextPlayRejection: unknown = null
+  static nextPlayRejection: Error | null = null
 
   src: string
   paused = true
@@ -66,14 +46,73 @@ class FakeAudio {
   })
 }
 
-const ttsRef: { current: TTSContextValue | null } = { current: null }
+const ttsRef: ValueRef<TTSContextValue | null> = { current: null }
+
+interface FakeSpeechVoice {
+  name: string
+  lang: string
+  default: boolean
+  localService: boolean
+  voiceURI: string
+}
+
+interface SpeechUtteranceFake {
+  text: string
+  voice: FakeSpeechVoice | null
+  lang: string
+  rate: number
+  pitch: number
+  volume: number
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onboundary: ((event: { name: string; charIndex: number; charLength?: number }) => void) | null
+}
+
+class FakeUtterance implements SpeechUtteranceFake {
+  text: string
+  voice: FakeSpeechVoice | null = null
+  lang = ''
+  rate = 1
+  pitch = 1
+  volume = 1
+  onstart: (() => void) | null = null
+  onend: (() => void) | null = null
+  onerror: ((event: { error: string }) => void) | null = null
+  onboundary: ((event: { name: string; charIndex: number; charLength?: number }) => void) | null = null
+
+  constructor(text: string) {
+    this.text = text
+  }
+}
+
+const pendingUtterances: FakeUtterance[] = []
+
+const speechSynthesisFake = {
+  speak: vi.fn((utterance: FakeUtterance) => {
+    pendingUtterances.push(utterance)
+  }),
+  cancel: vi.fn(),
+  pause: vi.fn(),
+  resume: vi.fn(),
+  getVoices: () => [{ name: 'Test Voice', lang: 'en-US', default: true, localService: true, voiceURI: 'Test Voice' }],
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  speaking: false,
+  pending: false,
+  paused: false,
+}
+
+function completeSpeech(): void {
+  const utterance = pendingUtterances.shift()
+  utterance?.onend?.()
+}
 
 function Consumer() {
   ttsRef.current = useTTS()
   return null
 }
 
-let fetchBodies: string[] = []
 let objectUrlCounter = 0
 
 const createObjectURL = vi.fn(() => `blob:fake-${++objectUrlCounter}`)
@@ -81,6 +120,16 @@ const revokeObjectURL = vi.fn()
 
 const textA = 'Alpha one. Alpha two. Alpha three. Alpha four. Alpha five.'
 const textB = 'Bravo one. Bravo two. Bravo three. Bravo four. Bravo five.'
+
+const synthesizeRequestSchema = z.object({ text: z.string() })
+
+interface TtsFetchState {
+  fetched: string[]
+  slowChunkText: string | null
+  slowChunkGate: Promise<void> | null
+}
+
+const fetchState: TtsFetchState = { fetched: [], slowChunkText: null, slowChunkGate: null }
 
 async function flushPlayback() {
   await act(async () => {
@@ -102,28 +151,27 @@ async function startPlayback(
   options?: SpeakMessageOptions,
 ): Promise<FakeAudio> {
   await act(async () => {
-    await ttsRef.current!.speakMessage(messageId, text, options)
+    const current = ttsRef.current
+    if (!current) throw new Error('expected the TTS provider to be mounted')
+    await current.speakMessage(messageId, text, options)
   })
   await waitFor(() => expect(player().paused).toBe(false))
   return player()
 }
 
-function setPreferences(overrides: Partial<TTSConfig> = {}) {
-  mocks.useSettings.mockReturnValue({
-    preferences: {
-      tts: {
-        enabled: true,
-        autoPlay: false,
-        provider: 'external',
-        endpoint: 'https://api.openai.com',
-        apiKey: 'test-key',
-        voice: 'alloy',
-        model: 'tts-1',
-        speed: 1.0,
-        ...overrides,
-      },
+function ttsPreferences(overrides: Partial<TTSConfig> = {}): UserPreferences {
+  return makeUserPreferences({
+    tts: {
+      enabled: true,
+      autoPlay: false,
+      provider: 'external',
+      endpoint: 'https://api.openai.com',
+      apiKey: 'test-key',
+      voice: 'alloy',
+      model: 'tts-1',
+      speed: 1.0,
+      ...overrides,
     },
-    updateSettings: vi.fn(),
   })
 }
 
@@ -147,51 +195,78 @@ const builtinConfig: TTSConfig = {
   speed: 1.0,
 }
 
-function renderProvider() {
-  return render(
+function synthesizeRoute() {
+  return {
+    method: 'POST' as const,
+    path: '/api/tts/synthesize',
+    respond: async (request: { body: unknown }) => {
+      const { text } = synthesizeRequestSchema.parse(request.body)
+      if (fetchState.slowChunkText === text && fetchState.slowChunkGate) {
+        await fetchState.slowChunkGate
+      }
+      fetchState.fetched.push(text)
+      return {
+        headers: { 'Content-Type': 'audio/mpeg' },
+        blob: new Blob([`audio:${text}`], { type: 'audio/mpeg' }),
+      }
+    },
+  }
+}
+
+interface RenderTtsResult {
+  fetchFake: FetchFake
+}
+
+async function renderProvider(overrides: Partial<TTSConfig> = {}): Promise<RenderTtsResult> {
+  const { queryClient, fetchFake } = renderWithProviders(
     <TTSProvider>
       <Consumer />
     </TTSProvider>,
+    {
+      fetchRoutes: [
+        synthesizeRoute(),
+        {
+          method: 'GET',
+          path: '/api/settings',
+          respond: () => ({ json: makeSettingsResponse({ preferences: ttsPreferences(overrides) }) }),
+        },
+      ],
+    },
   )
+  await waitFor(() => expect(queryClient.getQueryData(['settings', 'default'])).toBeDefined())
+  return { fetchFake }
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
   FakeAudio.instances = []
   FakeAudio.nextPlayRejection = null
-  fetchBodies = []
+  fetchState.fetched = []
+  fetchState.slowChunkText = null
+  fetchState.slowChunkGate = null
   objectUrlCounter = 0
   ttsRef.current = null
-
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? '{}')) as { text: string }
-    fetchBodies.push(body.text)
-    const blob = new Blob([`audio:${body.text}`], { type: 'audio/mpeg' })
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name: string) => (name.toLowerCase() === 'content-type' ? 'audio/mpeg' : null),
-      },
-      blob: async () => blob,
-      json: async () => ({}),
-    } as unknown as Response
-  })
+  pendingUtterances.length = 0
+  speechSynthesisFake.speak.mockClear()
+  speechSynthesisFake.cancel.mockClear()
+  speechSynthesisFake.pause.mockClear()
+  speechSynthesisFake.resume.mockClear()
 
   vi.stubGlobal('Audio', FakeAudio)
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('speechSynthesis', speechSynthesisFake)
+  vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
+  createObjectURL.mockClear()
+  revokeObjectURL.mockClear()
   URL.createObjectURL = createObjectURL
   URL.revokeObjectURL = revokeObjectURL
 })
 
 afterEach(() => {
-  vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('TTSProvider playback isolation', () => {
   it('does not start a concurrent chain when a stale onended fires after a new playback begins', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
     const firstSrc = audio.src
@@ -200,16 +275,18 @@ describe('TTSProvider playback isolation', () => {
     expect(staleOnended).toBeTypeOf('function')
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('B', textB)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('B', textB)
     })
 
-    await waitFor(() => expect(fetchBodies).toContain('Bravo three. Bravo four.'))
+    await waitFor(() => expect(fetchState.fetched).toContain('Bravo three. Bravo four.'))
     await waitFor(() => expect(audio.src).not.toBe(firstSrc))
     const activeSrc = audio.src
     expect(audio.paused).toBe(false)
 
     await act(async () => {
-      staleOnended!()
+      staleOnended?.()
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
@@ -219,27 +296,30 @@ describe('TTSProvider playback isolation', () => {
   })
 
   it('ignores a stale onerror after cleanup without orphaning the new audio or corrupting state', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
     const staleOnerror = audio.onerror
     expect(staleOnerror).toBeTypeOf('function')
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('B', textB)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('B', textB)
     })
 
-    await waitFor(() => expect(fetchBodies).toContain('Bravo three. Bravo four.'))
+    await waitFor(() => expect(fetchState.fetched).toContain('Bravo three. Bravo four.'))
     const activeSrc = audio.src
     const playCalls = audio.play.mock.calls.length
 
     await act(async () => {
-      staleOnerror!()
+      staleOnerror?.()
     })
 
-    expect(ttsRef.current!.state).toBe('playing')
-    expect(ttsRef.current!.error).toBeNull()
+    const current = ttsRef.current
+    if (!current) throw new Error('expected the TTS provider to be mounted')
+    expect(current.state).toBe('playing')
+    expect(current.error).toBeNull()
     expect(audio.paused).toBe(false)
     expect(audio.src).toBe(activeSrc)
     expect(audio.play.mock.calls.length).toBe(playCalls)
@@ -247,52 +327,41 @@ describe('TTSProvider playback isolation', () => {
   })
 
   it('cancels active Web Speech playback when an external playback starts', async () => {
-    setPreferences({ provider: 'external' })
-    renderProvider()
+    await renderProvider()
 
     await act(async () => {
-      await ttsRef.current!.speakWithConfig('Hello from web speech.', builtinConfig)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakWithConfig('Hello from web speech.', builtinConfig)
     })
-
-    expect(webSpeech.speakChunked).toHaveBeenCalled()
-    webSpeech.stop.mockClear()
+    await waitFor(() => expect(speechSynthesisFake.speak).toHaveBeenCalled())
+    speechSynthesisFake.cancel.mockClear()
 
     await act(async () => {
-      await ttsRef.current!.speakWithConfig('Now external audio.', externalConfig)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakWithConfig('Now external audio.', externalConfig)
     })
 
-    expect(webSpeech.stop).toHaveBeenCalled()
+    expect(speechSynthesisFake.cancel).toHaveBeenCalled()
   })
 
   it('fetches each chunk at most once when playback outruns an in-flight prefetch', async () => {
-    setPreferences()
-    renderProvider()
-
     const slowChunkText = 'Alpha three. Alpha four.'
-    let releaseSlowChunk: () => void = () => {}
-    const slowChunkGate = new Promise<void>((resolve) => {
+    let releaseSlowChunk: () => void = () => undefined
+    fetchState.slowChunkText = slowChunkText
+    fetchState.slowChunkGate = new Promise<void>((resolve) => {
       releaseSlowChunk = resolve
     })
-
-    const baseFetch = globalThis.fetch
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body ?? '{}')) as { text: string }
-        if (body.text === slowChunkText) {
-          await slowChunkGate
-        }
-        return baseFetch(input, init)
-      }),
-    )
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
-    await waitFor(() => expect(fetchBodies).toContain('Alpha one. Alpha two.'))
-    expect(fetchBodies).not.toContain(slowChunkText)
+    await waitFor(() => expect(fetchState.fetched).toContain('Alpha one. Alpha two.'))
+    expect(fetchState.fetched).not.toContain(slowChunkText)
     const firstSrc = audio.src
 
     await act(async () => {
-      audio.onended!()
+      audio.onended?.()
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
@@ -305,10 +374,10 @@ describe('TTSProvider playback isolation', () => {
     await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2))
     expect(audio.paused).toBe(false)
 
-    expect(fetchBodies.filter((text) => text === slowChunkText)).toHaveLength(1)
+    expect(fetchState.fetched.filter((text) => text === slowChunkText)).toHaveLength(1)
 
     const fetchCounts = new Map<string, number>()
-    for (const text of fetchBodies) {
+    for (const text of fetchState.fetched) {
       fetchCounts.set(text, (fetchCounts.get(text) ?? 0) + 1)
     }
     for (const count of fetchCounts.values()) {
@@ -319,12 +388,13 @@ describe('TTSProvider playback isolation', () => {
 
 describe('TTSProvider message completion', () => {
   it('reports completion once after the last chunk finishes', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEnd = vi.fn()
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('A', textA, { onEnd })
     })
 
     await waitFor(() => expect(FakeAudio.instances).toHaveLength(1))
@@ -334,41 +404,39 @@ describe('TTSProvider message completion', () => {
       await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(index + 1))
       expect(onEnd).not.toHaveBeenCalled()
       await act(async () => {
-        audio.onended!()
+        audio.onended?.()
       })
     }
 
     await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
     expect(onEnd).toHaveBeenCalledWith('completed', undefined)
-    expect(ttsRef.current!.state).toBe('idle')
+    expect(ttsRef.current?.state).toBe('idle')
   })
 
   it('reports a stop once and ignores the stale chunk end', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEnd = vi.fn()
 
     const audio = await startPlayback('A', textA, { onEnd })
     const staleOnended = audio.onended
 
     await act(async () => {
-      ttsRef.current!.stop()
+      ttsRef.current?.stop()
     })
 
     expect(onEnd).toHaveBeenCalledTimes(1)
     expect(onEnd).toHaveBeenCalledWith('stopped', undefined)
 
     await act(async () => {
-      staleOnended!()
+      staleOnended?.()
     })
 
     expect(onEnd).toHaveBeenCalledTimes(1)
-    expect(ttsRef.current!.state).toBe('idle')
+    expect(ttsRef.current?.state).toBe('idle')
   })
 
   it('reports the replaced message as stopped without settling the new one', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEndA = vi.fn()
     const onEndB = vi.fn()
 
@@ -376,7 +444,9 @@ describe('TTSProvider message completion', () => {
     const staleOnended = audio.onended
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('B', textB, { onEnd: onEndB })
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('B', textB, { onEnd: onEndB })
     })
 
     expect(onEndA).toHaveBeenCalledTimes(1)
@@ -384,32 +454,31 @@ describe('TTSProvider message completion', () => {
     expect(onEndB).not.toHaveBeenCalled()
 
     await act(async () => {
-      staleOnended!()
+      staleOnended?.()
     })
 
     expect(onEndA).toHaveBeenCalledTimes(1)
     expect(onEndB).not.toHaveBeenCalled()
-    expect(ttsRef.current!.activeMessageId).toBe('B')
+    expect(ttsRef.current?.activeMessageId).toBe('B')
   })
 
   it('clears the paused state and reports a stop when stopped while paused', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEnd = vi.fn()
 
     await startPlayback('A', textA, { onEnd })
 
     await act(async () => {
-      ttsRef.current!.pause()
+      ttsRef.current?.pause()
     })
 
-    expect(ttsRef.current!.isPaused).toBe(true)
+    expect(ttsRef.current?.isPaused).toBe(true)
 
     await act(async () => {
-      ttsRef.current!.stop()
+      ttsRef.current?.stop()
     })
 
-    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(ttsRef.current?.isPaused).toBe(false)
     expect(onEnd).toHaveBeenCalledTimes(1)
     expect(onEnd).toHaveBeenCalledWith('stopped', undefined)
   })
@@ -417,155 +486,148 @@ describe('TTSProvider message completion', () => {
 
 describe('TTSProvider pause and resume', () => {
   it('pauses the current chunk and resumes it without restarting the message', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
     const firstSrc = audio.src
 
     await act(async () => {
-      ttsRef.current!.pause()
+      ttsRef.current?.pause()
     })
 
-    expect(ttsRef.current!.isPaused).toBe(true)
-    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(ttsRef.current?.isPaused).toBe(true)
+    expect(ttsRef.current?.isPlaying).toBe(true)
     expect(audio.pause).toHaveBeenCalled()
     expect(audio.paused).toBe(true)
 
     const playCallsWhilePaused = audio.play.mock.calls.length
 
     await act(async () => {
-      ttsRef.current!.resume()
+      ttsRef.current?.resume()
     })
 
-    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(ttsRef.current?.isPaused).toBe(false)
     expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
     expect(audio.paused).toBe(false)
     expect(audio.src).toBe(firstSrc)
     expect(FakeAudio.instances).toHaveLength(1)
-    expect(fetchBodies.filter((text) => text === 'Alpha one. Alpha two.')).toHaveLength(1)
+    expect(fetchState.fetched.filter((text) => text === 'Alpha one. Alpha two.')).toHaveLength(1)
   })
 
   it('holds the next chunk until resumed when paused between chunks', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
     const firstSrc = audio.src
 
     await act(async () => {
-      ttsRef.current!.pause()
+      ttsRef.current?.pause()
     })
 
     const playCallsWhilePaused = audio.play.mock.calls.length
 
     await act(async () => {
-      audio.onended!()
+      audio.onended?.()
     })
 
     await waitFor(() => expect(audio.src).not.toBe(firstSrc))
 
     expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused)
     expect(audio.paused).toBe(true)
-    expect(ttsRef.current!.isPaused).toBe(true)
-    expect(ttsRef.current!.activeMessageId).toBe('A')
+    expect(ttsRef.current?.isPaused).toBe(true)
+    expect(ttsRef.current?.activeMessageId).toBe('A')
 
     await act(async () => {
-      ttsRef.current!.resume()
+      ttsRef.current?.resume()
     })
 
     expect(audio.play.mock.calls.length).toBe(playCallsWhilePaused + 1)
     expect(audio.paused).toBe(false)
-    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(ttsRef.current?.isPaused).toBe(false)
   })
 
   it('delegates pause and resume to the synthesizer for builtin playback', async () => {
-    setPreferences({ provider: 'builtin' })
-    renderProvider()
-
-    let releaseSpeech: () => void = () => {}
-    webSpeech.speakChunked.mockImplementationOnce(
-      () => new Promise<void>((resolve) => {
-        releaseSpeech = resolve
-      }),
-    )
+    await renderProvider({ provider: 'builtin' })
 
     await act(async () => {
-      void ttsRef.current!.speakWithConfig('Hello from builtin speech.', builtinConfig)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakWithConfig('Hello from builtin speech.', builtinConfig)
     })
 
-    await waitFor(() => expect(ttsRef.current!.isPlaying).toBe(true))
+    await waitFor(() => expect(speechSynthesisFake.speak).toHaveBeenCalled())
 
     await act(async () => {
-      ttsRef.current!.pause()
+      ttsRef.current?.pause()
     })
 
-    expect(webSpeech.pause).toHaveBeenCalledTimes(1)
-    expect(ttsRef.current!.isPaused).toBe(true)
+    expect(speechSynthesisFake.pause).toHaveBeenCalledTimes(1)
+    expect(ttsRef.current?.isPaused).toBe(true)
 
     await act(async () => {
-      ttsRef.current!.resume()
+      ttsRef.current?.resume()
     })
 
-    expect(webSpeech.resume).toHaveBeenCalledTimes(1)
-    expect(ttsRef.current!.isPaused).toBe(false)
+    expect(speechSynthesisFake.resume).toHaveBeenCalledTimes(1)
+    expect(ttsRef.current?.isPaused).toBe(false)
 
     await act(async () => {
-      releaseSpeech()
+      completeSpeech()
       await Promise.resolve()
     })
 
-    await waitFor(() => expect(ttsRef.current!.isIdle).toBe(true))
+    await waitFor(() => expect(ttsRef.current?.isIdle).toBe(true))
   })
 })
 
 describe('TTSProvider playback failures', () => {
   it('reports the browser blocking playback with its own message', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEnd = vi.fn()
     FakeAudio.nextPlayRejection = Object.assign(new Error('play blocked'), {
       name: 'NotAllowedError',
     })
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('A', textA, { onEnd })
     })
     await flushPlayback()
 
     expect(onEnd).toHaveBeenCalledTimes(1)
     expect(onEnd).toHaveBeenCalledWith('error', 'Audio playback was blocked by the browser')
-    expect(ttsRef.current!.state).toBe('error')
-    expect(ttsRef.current!.error).toBe('Audio playback was blocked by the browser')
+    expect(ttsRef.current?.state).toBe('error')
+    expect(ttsRef.current?.error).toBe('Audio playback was blocked by the browser')
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
 
     expect(player().src.startsWith('data:audio/wav;base64,')).toBe(true)
     expect(player().play).toHaveBeenCalledTimes(2)
   })
 
   it('reports the rejection message for a playback failure that is not a gesture block', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
     const onEnd = vi.fn()
     FakeAudio.nextPlayRejection = new Error('decoder gave up')
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA, { onEnd })
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('A', textA, { onEnd })
     })
     await flushPlayback()
 
     expect(onEnd).toHaveBeenCalledWith('error', 'decoder gave up')
-    expect(ttsRef.current!.error).toBe('decoder gave up')
+    expect(ttsRef.current?.error).toBe('decoder gave up')
   })
 })
 
 describe('TTSProvider unlock', () => {
   it('primes the shared element with a silent clip and reuses it for chunk playback', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
 
     expect(FakeAudio.instances).toHaveLength(1)
     const audio = player()
@@ -578,7 +640,9 @@ describe('TTSProvider unlock', () => {
     expect(audio.paused).toBe(true)
 
     await act(async () => {
-      await ttsRef.current!.speakMessage('A', textA)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      await current.speakMessage('A', textA)
     })
     await flushPlayback()
 
@@ -589,40 +653,37 @@ describe('TTSProvider unlock', () => {
   })
 
   it('does nothing on a repeat call once the element is primed', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
     await flushPlayback()
     const playCalls = player().play.mock.calls.length
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
 
     expect(player().play).toHaveBeenCalledTimes(playCalls)
     expect(FakeAudio.instances).toHaveLength(1)
   })
 
   it('does not interrupt a message that is already playing', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
 
     const audio = await startPlayback('A', textA)
     const src = audio.src
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
 
     expect(audio.src).toBe(src)
     expect(audio.play).toHaveBeenCalledTimes(1)
     expect(audio.pause).not.toHaveBeenCalled()
     expect(audio.paused).toBe(false)
-    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(ttsRef.current?.isPlaying).toBe(true)
   })
 
   it('does not touch the shared element for builtin playback', async () => {
-    setPreferences({ provider: 'builtin' })
-    renderProvider()
+    await renderProvider({ provider: 'builtin' })
 
-    act(() => ttsRef.current!.unlock())
+    act(() => ttsRef.current?.unlock())
 
     expect(FakeAudio.instances).toHaveLength(0)
   })
@@ -634,20 +695,14 @@ describe('TTSProvider message queue', () => {
   const queuedText = 'Bravo waits in queue.'
   const interruptingText = 'Charlie interrupts.'
 
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('plays a queued message only after the active playback ends and the pause elapses', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
+    vi.useFakeTimers()
 
     await act(async () => {
-      void ttsRef.current!.speakMessage('A', firstText)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakMessage('A', firstText)
     })
     await flushPlayback()
 
@@ -655,26 +710,26 @@ describe('TTSProvider message queue', () => {
     const audio = player()
     const firstSrc = audio.src
     expect(audio.paused).toBe(false)
-    expect(ttsRef.current!.activeMessageId).toBe('A')
+    expect(ttsRef.current?.activeMessageId).toBe('A')
 
     await act(async () => {
-      ttsRef.current!.queueMessage('B', queuedText)
+      ttsRef.current?.queueMessage('B', queuedText)
     })
     await flushPlayback()
 
     expect(audio.play).toHaveBeenCalledTimes(1)
     expect(audio.src).toBe(firstSrc)
     expect(audio.paused).toBe(false)
-    expect(ttsRef.current!.activeMessageId).toBe('A')
-    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(ttsRef.current?.activeMessageId).toBe('A')
+    expect(ttsRef.current?.isPlaying).toBe(true)
 
     await act(async () => {
-      audio.onended!()
+      audio.onended?.()
     })
     await flushPlayback()
 
-    expect(ttsRef.current!.isIdle).toBe(true)
-    expect(ttsRef.current!.activeMessageId).toBeNull()
+    expect(ttsRef.current?.isIdle).toBe(true)
+    expect(ttsRef.current?.activeMessageId).toBeNull()
 
     await act(async () => {
       vi.advanceTimersByTime(QUEUE_PAUSE_MS - 1)
@@ -690,34 +745,36 @@ describe('TTSProvider message queue', () => {
 
     expect(audio.play).toHaveBeenCalledTimes(2)
     expect(audio.paused).toBe(false)
-    expect(fetchBodies).toContain(queuedText)
-    expect(ttsRef.current!.activeMessageId).toBe('B')
-    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(fetchState.fetched).toContain(queuedText)
+    expect(ttsRef.current?.activeMessageId).toBe('B')
+    expect(ttsRef.current?.isPlaying).toBe(true)
   })
 
   it('drops queued messages when playback is stopped', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
+    vi.useFakeTimers()
 
     await act(async () => {
-      void ttsRef.current!.speakMessage('A', firstText)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakMessage('A', firstText)
     })
     await flushPlayback()
 
     const audio = player()
 
     await act(async () => {
-      ttsRef.current!.queueMessage('B', queuedText)
+      ttsRef.current?.queueMessage('B', queuedText)
     })
     await flushPlayback()
 
     await act(async () => {
-      audio.onended!()
+      audio.onended?.()
     })
     await flushPlayback()
 
     await act(async () => {
-      ttsRef.current!.stop()
+      ttsRef.current?.stop()
     })
 
     await act(async () => {
@@ -727,35 +784,39 @@ describe('TTSProvider message queue', () => {
 
     expect(audio.play).toHaveBeenCalledTimes(1)
     expect(FakeAudio.instances).toHaveLength(1)
-    expect(fetchBodies).not.toContain(queuedText)
-    expect(ttsRef.current!.state).toBe('idle')
-    expect(ttsRef.current!.activeMessageId).toBeNull()
+    expect(fetchState.fetched).not.toContain(queuedText)
+    expect(ttsRef.current?.state).toBe('idle')
+    expect(ttsRef.current?.activeMessageId).toBeNull()
   })
 
   it('clears queued messages when a manual speakMessage interrupts playback', async () => {
-    setPreferences()
-    renderProvider()
+    await renderProvider()
+    vi.useFakeTimers()
 
     await act(async () => {
-      void ttsRef.current!.speakMessage('A', firstText)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakMessage('A', firstText)
     })
     await flushPlayback()
 
     const audio = player()
 
     await act(async () => {
-      ttsRef.current!.queueMessage('B', queuedText)
+      ttsRef.current?.queueMessage('B', queuedText)
     })
     await flushPlayback()
 
     await act(async () => {
-      void ttsRef.current!.speakMessage('C', interruptingText)
+      const current = ttsRef.current
+      if (!current) throw new Error('expected the TTS provider to be mounted')
+      void current.speakMessage('C', interruptingText)
     })
     await flushPlayback()
 
     expect(audio.play).toHaveBeenCalledTimes(2)
-    expect(ttsRef.current!.activeMessageId).toBe('C')
-    expect(ttsRef.current!.isPlaying).toBe(true)
+    expect(ttsRef.current?.activeMessageId).toBe('C')
+    expect(ttsRef.current?.isPlaying).toBe(true)
 
     await act(async () => {
       vi.advanceTimersByTime(1000)
@@ -763,10 +824,10 @@ describe('TTSProvider message queue', () => {
     await flushPlayback()
 
     expect(audio.play).toHaveBeenCalledTimes(2)
-    expect(fetchBodies).not.toContain(queuedText)
+    expect(fetchState.fetched).not.toContain(queuedText)
 
     await act(async () => {
-      audio.onended!()
+      audio.onended?.()
     })
     await flushPlayback()
 
@@ -776,6 +837,6 @@ describe('TTSProvider message queue', () => {
     await flushPlayback()
 
     expect(audio.play).toHaveBeenCalledTimes(2)
-    expect(ttsRef.current!.state).toBe('idle')
+    expect(ttsRef.current?.state).toBe('idle')
   })
 })

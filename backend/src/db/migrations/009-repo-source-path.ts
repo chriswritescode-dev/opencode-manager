@@ -1,15 +1,12 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-}
 
 const migration: Migration = {
   id: '009-repo-source-path',
   legacy: { version: 9, name: 'repo-source-path' },
 
   up(db) {
-    const tableInfo = db.prepare('PRAGMA table_info(repos)').all() as ColumnInfo[]
+    const tableInfo = selectTableColumns(db, 'repos')
     const existing = new Set(tableInfo.map((column) => column.name))
 
     if (!existing.has('source_path')) {

@@ -1,7 +1,11 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import { z } from 'zod'
+import { parseJsonText } from '@opencode-manager/shared/utils'
 import { readStoredValue, writeStoredValue } from '@/lib/persistentStorage'
 
 const STORAGE_KEY = 'oc:sidebar:collapsed'
+
+const booleanStorageSchema = z.boolean()
 
 let collapsedSnapshot: boolean | null = null
 const listeners = new Set<() => void>()
@@ -11,12 +15,8 @@ function readStoredCollapsed(): boolean {
   if (stored === null) {
     return false
   }
-  try {
-    const parsed: unknown = JSON.parse(stored)
-    return typeof parsed === 'boolean' ? parsed : false
-  } catch {
-    return false
-  }
+  const parsed = booleanStorageSchema.safeParse(parseJsonText(stored))
+  return parsed.success ? parsed.data : false
 }
 
 function getCollapsedSnapshot(): boolean {
@@ -42,10 +42,6 @@ function toggleCollapsed(): void {
   listeners.forEach((listener) => listener())
 }
 
-/**
- * The persisted desktop sidebar collapse preference, shared by the sidebar's own toggle and the
- * global shortcut so both stay in sync.
- */
 export function useSidebarCollapsed(): [boolean, () => void] {
   const collapsed = useSyncExternalStore(
     subscribeToCollapsed,

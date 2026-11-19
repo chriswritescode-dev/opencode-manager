@@ -64,9 +64,13 @@ export function useNotifications() {
       if (!reg) throw new Error("Service worker not registered");
       if (!vapidData?.publicKey) throw new Error("VAPID key not available");
 
+      const keyBytes = urlBase64ToUint8Array(vapidData.publicKey)
+      const applicationServerKey = new ArrayBuffer(keyBytes.length)
+      new Uint8Array(applicationServerKey).set(keyBytes)
+
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey).buffer as ArrayBuffer,
+        applicationServerKey,
       });
 
       const json = subscription.toJSON();

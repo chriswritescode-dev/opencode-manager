@@ -42,14 +42,14 @@ function rejectDirectory(c: Context): Response {
   return c.json({ error: 'An absolute directory is required' }, 400)
 }
 
-function handleTerminalError(c: Context, error: unknown) {
-  if (error instanceof TerminalNotFoundError) {
-    return c.json({ error: error.message }, 404)
+function handleTerminalError(c: Context, cause: unknown) {
+  if (cause instanceof TerminalNotFoundError) {
+    return c.json({ error: cause.message }, 404)
   }
-  if (error instanceof OpenCodeServerError) {
-    return handleServiceError(c, error, 'Terminal request failed', OpenCodeServerError)
+  if (cause instanceof OpenCodeServerError) {
+    return handleServiceError(c, cause, 'Terminal request failed', OpenCodeServerError)
   }
-  return handleOpenCodeError(c, error, 'Terminal request failed')
+  return handleOpenCodeError(c, cause, 'Terminal request failed')
 }
 
 export function createOpenCodeServerTerminalRoutes(resolveTerminalService: ServerTerminalServiceResolver) {

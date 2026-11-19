@@ -7,6 +7,7 @@ import { Readable, Transform } from 'stream'
 import { pipeline } from 'stream/promises'
 import { join, resolve } from 'path'
 import * as fsp from 'fs/promises'
+import { z } from 'zod'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import {
   MirrorTargetBranchRequestSchema,
@@ -26,11 +27,12 @@ import {
   listGitWorktrees,
   resolveRepoWorkingDirectory,
 } from '../../services/repo'
-import type { RepoWorkspaceService } from '../../services/repo-workspace'
-import type { GitAuthService } from '../../services/git-auth'
+import type { RepoWorkspaceProvider } from '../../services/repo-workspace'
+import type { GitAuthEnvironmentProvider } from '../../services/git-auth'
 import type { OpenCodeClient } from '../../services/opencode/client'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
+import { parseJsonBody } from '../../utils/route-helpers'
 import { canonicalPathSync, mkdirSyncSafe } from '../../utils/fs-safe'
 import { safeGitOut, gitOut } from './repo-sync-helpers'
 import {
@@ -51,26 +53,58 @@ import {
 
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo']
 
-interface BeginBody {
-  create?: boolean
-  name?: string
-  originUrl?: string
-  branch?: string
-  force?: boolean
+export interface MirrorRouteDeps {
+  getRepoById: typeof getRepoById
+  updateLastPulled: typeof updateLastPulled
+  updateRepoBranch: typeof updateRepoBranch
+  deleteRepo: typeof deleteRepo
+  ensureMirrorTargetPath: typeof ensureMirrorTargetPath
+  createRepoRow: typeof createRepoRow
+  isDirectoryInUse: typeof isDirectoryInUse
+  isRepoInUse: typeof isRepoInUse
+  resolveRepoWorkingDirectory: typeof resolveRepoWorkingDirectory
+  listRepoSiblings: typeof listRepoSiblings
+  listGitWorktrees: typeof listGitWorktrees
+  gitOut: typeof gitOut
+  safeGitOut: typeof safeGitOut
 }
 
-interface CommitBody {
-  uploadId: string
-  totalParts: number
-  gzip?: boolean
+export const mirrorRouteDeps: MirrorRouteDeps = {
+  getRepoById,
+  updateLastPulled,
+  updateRepoBranch,
+  deleteRepo,
+  ensureMirrorTargetPath,
+  createRepoRow,
+  isDirectoryInUse,
+  isRepoInUse,
+  resolveRepoWorkingDirectory,
+  listRepoSiblings,
+  listGitWorktrees,
+  gitOut,
+  safeGitOut,
 }
 
-interface PatchBody {
-  baseHead?: string | null
-  patch?: string
-  force?: boolean
-  directory?: string
-}
+const BeginBodySchema = z.object({
+  create: z.boolean().optional(),
+  name: z.string().optional(),
+  originUrl: z.string().optional(),
+  branch: z.string().optional(),
+  force: z.boolean().optional(),
+})
+
+const CommitBodySchema = z.object({
+  uploadId: z.string().optional(),
+  totalParts: z.number().optional(),
+  gzip: z.boolean().optional(),
+})
+
+const PatchBodySchema = z.object({
+  baseHead: z.string().nullish(),
+  patch: z.string().optional(),
+  force: z.boolean().optional(),
+  directory: z.string().optional(),
+})
 
 const LEGACY_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.1.2 (the mirror upload protocol changed to chunked uploads)'
 const LEGACY_MOVE_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.4.0 (/ocm-move now moves sessions into OpenCode worktrees)'
@@ -91,13 +125,13 @@ function gitRaw(repoPath: string, args: string[], env: NodeJS.ProcessEnv = proce
   })
 }
 
-async function createMirrorPatch(fullPath: string): Promise<string> {
+async function createMirrorPatch(fullPath: string, deps: MirrorRouteDeps): Promise<string> {
   const untracked = (await gitRaw(fullPath, ['ls-files', '--others', '--exclude-standard', '-z']).catch(() => ''))
     .split('\0')
     .filter(Boolean)
   if (untracked.length === 0) return gitRaw(fullPath, ['diff', '--binary', 'HEAD', '--'])
 
-  const indexPath = (await safeGitOut(fullPath, ['rev-parse', '--git-path', 'index']))?.trim()
+  const indexPath = (await deps.safeGitOut(fullPath, ['rev-parse', '--git-path', 'index']))?.trim()
   const tempIndexDir = mkdtempSync(join(getReposPath(), '.ocm-index-'))
   const tempIndex = join(tempIndexDir, 'index')
   const env = { ...process.env, GIT_INDEX_FILE: tempIndex }
@@ -143,16 +177,16 @@ async function listLocalBranchNames(fullPath: string): Promise<Set<string>> {
   return new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))
 }
 
-async function isValidBranchName(repoPath: string, name: string): Promise<boolean> {
+async function isValidBranchName(repoPath: string, name: string, deps: MirrorRouteDeps): Promise<boolean> {
   if (name.startsWith('-')) return false
-  return (await safeGitOut(repoPath, ['check-ref-format', '--branch', name])) !== null
+  return (await deps.safeGitOut(repoPath, ['check-ref-format', '--branch', name])) !== null
 }
 
-async function checkoutState(directory: string): Promise<MirrorCheckoutState> {
+async function checkoutState(directory: string, deps: MirrorRouteDeps): Promise<MirrorCheckoutState> {
   const [branch, head, status] = await Promise.all([
     currentBranchName(directory),
-    safeGitOut(directory, ['rev-parse', 'HEAD']),
-    safeGitOut(directory, ['status', '--porcelain', '--untracked-files=all']),
+    deps.safeGitOut(directory, ['rev-parse', 'HEAD']),
+    deps.safeGitOut(directory, ['status', '--porcelain', '--untracked-files=all']),
   ])
   return {
     directory,
@@ -172,21 +206,23 @@ function isMirrorCheckoutSibling(repo: Repo): (sibling: RepoSibling) => boolean 
 async function listMirrorCheckoutSiblings(
   db: Database,
   repo: Repo,
-  gitAuthService: GitAuthService,
+  gitAuthService: GitAuthEnvironmentProvider,
   openCodeClient: OpenCodeClient,
+  deps: MirrorRouteDeps,
 ): Promise<RepoSibling[]> {
-  return listRepoSiblings(db, repo.id, gitAuthService.getGitEnvironment(), openCodeClient, isMirrorCheckoutSibling(repo))
+  return deps.listRepoSiblings(db, repo.id, gitAuthService.getGitEnvironment(), openCodeClient, isMirrorCheckoutSibling(repo))
 }
 
 async function resolveMirrorDirectory(
   db: Database,
   repo: Repo,
   directory: string | undefined,
-  gitAuthService: GitAuthService,
+  gitAuthService: GitAuthEnvironmentProvider,
   openCodeClient: OpenCodeClient,
+  deps: MirrorRouteDeps,
 ): Promise<string | null> {
-  return resolveRepoWorkingDirectory(repo, directory, () =>
-    listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient),
+  return deps.resolveRepoWorkingDirectory(repo, directory, () =>
+    listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient, deps),
   )
 }
 
@@ -208,8 +244,8 @@ function nextSuffixedWorktreeBranch(branch: string, localBranches: Set<string>, 
   }
 }
 
-async function branchHeadSha(fullPath: string, branch: string): Promise<string | null> {
-  const sha = await safeGitOut(fullPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+async function branchHeadSha(fullPath: string, branch: string, deps: MirrorRouteDeps): Promise<string | null> {
+  const sha = await deps.safeGitOut(fullPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
   return sha?.trim() || null
 }
 
@@ -294,7 +330,7 @@ async function stageBundleFromBody(body: ReadableStream, dirPrefix: string, patc
   const bundleDir = mkdtempSync(join(stagingRoot, dirPrefix))
   try {
     const bundlePath = join(bundleDir, 'repo.bundle')
-    const readable = Readable.fromWeb(body as unknown as Parameters<typeof Readable.fromWeb>[0])
+    const readable = Readable.fromWeb(body)
     const patchChunks: Buffer[] = []
     let patchRead = 0
     const splitPatch = new Transform({
@@ -329,8 +365,9 @@ async function stageBundleFromBody(body: ReadableStream, dirPrefix: string, patc
 export function createInternalRepoMirrorRoutes(
   db: Database,
   openCodeClient: OpenCodeClient,
-  gitAuthService: GitAuthService,
-  repoWorkspaces: RepoWorkspaceService,
+  gitAuthService: GitAuthEnvironmentProvider,
+  repoWorkspaces: RepoWorkspaceProvider,
+  deps: MirrorRouteDeps = mirrorRouteDeps,
 ) {
   const app = new Hono()
 
@@ -340,12 +377,11 @@ export function createInternalRepoMirrorRoutes(
 
   app.post('/:repoId/mirror/begin', async (c) => {
     const repoIdRaw = c.req.param('repoId')
-    let body: BeginBody
-    try {
-      body = (await c.req.json()) as BeginBody
-    } catch {
-      return c.json({ error: 'invalid json body' }, 400)
+    const parsedBody = await parseJsonBody(c, BeginBodySchema, { invalidMessage: 'invalid json body' })
+    if (!parsedBody.ok) {
+      return parsedBody.response
     }
+    const body = parsedBody.data
 
     const force = body.force === true
     const create = body.create === true
@@ -357,8 +393,8 @@ export function createInternalRepoMirrorRoutes(
 
     if (repoIdRaw === '0' && create) {
       if (!body.name) return c.json({ error: 'name required', message: 'provide name in body' }, 400)
-      const target = ensureMirrorTargetPath(body.name)
-      const { repo: newRepo, created: wasCreated } = createRepoRow(db, {
+      const target = deps.ensureMirrorTargetPath(body.name)
+      const { repo: newRepo, created: wasCreated } = deps.createRepoRow(db, {
         name: body.name,
         originUrl: body.originUrl,
         localPath: target.localPath,
@@ -370,18 +406,18 @@ export function createInternalRepoMirrorRoutes(
       created = wasCreated
       createdRepoId = wasCreated ? newRepo.id : undefined
 
-      if (!wasCreated && !force && isRepoInUse(db, repoId)) {
+      if (!wasCreated && !force && deps.isRepoInUse(db, repoId)) {
         return c.json({ error: 'repo_in_use', message: 'open OpenCode sessions are using this repo; rerun with force=1' }, 409)
       }
     } else {
       const repoIdNum = Number(repoIdRaw)
       if (!Number.isFinite(repoIdNum)) return c.json({ error: 'invalid repoId' }, 400)
-      const repo = getRepoById(db, repoIdNum)
+      const repo = deps.getRepoById(db, repoIdNum)
       if (!repo) return c.json({ error: 'repo not found' }, 404)
       repoId = repo.id
       fullPath = repo.fullPath
 
-      if (!force && isRepoInUse(db, repoId)) {
+      if (!force && deps.isRepoInUse(db, repoId)) {
         return c.json({ error: 'repo_in_use', message: 'open OpenCode sessions are using this repo; rerun with force=1' }, 409)
       }
     }
@@ -392,7 +428,7 @@ export function createInternalRepoMirrorRoutes(
     } catch (error) {
       logger.error('mirror begin failed:', error)
       if (createdRepoId !== undefined) {
-        try { deleteRepo(db, createdRepoId) } catch { /* ignore */ }
+        try { deps.deleteRepo(db, createdRepoId) } catch { }
       }
       return c.json({ error: getErrorMessage(error) }, 500)
     }
@@ -422,7 +458,7 @@ export function createInternalRepoMirrorRoutes(
 
     const partPath = getPartPath(uploadId, index)
     try {
-      const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
+      const body = Readable.fromWeb(rawBody)
       await pipeline(body, createWriteStream(partPath))
       const stat = await fsp.stat(partPath)
       return c.json({ index, size: stat.size })
@@ -434,14 +470,12 @@ export function createInternalRepoMirrorRoutes(
   })
 
   app.post('/:repoId/mirror/commit', async (c) => {
-    let body: CommitBody
-    try {
-      body = (await c.req.json()) as CommitBody
-    } catch {
-      return c.json({ error: 'invalid json body' }, 400)
+    const parsedBody = await parseJsonBody(c, CommitBodySchema, { invalidMessage: 'invalid json body' })
+    if (!parsedBody.ok) {
+      return parsedBody.response
     }
 
-    const { uploadId, totalParts, gzip } = body
+    const { uploadId, totalParts, gzip } = parsedBody.data
     if (!uploadId) return c.json({ error: 'uploadId required' }, 400)
     if (!isValidTotalParts(totalParts)) return c.json({ error: TOTAL_PARTS_INVALID_MESSAGE }, 400)
 
@@ -457,11 +491,11 @@ export function createInternalRepoMirrorRoutes(
       const swap = await atomicSwapIntoPlace(extracted.extractedRoot, meta.fullPath)
       backupDir = swap.backupDir
 
-      const branchName = await safeGitOut(meta.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const head = await safeGitOut(meta.fullPath, ['rev-parse', 'HEAD'])
+      const branchName = await deps.safeGitOut(meta.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+      const head = await deps.safeGitOut(meta.fullPath, ['rev-parse', 'HEAD'])
 
-      if (branchName) updateRepoBranch(db, meta.repoId, branchName.trim())
-      updateLastPulled(db, meta.repoId)
+      if (branchName) deps.updateRepoBranch(db, meta.repoId, branchName.trim())
+      deps.updateLastPulled(db, meta.repoId)
 
       await carryOverIgnoredFiles(backupDir, meta.fullPath)
       await discardBackup(backupDir)
@@ -481,7 +515,7 @@ export function createInternalRepoMirrorRoutes(
       logger.error('mirror commit failed:', error)
       await restoreBackup(meta.fullPath, backupDir)
       if (meta.createdRepoId !== undefined) {
-        try { deleteRepo(db, meta.createdRepoId) } catch { /* ignore */ }
+        try { deps.deleteRepo(db, meta.createdRepoId) } catch { }
       }
       if (staging) {
         await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
@@ -495,7 +529,7 @@ export function createInternalRepoMirrorRoutes(
     const uploadId = c.req.param('uploadId')
     const meta = await readUploadMeta(uploadId)
     if (meta?.createdRepoId !== undefined) {
-      try { deleteRepo(db, meta.createdRepoId) } catch { /* ignore */ }
+      try { deps.deleteRepo(db, meta.createdRepoId) } catch { }
     }
     await deleteUploadSession(uploadId)
     return c.json({ ok: true })
@@ -505,10 +539,10 @@ export function createInternalRepoMirrorRoutes(
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
     let bundlePath: string | undefined
@@ -518,7 +552,7 @@ export function createInternalRepoMirrorRoutes(
       stream.on('close', () => {
         if (bundlePath) fsp.rm(join(bundlePath, '..'), { recursive: true, force: true }).catch(() => {})
       })
-      return new Response(Readable.toWeb(stream) as ReadableStream, {
+      return new Response(Readable.toWeb(stream), {
         headers: { 'Content-Type': 'application/octet-stream' },
       })
     } catch (error) {
@@ -532,14 +566,14 @@ export function createInternalRepoMirrorRoutes(
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
     const force = c.req.query('force') === '1'
-    if (isDirectoryInUse(directory) && !force) {
+    if (deps.isDirectoryInUse(directory) && !force) {
       return c.json({ error: 'repo_in_use', message: 'open OpenCode sessions are using this repo; rerun with force=1' }, 409)
     }
 
@@ -556,10 +590,10 @@ export function createInternalRepoMirrorRoutes(
       bundleDir = staged.bundleDir
       await importBundle(directory, staged.bundlePath, branch, requireCurrentBranch, force, targetBranch)
 
-      const state = await checkoutState(directory)
+      const state = await checkoutState(directory, deps)
       if (directory === repo.fullPath) {
-        if (state.branch) updateRepoBranch(db, repoId, state.branch)
-        updateLastPulled(db, repoId)
+        if (state.branch) deps.updateRepoBranch(db, repoId, state.branch)
+        deps.updateLastPulled(db, repoId)
       }
 
       return c.json({
@@ -591,18 +625,18 @@ export function createInternalRepoMirrorRoutes(
     const branchParsed = MirrorTargetBranchRequestSchema.safeParse({ branch: c.req.query('branch') })
     if (!branchParsed.success) return c.json({ error: 'branch required' }, 400)
     const { branch } = branchParsed.data
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
-    if (!(await isValidBranchName(repo.fullPath, branch))) return c.json({ error: 'invalid branch name' }, 400)
+    if (!(await isValidBranchName(repo.fullPath, branch, deps))) return c.json({ error: 'invalid branch name' }, 400)
 
     try {
       const env = gitAuthService.getGitEnvironment()
       const [main, siblings, gitWorktrees, localBranches, branchHead] = await Promise.all([
-        checkoutState(repo.fullPath),
-        listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient),
-        listGitWorktrees(repo.fullPath, env),
+        checkoutState(repo.fullPath, deps),
+        listMirrorCheckoutSiblings(db, repo, gitAuthService, openCodeClient, deps),
+        deps.listGitWorktrees(repo.fullPath, env),
         listLocalBranchNames(repo.fullPath),
-        branchHeadSha(repo.fullPath, branch),
+        branchHeadSha(repo.fullPath, branch, deps),
       ])
 
       const branchByCanonicalPath = new Map<string, string | null>()
@@ -623,7 +657,7 @@ export function createInternalRepoMirrorRoutes(
         .filter((candidate): candidate is { sibling: RepoSibling; rank: number } => candidate.rank !== null)
         .sort((left, right) => left.rank - right.rank)
 
-      const worktrees = await Promise.all(candidates.map((candidate) => checkoutState(candidate.sibling.fullPath)))
+      const worktrees = await Promise.all(candidates.map((candidate) => checkoutState(candidate.sibling.fullPath, deps)))
 
       const response: MirrorCheckoutsResponse = {
         main,
@@ -647,10 +681,10 @@ export function createInternalRepoMirrorRoutes(
     const targetBranch = c.req.header('x-ocm-target-branch')?.trim()
     if (!branch || !targetBranch) return c.json({ error: 'branch and target branch required' }, 400)
 
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    if (!(await isValidBranchName(repo.fullPath, branch)) || !(await isValidBranchName(repo.fullPath, targetBranch))) {
+    if (!(await isValidBranchName(repo.fullPath, branch, deps)) || !(await isValidBranchName(repo.fullPath, targetBranch, deps))) {
       return c.json({ error: 'invalid branch name' }, 400)
     }
 
@@ -661,7 +695,7 @@ export function createInternalRepoMirrorRoutes(
       patchBytes = Number(patchBytesHeader.trim())
     }
 
-    const gitWorktrees = await listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
+    const gitWorktrees = await deps.listGitWorktrees(repo.fullPath, gitAuthService.getGitEnvironment())
     if (gitWorktrees.some((worktree) => worktree.branch === targetBranch)) {
       return c.json({ error: 'branch_in_use', message: `branch '${targetBranch}' is checked out in a worktree of this repository` }, 409)
     }
@@ -680,7 +714,7 @@ export function createInternalRepoMirrorRoutes(
           await applyMirrorPatch(directory, staged.patch)
         },
       })
-      const state = await checkoutState(worktree.directory)
+      const state = await checkoutState(worktree.directory, deps)
       const response: MirrorWorktreeCreateResponse = {
         repoId: repo.id,
         fullPath: worktree.directory,
@@ -702,13 +736,13 @@ export function createInternalRepoMirrorRoutes(
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
-    const state = await checkoutState(directory)
+    const state = await checkoutState(directory, deps)
     return c.json({
       repoId: repo.id,
       branch: state.branch,
@@ -723,13 +757,13 @@ export function createInternalRepoMirrorRoutes(
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
     const sha = c.req.param('sha')
     if (!/^[0-9a-f]{7,64}$/i.test(sha)) return c.json({ error: 'invalid sha' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
-    const ancestry = await safeGitOut(directory, ['merge-base', '--is-ancestor', sha, 'HEAD'])
+    const ancestry = await deps.safeGitOut(directory, ['merge-base', '--is-ancestor', sha, 'HEAD'])
     return c.json({ repoId: repo.id, contained: ancestry !== null })
   })
 
@@ -737,15 +771,15 @@ export function createInternalRepoMirrorRoutes(
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
-    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, c.req.query('directory'), gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
     try {
-      const state = await checkoutState(directory)
-      const patch = await createMirrorPatch(directory)
+      const state = await checkoutState(directory, deps)
+      const patch = await createMirrorPatch(directory, deps)
       return c.json({
         repoId: repo.id,
         branch: state.branch,
@@ -763,29 +797,25 @@ export function createInternalRepoMirrorRoutes(
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
 
-    let body: PatchBody
-    try {
-      body = (await c.req.json()) as PatchBody
-    } catch {
-      return c.json({ error: 'invalid json body' }, 400)
+    const parsedBody = await parseJsonBody(c, PatchBodySchema, { invalidMessage: 'invalid json body' })
+    if (!parsedBody.ok) {
+      return parsedBody.response
     }
+    const body = parsedBody.data
 
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
     if (!body.patch && body.patch !== '') return c.json({ error: 'patch required' }, 400)
-    if (body.directory !== undefined && typeof body.directory !== 'string') {
-      return c.json({ error: 'Directory is not part of this repository' }, 400)
-    }
 
-    const directory = await resolveMirrorDirectory(db, repo, body.directory, gitAuthService, openCodeClient)
+    const directory = await resolveMirrorDirectory(db, repo, body.directory, gitAuthService, openCodeClient, deps)
     if (!directory) return c.json({ error: 'Directory is not part of this repository' }, 400)
 
-    if (body.force !== true && isDirectoryInUse(directory)) {
+    if (body.force !== true && deps.isDirectoryInUse(directory)) {
       return c.json({ error: 'repo_in_use', message: 'open OpenCode sessions are using this repo; rerun with force=1' }, 409)
     }
 
     try {
-      const state = await checkoutState(directory)
+      const state = await checkoutState(directory, deps)
       const baseHead = body.baseHead?.trim() || null
       if (baseHead && state.head && baseHead !== state.head) {
         return c.json({ error: 'head_mismatch', message: 'Manager repo HEAD differs from patch base' }, 409)
@@ -794,8 +824,8 @@ export function createInternalRepoMirrorRoutes(
       await applyMirrorPatch(directory, body.patch)
 
       if (directory === repo.fullPath) {
-        if (state.branch) updateRepoBranch(db, repoId, state.branch)
-        updateLastPulled(db, repoId)
+        if (state.branch) deps.updateRepoBranch(db, repoId, state.branch)
+        deps.updateLastPulled(db, repoId)
       }
 
       return c.json({
@@ -816,7 +846,7 @@ export function createInternalRepoMirrorRoutes(
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)
     if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
-    const repo = getRepoById(db, repoId)
+    const repo = deps.getRepoById(db, repoId)
     if (!repo) return c.json({ error: 'repo not found' }, 404)
 
     const compress = c.req.query('compress') === 'gzip'
@@ -829,7 +859,7 @@ export function createInternalRepoMirrorRoutes(
 
     let ignoreFile: string | undefined
     try {
-      const ignored = await gitOut(fullPath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
+      const ignored = await deps.gitOut(fullPath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
       if (ignored.trim()) {
         const excludeParent = getStagingRoot()
         mkdirSyncSafe(excludeParent)
@@ -837,7 +867,7 @@ export function createInternalRepoMirrorRoutes(
         writeFileSync(join(ignoreFile, '.gitignore'), ignored)
         excludeArgs.push('--exclude-from', join(ignoreFile, '.gitignore'))
       }
-    } catch { /* ignore git ls-files errors */ }
+    } catch { }
 
     const tarArgs = ['-c', '-C', fullPath, ...excludeArgs, '.']
     if (compress) {

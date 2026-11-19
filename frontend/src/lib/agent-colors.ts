@@ -1,12 +1,14 @@
-const THEME_NAME_TOKENS: Record<string, string> = {
-  primary: 'var(--color-primary)',
-  secondary: 'var(--color-foreground)',
-  accent: 'var(--color-info)',
-  success: 'var(--color-success)',
-  warning: 'var(--color-warning)',
-  error: 'var(--color-destructive)',
-  info: 'var(--color-info)',
-}
+import type { CSSProperties } from 'react'
+
+const THEME_NAME_TOKENS = new Map<string, string>([
+  ['primary', 'var(--color-primary)'],
+  ['secondary', 'var(--color-foreground)'],
+  ['accent', 'var(--color-info)'],
+  ['success', 'var(--color-success)'],
+  ['warning', 'var(--color-warning)'],
+  ['error', 'var(--color-destructive)'],
+  ['info', 'var(--color-info)'],
+])
 
 const DEFAULT_AGENT_NAMES = new Set(['plan', 'build', 'docs', 'ask'])
 
@@ -23,7 +25,7 @@ function resolveAgentColor(agentName: string, apiColor?: string): string {
   }
 
   if (apiColor) {
-    const themeToken = THEME_NAME_TOKENS[apiColor.toLowerCase()]
+    const themeToken = THEME_NAME_TOKENS.get(apiColor.toLowerCase())
     if (themeToken) {
       return themeToken
     }
@@ -37,10 +39,20 @@ function resolveAgentColor(agentName: string, apiColor?: string): string {
   return FALLBACK_COLOR
 }
 
+interface AgentStyleVars {
+  '--agent-color': string
+  '--agent-bg': string
+  '--agent-bg-hover': string
+  '--agent-border': string
+  '--agent-border-hover': string
+  '--agent-shadow': string
+  '--agent-shadow-hover': string
+}
+
 export function getAgentStyleVars(
   agentName: string,
   apiColor?: string
-): Record<string, string> {
+): CSSProperties & AgentStyleVars {
   const color = resolveAgentColor(agentName, apiColor)
   const mix = (percent: number) => `color-mix(in oklab, ${color} ${percent}%, transparent)`
 

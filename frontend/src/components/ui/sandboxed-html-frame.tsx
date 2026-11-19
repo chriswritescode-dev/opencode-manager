@@ -1,9 +1,5 @@
 import { cn } from '@/lib/utils'
 
-/**
- * Renders untrusted HTML in an iframe restricted to `allow-scripts` without same-origin access.
- * Owns the artifact sandbox policy so callers cannot widen it; remounts when `reloadKey` changes.
- */
 export function SandboxedHtmlFrame({
   src,
   title,

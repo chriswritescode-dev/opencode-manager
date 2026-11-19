@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import { WALKTHROUGH_GENERATION_TIMEOUT_MS } from '@opencode-manager/shared/schemas'
 import {
   claimChangeWalkthroughGeneration,
@@ -11,15 +12,17 @@ import {
   updateChangeWalkthrough,
   type ClaimChangeWalkthroughGenerationInput,
 } from '../../src/db/change-walkthroughs'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
 import migration202610151200 from '../../src/db/migrations/202610151200-change-walkthrough-sessions'
 import migration202610161200 from '../../src/db/migrations/202610161200-change-walkthrough-execution'
+import { selectRows, selectTableColumns } from '../../src/db/rows'
+import { createTestDatabase } from '../helpers/test-database'
 
 const SESSION_ID = 'ses_walkthrough'
 const SESSION_SOURCE = 'session'
 const STAGED_SOURCE = 'staged'
 const NOW = 10_000_000
+
+const IndexInfoSchema = z.object({ name: z.string() })
 
 function claim(
   overrides: Partial<ClaimChangeWalkthroughGenerationInput> = {},
@@ -49,8 +52,7 @@ describe('change walkthroughs', () => {
   let db: Database
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
   })
 
   afterEach(() => {
@@ -58,10 +60,7 @@ describe('change walkthroughs', () => {
   })
 
   it('creates the sessions table with the expected columns, primary key, and index', () => {
-    const columns = db.prepare('PRAGMA table_info(change_walkthroughs)').all() as Array<{
-      name: string
-      pk: number
-    }>
+    const columns = selectTableColumns(db, 'change_walkthroughs')
     const names = columns.map((column) => column.name)
     expect(names).toEqual(
       expect.arrayContaining([
@@ -83,7 +82,7 @@ describe('change walkthroughs', () => {
       .map((column) => column.name)
     expect(primaryKey).toEqual(['session_id', 'source_key'])
 
-    const indexes = db.prepare('PRAGMA index_list(change_walkthroughs)').all() as Array<{ name: string }>
+    const indexes = selectRows(db, IndexInfoSchema, 'PRAGMA index_list(change_walkthroughs)')
     expect(indexes.map((index) => index.name)).toContain('change_walkthroughs_walkthrough_session')
   })
 
@@ -92,7 +91,7 @@ describe('change walkthroughs', () => {
   })
 
   it('adds the execution_started_at column idempotently', () => {
-    const columns = db.prepare('PRAGMA table_info(change_walkthroughs)').all() as Array<{ name: string }>
+    const columns = selectTableColumns(db, 'change_walkthroughs')
     expect(columns.map((column) => column.name)).toContain('execution_started_at')
 
     expect(() => migration202610161200.up(db)).not.toThrow()
@@ -286,7 +285,8 @@ describe('change walkthroughs', () => {
     ).toMatchObject({ status: 'ready', executionStartedAt: null })
   })
 
-  it('updates a row whose status matches and persists the patch', () => {    expect(claimChangeWalkthroughGeneration(db, claim())).toBe(true)
+  it('updates a row whose status matches and persists the patch', () => {
+    expect(claimChangeWalkthroughGeneration(db, claim())).toBe(true)
 
     const failed = updateChangeWalkthrough(db, SESSION_ID, SESSION_SOURCE, ['generating'], {
       status: 'failed',

@@ -1,22 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
+import { z } from 'zod'
 import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
+import type { FormInfo, PermissionRequest } from '@opencode-manager/shared/opencode'
 import type { OpenCodeServer, OpenCodeServerTestResult } from '@opencode-manager/shared/schemas'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
 import { sseAggregator } from '../../src/services/sse-aggregator'
-import { RemoteServerEventHub } from '../../src/services/remote-server-events'
-import type {
-  OpenCodeServerChange,
-  OpenCodeServerConnection,
-  OpenCodeServerRegistry,
-} from '../../src/services/opencode-server-registry'
+import { RemoteServerEventHub, type RemoteServerEventApi, type RemoteServerEventHubRegistry } from '../../src/services/remote-server-events'
+import type { OpenCodeServerChange, OpenCodeServerConnection } from '../../src/services/opencode-server-registry'
+import { createStubOpenCodeApi, sessionInfo } from '../helpers/stub-opencode-client'
 
 const SERVER_A: OpenCodeServer = {
   id: 'srv_a',
@@ -40,21 +31,101 @@ const SERVER_B: OpenCodeServer = {
   updatedAt: 1,
 }
 
-const SERVER_CONNECTED: V2Event = { id: 'evt_connected', type: 'server.connected', data: {} }
+const SERVER_CONNECTED = { id: 'evt_connected', type: 'server.connected', data: {} } satisfies V2Event
+
+const FORM_FIELDS = [{ key: 'continue', type: 'string' }] satisfies FormInfo['fields']
+
+type ActiveSessions = Awaited<ReturnType<OpenCodeApi['session']['active']>>
+type PermissionListOutput = Awaited<ReturnType<OpenCodeApi['permission']['request']['list']>>
+type SessionCreatedEvent = Extract<V2Event, { type: 'session.created' }>
+type SessionForkedEvent = Extract<V2Event, { type: 'session.forked' }>
+type SessionDeletedEvent = Extract<V2Event, { type: 'session.deleted' }>
+type SessionExecutionSucceededEvent = Extract<V2Event, { type: 'session.execution.succeeded' }>
+
+function sessionIdle(sessionID: string, directory?: string): V2Event {
+  const event = { id: 'evt_1', created: 1, type: 'session.idle', data: { sessionID } } satisfies V2Event
+  return directory === undefined ? event : { ...event, location: { directory } }
+}
+
+function sessionStatus(sessionID: string, status: 'busy' | 'idle', directory: string): V2Event {
+  return {
+    id: 'evt_1',
+    created: 1,
+    type: 'session.status',
+    location: { directory },
+    data: { sessionID, status: { type: status } },
+  } satisfies V2Event
+}
+
+function sessionCreated(sessionID: string, options: { directory?: string; parentID?: string } = {}): V2Event {
+  const directory = options.directory ?? '/repo'
+  const data: SessionCreatedEvent['data'] = {
+    sessionID,
+    projectID: 'proj_stub',
+    location: { directory },
+    slug: sessionID,
+    version: '2.0.15',
+  }
+  if (options.parentID !== undefined) data.parentID = options.parentID
+  const event: SessionCreatedEvent = {
+    id: 'evt_1',
+    created: 1,
+    type: 'session.created',
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
+    data,
+  }
+  if (options.directory !== undefined) event.location = { directory: options.directory }
+  return event
+}
+
+function sessionForked(sessionID: string, parentID: string): V2Event {
+  const event: SessionForkedEvent = {
+    id: 'evt_1',
+    created: 1,
+    type: 'session.forked',
+    durable: { aggregateID: sessionID, seq: 1, version: 2 },
+    data: { sessionID, parentID, boundary: { type: 'before', messageID: 'msg_1' } },
+  }
+  return event
+}
+
+function sessionDeleted(sessionID: string): V2Event {
+  const event: SessionDeletedEvent = {
+    id: 'evt_1',
+    created: 1,
+    type: 'session.deleted',
+    durable: { aggregateID: sessionID, seq: 1, version: 2 },
+    data: { sessionID },
+  }
+  return event
+}
+
+function sessionExecutionSucceeded(sessionID: string): V2Event {
+  const event: SessionExecutionSucceededEvent = {
+    id: 'evt_1',
+    created: 1,
+    type: 'session.execution.succeeded',
+    durable: { aggregateID: sessionID, seq: 1, version: 1 },
+    data: { sessionID },
+  }
+  return event
+}
+
+type StreamFailure = string | Error | { message?: string; code?: number }
 
 interface ControlledEventStream {
   iterable: AsyncIterable<V2Event>
   signal: AbortSignal
   push: (event: V2Event) => void
   end: () => void
-  fail: (error: unknown) => void
+  fail: (error: StreamFailure) => void
 }
 
 function createControlledEventStream(): ControlledEventStream {
   const queue: V2Event[] = []
   let finished = false
-  let failure: { value: unknown } | null = null
-  let signal: AbortSignal
+  let failure: { value: StreamFailure } | null = null
+  let abortSignal!: AbortSignal
   let notify: (() => void) | null = null
 
   const wake = (): void => {
@@ -85,12 +156,13 @@ function createControlledEventStream(): ControlledEventStream {
   return {
     iterable,
     get signal() {
-      return signal
+      return abortSignal
     },
     set signal(next: AbortSignal) {
-      signal = next
+      abortSignal = next
       next.addEventListener('abort', () => {
-        failure = { value: next.reason ?? new Error('aborted') }
+        const reason = next.reason
+        failure = { value: reason instanceof Error ? reason : new Error('aborted') }
         wake()
       }, { once: true })
     },
@@ -106,7 +178,7 @@ function createControlledEventStream(): ControlledEventStream {
       failure = { value: error }
       wake()
     },
-  } as ControlledEventStream
+  }
 }
 
 interface CapturedClient {
@@ -128,29 +200,37 @@ function createCapturingClient(): CapturedClient {
   }
 }
 
-function parseFrame(frame: string): {
-  directory: string | null
-  serverId?: string
-  payload: { id?: string; type: string; data: Record<string, unknown> }
-} {
-  return JSON.parse(frame.replace(/^event: message\ndata: /, '').trim())
+const FrameSchema = z.object({
+  directory: z.string().nullable(),
+  serverId: z.string().optional(),
+  payload: z.object({
+    id: z.string().optional(),
+    created: z.number().optional(),
+    type: z.string(),
+    location: z.object({ directory: z.string() }).optional(),
+    data: JsonValueSchema,
+  }),
+})
+
+function parseFrame(frame: string) {
+  return FrameSchema.parse(JSON.parse(frame.replace(/^event: message\ndata: /, '').trim()))
 }
 
 interface ApiFixture {
-  permissions?: Record<string, unknown[]>
-  forms?: Record<string, unknown[]>
-  active?: Record<string, { type: 'running' }>
+  permissions?: Record<string, PermissionRequest[]>
+  forms?: Record<string, FormInfo[]>
+  active?: ActiveSessions
   sessionDirectories?: Record<string, string>
 }
 
-function makeApi(fixture: ApiFixture, subscriptions: ControlledEventStream[]): OpenCodeApi {
+function makeApi(fixture: ApiFixture, subscriptions: ControlledEventStream[]): RemoteServerEventApi {
   const directoryOf = (input?: { location?: { directory?: string } }): string => input?.location?.directory ?? ''
 
   return {
     event: {
-      subscribe: (options: { signal?: AbortSignal; onActivity?: () => void }) => {
+      subscribe: (options?: { signal?: AbortSignal }) => {
         const stream = createControlledEventStream()
-        stream.signal = options.signal!
+        if (options?.signal) stream.signal = options.signal
         subscriptions.push(stream)
         return stream.iterable
       },
@@ -171,21 +251,22 @@ function makeApi(fixture: ApiFixture, subscriptions: ControlledEventStream[]): O
     },
     session: {
       active: vi.fn(async () => fixture.active ?? {}),
-      get: vi.fn(async (input: { sessionID: string }) => ({
+      get: vi.fn(async (input: { sessionID: string }) => sessionInfo({
+        id: input.sessionID,
         location: { directory: fixture.sessionDirectories?.[input.sessionID] ?? '' },
       })),
     },
-  } as unknown as OpenCodeApi
+  }
 }
 
 interface FakeServerTransport {
-  api: OpenCodeApi
+  api: RemoteServerEventApi
   subscriptions: ControlledEventStream[]
 }
 
 interface FakeRegistry {
-  registry: OpenCodeServerRegistry
-  api: OpenCodeApi
+  registry: RemoteServerEventHubRegistry
+  api: RemoteServerEventApi
   transport: (serverId: string) => FakeServerTransport
   latest: (serverId: string) => ControlledEventStream
   emit: (change: OpenCodeServerChange) => void
@@ -212,13 +293,13 @@ function createRegistry(servers: OpenCodeServer[], fixture: ApiFixture = {}): Fa
     return created
   }
 
-  const registry = {
-    list: () => {
+  const registry: RemoteServerEventHubRegistry = {
+    list: vi.fn(() => {
       listCalls += 1
       return Array.from(byId.values())
-    },
-    get: (serverId: string) => byId.get(serverId) ?? null,
-    getConnection: (serverId: string): OpenCodeServerConnection => {
+    }),
+    get: vi.fn((serverId: string) => byId.get(serverId) ?? null),
+    getConnection: vi.fn((serverId: string): OpenCodeServerConnection => {
       const server = byId.get(serverId)
       if (!server) throw new Error(`OpenCode server not found: ${serverId}`)
       if (!server.enabled) throw new Error(`OpenCode server is disabled: ${serverId}`)
@@ -226,17 +307,20 @@ function createRegistry(servers: OpenCodeServer[], fixture: ApiFixture = {}): Fa
         baseUrl: server.baseUrl,
         authorization: server.hasPassword ? 'Basic dXNlcjpwYXNz' : null,
       }
-    },
-    getClient: (serverId: string) => {
+    }),
+    getClient: vi.fn((serverId: string) => {
       clientCalls.push(serverId)
-      return { api: transport(serverId).api }
-    },
-    onChange: (listener: (change: OpenCodeServerChange) => void) => {
+      return {
+        api: transport(serverId).api,
+        forwardRaw: vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })),
+      }
+    }),
+    onChange: vi.fn((listener: (change: OpenCodeServerChange) => void) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
-    },
+    }),
     test: vi.fn(async () => ({ ok: true, version: '2.0.15', versionSupported: true, error: null })),
-  } as unknown as OpenCodeServerRegistry
+  }
 
   return {
     registry,
@@ -260,16 +344,6 @@ async function flushPromises(): Promise<void> {
   for (let i = 0; i < 10; i++) {
     await Promise.resolve()
   }
-}
-
-function remoteEvent(type: string, data: unknown, directory?: string): V2Event {
-  return {
-    id: 'evt_1',
-    created: 1,
-    type,
-    ...(directory ? { location: { directory } } : {}),
-    data,
-  } as V2Event
 }
 
 describe('RemoteServerEventHub event delivery', () => {
@@ -316,7 +390,7 @@ describe('RemoteServerEventHub event delivery', () => {
     otherServerClient.frames.length = 0
     localClient.frames.length = 0
 
-    stream.push(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    stream.push(sessionIdle('ses_1', '/repo'))
     await flushPromises()
 
     const envelope = {
@@ -343,11 +417,11 @@ describe('RemoteServerEventHub event delivery', () => {
 
     hub.start()
     const stream = fake.latest('srv_a')
-    stream.push(remoteEvent('session.created', { sessionID: 'ses_1', parentID: null }, '/repo'))
+    stream.push(sessionCreated('ses_1', { directory: '/repo' }))
     await flushPromises()
     client.frames.length = 0
 
-    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    stream.push(sessionExecutionSucceeded('ses_1'))
     await flushPromises()
 
     expect(client.frames.map(parseFrame)).toEqual([{
@@ -368,19 +442,19 @@ describe('RemoteServerEventHub event delivery', () => {
 
     hub.start()
     const stream = fake.latest('srv_a')
-    stream.push(remoteEvent('session.created', { sessionID: 'ses_parent' }, '/repo'))
-    stream.push(remoteEvent('session.forked', { sessionID: 'ses_fork', parentID: 'ses_parent' }))
+    stream.push(sessionCreated('ses_parent', { directory: '/repo' }))
+    stream.push(sessionForked('ses_fork', 'ses_parent'))
     await flushPromises()
     client.frames.length = 0
 
-    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    stream.push(sessionExecutionSucceeded('ses_fork'))
     await flushPromises()
     expect(client.frames.map(parseFrame).map(frame => frame.directory)).toEqual(['/repo'])
 
-    stream.push(remoteEvent('session.deleted', { sessionID: 'ses_fork' }))
+    stream.push(sessionDeleted('ses_fork'))
     await flushPromises()
     client.frames.length = 0
-    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_fork' }))
+    stream.push(sessionExecutionSucceeded('ses_fork'))
     await flushPromises()
 
     expect(client.frames.map(parseFrame)).toEqual([{
@@ -404,13 +478,13 @@ describe('RemoteServerEventHub event delivery', () => {
     sseAggregator.addClient('any-b', subscribedB.callback, subscribedB.writeFrame, ['srv_b|/repo'])
 
     hub.start()
-    fake.latest('srv_a').push(remoteEvent('server.connected', {}))
+    fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
 
     const envelope = {
       directory: null,
       serverId: 'srv_a',
-      payload: { id: 'evt_1', created: 1, type: 'server.connected', data: {} },
+      payload: { id: 'evt_connected', type: 'server.connected', data: {} },
     }
     expect(subscribedA.frames.map(parseFrame)).toEqual([envelope])
     expect(otherDirectoryA.frames.map(parseFrame)).toEqual([envelope])
@@ -422,7 +496,7 @@ describe('RemoteServerEventHub event delivery', () => {
     sseAggregator.addClient('raw-remote', client.callback, client.writeFrame, ['srv_a|/repo'])
 
     hub.start()
-    const event = remoteEvent('session.idle', { sessionID: 'ses_1', extra: { b: 2, a: 1 } }, '/repo')
+    const event = sessionIdle('ses_1', '/repo')
     fake.latest('srv_a').push(event)
     await flushPromises()
 
@@ -439,8 +513,8 @@ describe('RemoteServerEventHub event delivery', () => {
 
     hub.start()
     const stream = fake.latest('srv_a')
-    stream.push(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
-    stream.push(remoteEvent('session.execution.succeeded', { sessionID: 'ses_1' }))
+    stream.push(sessionCreated('ses_1', { directory: '/repo' }))
+    stream.push(sessionExecutionSucceeded('ses_1'))
     await flushPromises()
 
     expect(seen).toEqual([
@@ -454,7 +528,7 @@ describe('RemoteServerEventHub event delivery', () => {
     hub.start()
     const stream = fake.latest('srv_a')
 
-    stream.push(remoteEvent('session.created', { sessionID: 'ses_sub', parentID: 'ses_root' }, '/repo'))
+    stream.push(sessionCreated('ses_sub', { directory: '/repo', parentID: 'ses_root' }))
     await flushPromises()
 
     expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(true)
@@ -462,7 +536,7 @@ describe('RemoteServerEventHub event delivery', () => {
     expect(sseAggregator.isSubagentSession('ses_sub')).toBe(false)
     expect(sseAggregator.isSubagentSession('ses_sub', 'srv_b')).toBe(false)
 
-    stream.push(remoteEvent('session.deleted', { sessionID: 'ses_sub' }))
+    stream.push(sessionDeleted('ses_sub'))
     await flushPromises()
 
     expect(hub.isSubagentSession('srv_a', 'ses_sub')).toBe(false)
@@ -687,7 +761,7 @@ describe('RemoteServerEventHub reconnection', () => {
       { serverId: 'srv_a', connected: false, version: null, error: null },
     ])
 
-    stream.push(remoteEvent('session.idle', { sessionID: 'ses_1' }, '/repo'))
+    stream.push(sessionIdle('ses_1', '/repo'))
     await flushPromises()
     expect(client.frames).toHaveLength(0)
   })
@@ -778,7 +852,7 @@ describe('RemoteServerEventHub failure handling', () => {
   })
 
   it('records a connection failure without credentials and without subscribing', () => {
-    ;(fake.registry as unknown as { getConnection: (serverId: string) => never }).getConnection = () => {
+    fake.registry.getConnection = () => {
       throw new Error('OpenCode server is disabled: srv_a')
     }
 
@@ -793,7 +867,7 @@ describe('RemoteServerEventHub failure handling', () => {
   it('retries with backoff when the client cannot be created', async () => {
     vi.useFakeTimers()
     let attempts = 0
-    ;(fake.registry as unknown as { getClient: (serverId: string) => never }).getClient = () => {
+    fake.registry.getClient = () => {
       attempts += 1
       throw new Error('bad event source')
     }
@@ -807,7 +881,7 @@ describe('RemoteServerEventHub failure handling', () => {
   })
 
   it('returns no statuses when the registry cannot be listed', () => {
-    ;(fake.registry as unknown as { list: () => never }).list = () => {
+    fake.registry.list = () => {
       throw new Error('db down')
     }
 
@@ -822,7 +896,7 @@ describe('RemoteServerEventHub failure handling', () => {
     stream.push(SERVER_CONNECTED)
     await flushPromises()
 
-    ;(fake.registry as unknown as { get: (serverId: string) => never }).get = () => {
+    fake.registry.get = () => {
       throw new Error('db down')
     }
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
@@ -853,7 +927,7 @@ describe('RemoteServerEventHub pending action replay', () => {
     sseAggregator.setScheduledSessionsResolver(() => [])
     fake = createRegistry([SERVER_A], {
       permissions: { '/repo': [{ id: 'perm-1', sessionID: 'ses-1', action: 'shell', resources: ['ls'] }] },
-      forms: { '/repo': [{ id: 'form-1', sessionID: 'ses-1', title: 'Continue?', fields: [] }] },
+      forms: { '/repo': [{ id: 'form-1', sessionID: 'ses-1', title: 'Continue?', fields: FORM_FIELDS }] },
     })
     hub = new RemoteServerEventHub(fake.registry, sseAggregator)
   })
@@ -863,8 +937,8 @@ describe('RemoteServerEventHub pending action replay', () => {
     sseAggregator.shutdown()
   })
 
-  async function trackSessionStatus(sessionID: string, directory: string, status: string): Promise<void> {
-    fake.latest('srv_a').push(remoteEvent('session.status', { sessionID, status: { type: status } }, directory))
+  async function trackSessionStatus(sessionID: string, directory: string, status: 'busy' | 'idle'): Promise<void> {
+    fake.latest('srv_a').push(sessionStatus(sessionID, status, directory))
     await flushPromises()
   }
 
@@ -887,7 +961,7 @@ describe('RemoteServerEventHub pending action replay', () => {
     expect(parsed.map(frame => frame.payload.type)).toEqual(['permission.asked', 'form.created'])
     expect(parsed[0]?.payload.id).toMatch(/^ocm_replay_remote_/)
     expect(parsed[1]?.payload.data).toEqual({
-      form: { id: 'form-1', sessionID: 'ses-1', title: 'Continue?', fields: [] },
+      form: { id: 'form-1', sessionID: 'ses-1', title: 'Continue?', fields: FORM_FIELDS },
     })
     expect(other.frames).toHaveLength(0)
   })
@@ -938,7 +1012,17 @@ describe('RemoteServerEventHub pending action replay', () => {
   })
 
   it('does not use the local pending action fetcher for remote keys', async () => {
-    const localApi = makeApi({ permissions: { '/repo': [{ id: 'local-perm' }] } }, [])
+    const localApi = createStubOpenCodeApi({
+      permission: {
+        request: {
+          list: vi.fn(async () => ({
+            location: { directory: '/repo' },
+            data: [{ id: 'local-perm', sessionID: 'ses-1', action: 'shell' as const, resources: [] }],
+          })),
+        },
+      },
+    })
+    const localList = vi.mocked(localApi.permission.request.list)
     sseAggregator.setOpenCodeClient({ api: localApi })
 
     hub.start()
@@ -948,8 +1032,8 @@ describe('RemoteServerEventHub pending action replay', () => {
 
     await flushPromises()
 
-    expect(localApi.permission.request.list).toHaveBeenCalledTimes(1)
-    expect(localApi.permission.request.list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
+    expect(localList).toHaveBeenCalledTimes(1)
+    expect(localList).toHaveBeenCalledWith({ location: { directory: '/repo' } })
     expect(fake.api.permission.request.list).toHaveBeenCalledTimes(1)
     expect(fake.api.permission.request.list).toHaveBeenCalledWith({ location: { directory: '/repo' } })
   })
@@ -967,10 +1051,9 @@ describe('RemoteServerEventHub pending action replay', () => {
   })
 
   it('skips the replay when the client unsubscribed before it resolved', async () => {
-    let resolvePermissions: (value: { location: { directory: string }; data: unknown[] }) => void = () => {}
-    const list = fake.api.permission.request.list as unknown as (input: { location?: { directory?: string } }) => Promise<unknown>
-    vi.mocked(list).mockImplementation(() => new Promise((resolve) => {
-      resolvePermissions = resolve as (value: { location: { directory: string }; data: unknown[] }) => void
+    let resolvePermissions: (value: PermissionListOutput) => void = () => {}
+    vi.mocked(fake.api.permission.request.list).mockImplementation(() => new Promise<PermissionListOutput>((resolve) => {
+      resolvePermissions = resolve
     }))
     vi.mocked(fake.api.form.list).mockResolvedValue({ location: { directory: '/repo' }, data: [] })
 
@@ -980,7 +1063,10 @@ describe('RemoteServerEventHub pending action replay', () => {
     sseAggregator.addClient('unsubscribed', client.callback, client.writeFrame, ['srv_a|/repo'])
     sseAggregator.removeDirectories('unsubscribed', ['srv_a|/repo'])
 
-    resolvePermissions({ location: { directory: '/repo' }, data: [{ id: 'late', sessionID: 'ses-1' }] })
+    resolvePermissions({
+      location: { directory: '/repo' },
+      data: [{ id: 'late', sessionID: 'ses-1', action: 'shell', resources: [] }],
+    })
     await flushPromises()
 
     expect(client.frames).toHaveLength(0)
@@ -1015,7 +1101,7 @@ describe('RemoteServerEventHub session status replay', () => {
     hub.start()
     fake.latest('srv_a').push(SERVER_CONNECTED)
     await flushPromises()
-    fake.latest('srv_a').push(remoteEvent('session.created', { sessionID }, directory))
+    fake.latest('srv_a').push(sessionCreated(sessionID, { directory }))
     await flushPromises()
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
     await flushPromises()
@@ -1078,13 +1164,13 @@ describe('RemoteServerEventHub session status replay', () => {
     const first = fake.latest('srv_a')
     first.push(SERVER_CONNECTED)
     await flushPromises()
-    first.push(remoteEvent('session.created', { sessionID: 'ses_1' }, '/repo'))
+    first.push(sessionCreated('ses_1', { directory: '/repo' }))
     await flushPromises()
 
-    let resolveActive: (value: Record<string, { type: 'running' }>) => void = () => {}
-    vi.mocked(fake.api.session.active).mockReturnValueOnce(new Promise<Record<string, { type: 'running' }>>((resolve) => {
+    let resolveActive: (value: ActiveSessions) => void = () => {}
+    vi.mocked(fake.api.session.active).mockReturnValueOnce(new Promise<ActiveSessions>((resolve) => {
       resolveActive = resolve
-    }) as never)
+    }))
 
     fake.emit({ type: 'upserted', serverId: 'srv_a' })
     const second = fake.latest('srv_a')

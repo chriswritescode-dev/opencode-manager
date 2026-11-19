@@ -1,13 +1,19 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import type { OpenCodeApi, V2Event } from '@opencode-manager/shared/opencode'
+import type { V2Event } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
 
+export interface OpenCodeEventStreamApi {
+  event: {
+    subscribe: (options?: { signal?: AbortSignal; onActivity?: () => void }) => AsyncIterable<V2Event>
+  }
+}
+
 export interface OpenCodeEventSubscriptionOptions {
-  api: () => OpenCodeApi
+  api: () => OpenCodeEventStreamApi
   label: string
   onOpen: () => void
   onEvent: (event: V2Event) => void
-  onDisconnect: (error: unknown) => void
+  onDisconnect: (cause: unknown) => void
   reconnectDelayMs?: number
   maxReconnectDelayMs?: number
   stallThresholdMs?: number
@@ -28,17 +34,6 @@ function nextBackoffDelay(currentDelayMs: number, maxDelayMs: number): number {
   return Math.min(currentDelayMs * 2, maxDelayMs)
 }
 
-/**
- * Subscribes to an OpenCode event stream and owns its reconnect, backoff and stall detection.
- *
- * Every attempt yields a fresh subscription. The first `server.connected` event marks the attempt
- * as established, every event reaches `onEvent` in order, and an attempt that ends, throws or
- * exceeds the stall threshold disconnects, waits the current backoff delay and reconnects with the
- * delay doubled up to `maxReconnectDelayMs`.
- *
- * @param options Stream access, callbacks and optional timing overrides.
- * @returns Handles to close the subscription or force an immediate reconnect.
- */
 export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOptions): OpenCodeEventSubscription {
   const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULTS.SSE.RECONNECT_DELAY_MS
   const maxReconnectDelayMs = options.maxReconnectDelayMs ?? DEFAULTS.SSE.MAX_RECONNECT_DELAY_MS
@@ -52,9 +47,6 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
   let delayTimer: ReturnType<typeof setTimeout> | null = null
   let resolveDelay: (() => void) | null = null
 
-  /**
-   * Clears the watchdog and aborts the in-flight attempt so its stream iterator ends.
-   */
   const stopAttempt = (): void => {
     const attempt = currentAttempt
     currentAttempt = null
@@ -66,10 +58,6 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
     attempt.controller.abort()
   }
 
-  /**
-   * Cancels a pending reconnect wait and resolves it at once, letting the loop observe that it has
-   * been closed or superseded.
-   */
   const stopDelay = (): void => {
     if (delayTimer) {
       clearTimeout(delayTimer)
@@ -89,11 +77,6 @@ export function subscribeOpenCodeEvents(options: OpenCodeEventSubscriptionOption
     }, delayMs)
   })
 
-  /**
-   * Runs the reconnect loop for one loop token, opening a fresh attempt per iteration, aborting it
-   * when the stall watchdog fires, and waiting a doubling backoff before retrying. Returns once the
-   * subscription is closed or `token` is superseded by a newer loop.
-   */
   const run = async (token: number): Promise<void> => {
     while (!closed && token === loopToken) {
       const attempt: SubscriptionAttempt = { controller: new AbortController(), watchdog: null }

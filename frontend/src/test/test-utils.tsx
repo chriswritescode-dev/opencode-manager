@@ -1,12 +1,12 @@
-/* eslint-disable react-refresh/only-export-components */
-
-import { useEffect, type ReactNode } from 'react'
 import { renderHook } from '@testing-library/react'
-import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import { vi } from 'vitest'
+import type { ReactNode } from 'react'
 import type { useSettings } from '@/hooks/useSettings'
 import type { VoiceConversationController } from '@/hooks/useVoiceConversation'
-import { BUILTIN_COMMAND_ACTIONS, type CommandActions } from '@/lib/builtinCommands'
+import type { CommandActions } from '@/lib/builtinCommands'
+import { LocationCatcher } from './test-components'
+import { installMatchMedia } from './browserFakes'
 
 export function createVoiceConversationControllerMock(
   overrides: Partial<VoiceConversationController> = {},
@@ -35,9 +35,28 @@ export function createVoiceConversationControllerMock(
 }
 
 export function createCommandActionsMock(): CommandActions {
-  return Object.fromEntries(
-    BUILTIN_COMMAND_ACTIONS.map((action) => [action, vi.fn()]),
-  ) as unknown as CommandActions
+  return {
+    showSessions: vi.fn(),
+    showModels: vi.fn(),
+    newSession: vi.fn(),
+    toggleDetails: vi.fn(),
+    exportSession: vi.fn(),
+    copyTranscript: vi.fn(),
+    compact: vi.fn(),
+    askSideQuestion: vi.fn(),
+    renameSession: vi.fn(),
+    forkSession: vi.fn(),
+    jumpToMessage: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
+    cycleAgent: vi.fn(),
+    cycleVariant: vi.fn(),
+    showMcp: vi.fn(),
+    showSkills: vi.fn(),
+    showSettings: vi.fn(),
+    connectProvider: vi.fn(),
+    showWalkthrough: vi.fn(),
+  }
 }
 
 export function createUseSettingsMock(
@@ -58,22 +77,8 @@ export function createUseSettingsMock(
 }
 
 export function stubMatchMedia(matches: boolean) {
-  const listeners = new Set<(event: MediaQueryListEvent) => void>()
-  const mediaQueryList = {
-    matches,
-    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
-      listeners.add(listener)
-    },
-    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
-      listeners.delete(listener)
-    },
-  }
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    writable: true,
-    value: () => mediaQueryList,
-  })
-  return { mediaQueryList, listeners }
+  const fake = installMatchMedia(matches)
+  return { mediaQueryList: fake.mediaQueryList, listeners: fake.listeners }
 }
 
 export function createRouterWrapper(initialEntries?: string[]) {
@@ -86,27 +91,8 @@ export function renderHookWithRouter<T>(renderFn: () => T, initialEntries?: stri
   return renderHook(renderFn, { wrapper: createRouterWrapper(initialEntries) })
 }
 
-export function LocationCatcher({
-  capturedSearch,
-  capturedPathname,
-  capturedNavigationType,
-}: {
-  capturedSearch: { current: string }
-  capturedPathname?: { current: string }
-  capturedNavigationType?: { current: string }
-}) {
-  const location = useLocation()
-  const navigationType = useNavigationType()
-  useEffect(() => {
-    capturedSearch.current = location.search
-    if (capturedPathname) capturedPathname.current = location.pathname
-    if (capturedNavigationType) capturedNavigationType.current = navigationType
-  })
-  return null
-}
-
 export function renderHookWithRouterAndLocation<T>(renderFn: () => T, initialEntries?: string[]) {
-  const capturedSearch: { current: string } = { current: '' }
+  const capturedSearch = { current: '' }
   const wrapper = function Wrapper({ children }: { children: ReactNode }) {
     return (
       <MemoryRouter initialEntries={initialEntries}>

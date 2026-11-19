@@ -1,13 +1,18 @@
 import { API_BASE_URL } from '@/config'
-import type { SecretKind, SecretListResponse, SetSecretRequest } from '@opencode-manager/shared/schemas'
+import {
+  SecretListResponseSchema,
+  type SecretKind,
+  type SecretListResponse,
+  type SetSecretRequest,
+} from '@opencode-manager/shared/schemas'
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 
 export type SecretScope = { scope: 'global' } | { scope: 'repo'; repoId: number }
 
-const KIND_SEGMENT: Record<SecretKind, string> = {
+const KIND_SEGMENT = {
   secret: 'secrets',
   variable: 'variables',
-}
+} satisfies Record<SecretKind, string>
 
 function secretsPath(scope: SecretScope, kind: SecretKind): string {
   const segment = KIND_SEGMENT[kind]
@@ -17,7 +22,7 @@ function secretsPath(scope: SecretScope, kind: SecretKind): string {
 }
 
 export async function listSecrets(scope: SecretScope, kind: SecretKind): Promise<SecretListResponse> {
-  return fetchWrapper(secretsPath(scope, kind))
+  return fetchWrapper(secretsPath(scope, kind), SecretListResponseSchema)
 }
 
 export async function setSecret(
@@ -41,6 +46,6 @@ export async function deleteSecret(
 ): Promise<void> {
   return fetchWrapperVoid(`${secretsPath(scope, kind)}/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    ...(environment ? { params: { environment } } : {}),
+    params: environment ? { environment } : undefined,
   })
 }

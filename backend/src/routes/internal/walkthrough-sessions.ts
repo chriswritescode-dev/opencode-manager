@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import { WalkthroughChangesParamsSchema } from '@opencode-manager/shared/schemas'
-import type { ChangeWalkthroughService } from '../../services/change-walkthroughs'
+import type { ChangeWalkthroughRoutesService } from '../change-walkthroughs'
 import { handleServiceError, parseJsonBody } from '../../utils/route-helpers'
 import { ServiceError } from '../../utils/service-error'
 
-export function createInternalWalkthroughSessionRoutes(service: ChangeWalkthroughService) {
+export function createInternalWalkthroughSessionRoutes(service: ChangeWalkthroughRoutesService) {
   const app = new Hono()
 
   app.post('/:sessionId/changes', async (c) => {

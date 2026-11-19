@@ -1,9 +1,7 @@
-/** Trims a URL and removes its trailing slashes. */
 export function trimUrlTrailingSlashes(url: string): string {
   return url.trim().replace(/\/+$/, '')
 }
 
-/** Parses a value into a URL, or returns null when it is not an absolute http(s) URL. */
 export function parseHttpUrl(value: string): URL | null {
   let url: URL
   try {
@@ -15,13 +13,11 @@ export function parseHttpUrl(value: string): URL | null {
   return url
 }
 
-/** Reports whether two URLs share the same origin; false when either URL is invalid. */
 export function haveSameUrlOrigin(first: string, second: string): boolean {
   const origin = readUrlOrigin(first)
   return origin !== null && origin === readUrlOrigin(second)
 }
 
-/** Reports whether a hostname refers to the local machine. */
 export function isLoopbackHost(hostname: string): boolean {
   const host = normalizeHostname(hostname)
   if (host === 'localhost' || host === '::1') return true
@@ -29,7 +25,6 @@ export function isLoopbackHost(hostname: string): boolean {
   return octets !== null && octets[0] === 127
 }
 
-/** Reports whether a hostname is an RFC 1918, link-local, or CGNAT address. */
 export function isPrivateNetworkHost(hostname: string): boolean {
   const host = normalizeHostname(hostname)
   const octets = parseIpv4Octets(host)
@@ -48,7 +43,6 @@ export function isPrivateNetworkHost(hostname: string): boolean {
   return firstHextet >= 0xfc00 && firstHextet <= 0xfdff
 }
 
-/** Reports whether a URL uses plain HTTP on a host other than loopback or a private network. */
 export function isPublicPlainHttpUrl(url: URL): boolean {
   return (
     url.protocol === 'http:' &&

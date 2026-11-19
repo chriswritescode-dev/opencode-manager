@@ -1,416 +1,244 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { makeForm, makeSession } from '@/test/fixtures/api'
+import { connectTestEventStream } from '@/test/render'
+import { renderSessionPage, sessionPageStatus } from '@/test/sessionPage'
+import { installMatchMedia } from '@/test/browserFakes'
 import type { FormInfo } from '@opencode-manager/shared/opencode'
-import { FetchError } from '@/api/fetchWrapper'
-import { SessionDetail } from '../SessionDetail'
-
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  useSessionTranscript: vi.fn(),
-  useSSE: vi.fn(),
-  useRepoActivity: vi.fn(),
-  usePermissions: vi.fn(),
-  useForms: vi.fn(),
-  useSSEHealth: vi.fn(),
-  useConfig: vi.fn(),
-  useMobile: vi.fn(),
-  useAutoScroll: vi.fn(),
-  useDialogParam: vi.fn(),
-  useSessionStatusForSession: vi.fn(),
-  setToolRailMounted: vi.fn(),
-  showToast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), loading: vi.fn() },
-}))
-
-const formsState = {
-  bySession: {} as Record<string, FormInfo | null>,
-  reply: vi.fn(),
-  cancel: vi.fn(),
-  forgetPendingActionsForSession: vi.fn(),
-}
-
-vi.mock('@/config', () => ({
-  OPENCODE_API_ENDPOINT: 'http://localhost:5551/api/opencode',
-  API_BASE_URL: 'http://localhost:5551',
-  SERVER_PORT: 5003,
-  OPENCODE_PORT: 5551,
-  FILE_LIMITS: {},
-  DEFAULTS: {},
-  ALLOWED_MIME_TYPES: [],
-  GIT_PROVIDERS: [],
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: mocks.showToast,
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSession: mocks.useSession,
-  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useUpdateSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useCreateSession: vi.fn(() => ({ mutateAsync: vi.fn() })),
-  useConfig: mocks.useConfig,
-  useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
-  useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
-  useAgents: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useSessionTranscript', () => ({
-  useSessionTranscript: mocks.useSessionTranscript,
-}))
-
-vi.mock('@/hooks/useRepoSiblings', () => ({
-  useRepoSiblings: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: vi.fn(() => ({ isEnabled: false })),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: vi.fn(() => ({
-    preferences: { expandToolCalls: false },
-    updateSettings: vi.fn(),
-  })),
-}))
-
-vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: vi.fn() })),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-  useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
-  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-}))
-
-vi.mock('@/hooks/useVisualViewport', () => ({
-  useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
-}))
-
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
-  useShortcutActions: vi.fn(),
-}))
-
-vi.mock('@/hooks/useAutoScroll', () => ({
-  useAutoScroll: mocks.useAutoScroll,
-}))
-
-vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn(() => [false, vi.fn()]),
-}))
-
-vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
-  getAssistantText: vi.fn(() => ''),
-  getLatestPlayableAssistantMessage: vi.fn(() => null),
-  useAutoPlayLastResponse: vi.fn(() => {}),
-}))
-
-vi.mock('@/stores/uiStateStore', () => ({
-  useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
-    typeof selector === 'function'
-      ? selector({
-          isEditingMessage: false,
-          isToolRailMounted: false,
-          setToolRailMounted: mocks.setToolRailMounted,
-        })
-      : false
-  ),
-}))
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn(() => ({ setStatus: vi.fn() })),
-  useSessionStatusForSession: mocks.useSessionStatusForSession,
-}))
-
-vi.mock('@/hooks/useSSE', () => ({
-  useSSE: mocks.useSSE,
-}))
-
-vi.mock('@/hooks/useRepoActivity', () => ({
-  useRepoActivity: mocks.useRepoActivity,
-}))
-
-vi.mock('@/contexts/EventContext', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...(actual as object),
-    usePermissions: mocks.usePermissions,
-    useForms: mocks.useForms,
-    useSSEHealth: mocks.useSSEHealth,
-  }
-})
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: () => ({ needsInput: 0, running: 0 }),
-  useRepoActivityState: () => null,
-}))
-
-vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn(() => Promise.resolve({
-    id: 1,
-    repoUrl: 'https://github.com/test/repo',
-    localPath: '/test/repo',
-    sourcePath: null,
-    fullPath: '/test/repo',
-    branch: 'main',
-    currentBranch: 'main',
-    fullSlug: 'test/repo',
-    repoType: 'github' as const,
-  })),
-  initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
-}))
-
-vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
-vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: vi.fn(() => null) }))
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: vi.fn(() => ({ data: undefined })),
-  useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
-}))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
-  FileBrowserSheet: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoMcpDialog', () => ({
-  RepoMcpDialog: vi.fn(() => null),
-}))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))
-
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({
-  ResetPermissionsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({
-  RepoSkillsDialog: vi.fn(() => null),
-}))
-
-vi.mock('@/components/source-control', () => ({
-  SourceControlPanel: vi.fn(() => null),
-}))
-
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({
-  PendingActionsGroup: vi.fn(() => null),
-}))
-
-vi.mock('@/components/message/PromptInput', () => ({
-  PromptInput: vi.fn(() => <div>MockedPromptInput</div>),
-}))
 
 const VIEWED_SESSION_ID = 'viewed-session'
 
-function createForm(id: string, sessionID: string, title: string): FormInfo {
-  return {
-    id,
-    sessionID,
-    title,
-    fields: [
-      { key: 'q0', title: 'Confirm', type: 'string', options: [{ value: 'Yes', label: 'Yes' }] },
-    ],
-  }
+const viewedSessionForm = makeForm({
+  id: 'form-viewed',
+  sessionID: VIEWED_SESSION_ID,
+  title: 'Continue A',
+})
+
+const nextSessionForm = makeForm({
+  id: 'form-next',
+  sessionID: VIEWED_SESSION_ID,
+  title: 'Continue B',
+})
+
+const otherSessionForm = makeForm({
+  id: 'form-other',
+  sessionID: 'other-session',
+  title: 'Continue B',
+})
+
+function viewedSession(sessionId: string = VIEWED_SESSION_ID) {
+  return makeSession({ id: sessionId, title: 'Viewed session', location: { directory: '/test/repo' } })
 }
 
-const viewedSessionForm = createForm('form-viewed', VIEWED_SESSION_ID, 'Continue A')
-const otherSessionForm = createForm('form-other', 'other-session', 'Continue B')
-
-function renderTree() {
-  return (
-    <MemoryRouter initialEntries={[`/repos/1/sessions/${VIEWED_SESSION_ID}`]}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <Routes>
-          <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-        </Routes>
-      </QueryClientProvider>
-    </MemoryRouter>
-  )
+function formsRoute(forms: () => FormInfo[]) {
+  return () => ({ json: { data: forms() } })
 }
 
 describe('SessionDetail form prompt session scoping', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-
-    formsState.bySession = {}
-    formsState.reply = vi.fn().mockResolvedValue(undefined)
-    formsState.cancel = vi.fn().mockResolvedValue(undefined)
-    formsState.forgetPendingActionsForSession = vi.fn()
-
-    mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useRepoActivity.mockReturnValue(undefined)
-    mocks.usePermissions.mockReturnValue({
-      pendingCount: 0,
-      syncForSession: vi.fn(),
-    })
-    mocks.useForms.mockImplementation(() => ({
-      current: null,
-      getForSession: (sessionID: string) => formsState.bySession[sessionID] ?? null,
-      pendingCount: 0,
-      reply: formsState.reply,
-      cancel: formsState.cancel,
-      forgetPendingActionsForSession: formsState.forgetPendingActionsForSession,
-      syncForSession: vi.fn(),
-    }))
-    mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
-    mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.useDialogParam.mockReturnValue([false, vi.fn()])
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
+    installMatchMedia(false)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 })
   })
 
   it('renders the viewed session form when another session owns the globally current form', async () => {
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    formsState.bySession['other-session'] = otherSessionForm
-
-    render(renderTree())
-
-    await waitFor(() => {
-      expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument()
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [viewedSessionForm, otherSessionForm]),
     })
+
+    expect((await screen.findAllByText('Continue A'))[0]).toBeInTheDocument()
   })
 
   it('renders no form prompt when only another session has a pending form', async () => {
-    formsState.bySession['other-session'] = otherSessionForm
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [otherSessionForm]),
+    })
 
-    render(renderTree())
-
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('prompt-overlay')).toBeInTheDocument())
     expect(screen.queryByText('Continue B')).not.toBeInTheDocument()
   })
 
-  it('submits the viewed session form through the facade', async () => {
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    formsState.bySession['other-session'] = otherSessionForm
+  it('submits the viewed session form answer for that form', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [viewedSessionForm, otherSessionForm]),
+    })
 
-    render(renderTree())
-
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    await user.click(await screen.findByRole('button', { name: 'Yes' }))
+    await user.click(screen.getByRole('button', { name: 'Submit' }))
 
     await waitFor(() => {
-      expect(formsState.reply).toHaveBeenCalledWith('form-viewed', { q0: 'Yes' })
+      expect(
+        fetchFake.lastRequest('POST', `/api/opencode/api/session/${VIEWED_SESSION_ID}/form/form-viewed/reply`)?.body,
+      ).toEqual({ answer: { q0: 'Yes' } })
     })
   })
 
   it('clears a minimized indicator once its form resolves elsewhere and opens the next form', async () => {
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    const { rerender } = render(renderTree())
+    const user = userEvent.setup()
+    const pendingForms: FormInfo[] = [viewedSessionForm]
+    const { eventStream } = renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => pendingForms),
+    })
 
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Dismiss form' })).toBeInTheDocument())
+    await user.click(await screen.findByRole('button', { name: 'Continue A' }))
+    expect(await screen.findByRole('button', { name: 'Dismiss form' })).toBeInTheDocument()
+    pendingForms.length = 0
+    await connectTestEventStream(eventStream)
 
-    formsState.bySession[VIEWED_SESSION_ID] = null
-    rerender(renderTree())
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Dismiss form' })).not.toBeInTheDocument(),
-    )
+    act(() => {
+      eventStream?.message({
+        id: 'evt_form_replied',
+        created: 2,
+        type: 'form.replied',
+        data: { id: viewedSessionForm.id, sessionID: VIEWED_SESSION_ID },
+        directory: '/test/repo',
+      })
+    })
 
-    formsState.bySession[VIEWED_SESSION_ID] = otherSessionForm
-    rerender(renderTree())
-    await waitFor(() => expect(screen.getAllByText('Continue B')[0]).toBeInTheDocument())
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Dismiss form' })).not.toBeInTheDocument()
+    })
+
+    act(() => {
+      eventStream?.message({
+        id: 'evt_form_next',
+        created: 3,
+        type: 'form.created',
+        data: { form: nextSessionForm },
+        directory: '/test/repo',
+      })
+    })
+
+    expect((await screen.findAllByText('Continue B'))[0]).toBeInTheDocument()
   })
 
-  it('dismisses a minimized form locally and then opens the next form', async () => {
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    formsState.cancel.mockImplementation(async () => {
-      formsState.bySession[VIEWED_SESSION_ID] = null
+  it('dismisses a minimized form through the API and then opens the next form', async () => {
+    const user = userEvent.setup()
+    const pendingForms: FormInfo[] = [viewedSessionForm]
+    const { fetchFake, eventStream } = renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => pendingForms),
     })
-    const { rerender } = render(renderTree())
 
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss form' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue A' }))
+    await user.click(await screen.findByRole('button', { name: 'Dismiss form' }))
 
-    await waitFor(() => expect(formsState.cancel).toHaveBeenCalledWith('form-viewed'))
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Dismiss form' })).not.toBeInTheDocument(),
-    )
+    await waitFor(() => {
+      expect(
+        fetchFake.findRequests('DELETE', `/api/opencode/api/session/${VIEWED_SESSION_ID}/form/form-viewed`),
+      ).toHaveLength(1)
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Dismiss form' })).not.toBeInTheDocument()
+    })
 
-    formsState.bySession[VIEWED_SESSION_ID] = otherSessionForm
-    rerender(renderTree())
-    await waitFor(() => expect(screen.getAllByText('Continue B')[0]).toBeInTheDocument())
+    pendingForms.length = 0
+    await connectTestEventStream(eventStream)
+    act(() => {
+      eventStream?.message({
+        id: 'evt_form_next',
+        created: 3,
+        type: 'form.created',
+        data: { form: nextSessionForm },
+        directory: '/test/repo',
+      })
+    })
+
+    expect((await screen.findAllByText('Continue B'))[0]).toBeInTheDocument()
   })
 
   it('retains a minimized form and reports an error when dismissal fails', async () => {
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    formsState.cancel.mockRejectedValue(new Error('boom'))
-    render(renderTree())
+    const user = userEvent.setup()
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [viewedSessionForm]),
+      formCancelRespond: () => sessionPageStatus(500, { error: 'boom' }),
+    })
 
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss form' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue A' }))
+    await user.click(await screen.findByRole('button', { name: 'Dismiss form' }))
 
-    await waitFor(() =>
-      expect(mocks.showToast.error).toHaveBeenCalledWith('Failed to dismiss form'),
-    )
+    expect(await screen.findByText('Failed to dismiss form')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Dismiss form' })).toBeInTheDocument()
   })
 
   it('fills the prompt overlay from the header to the prompt while a form is open on mobile', async () => {
-    mocks.useMobile.mockReturnValue(true)
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 480 })
+    installMatchMedia(true)
 
-    render(renderTree())
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [viewedSessionForm]),
+    })
 
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
+    await screen.findAllByText('Continue A')
     expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0')
   })
 
   it('bounds the form card by the space above the prompt on desktop so its header stays visible', async () => {
-    mocks.useMobile.mockReturnValue(false)
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => [viewedSessionForm]),
+    })
 
-    render(renderTree())
-
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
+    await screen.findAllByText('Continue A')
     const overlay = screen.getByTestId('prompt-overlay')
     expect(overlay).toHaveClass('top-0', 'justify-end', 'pointer-events-none')
     expect(overlay.firstElementChild).toHaveClass('max-h-full', 'min-h-0', 'pointer-events-auto')
   })
 
   it('keeps the prompt overlay anchored without an open form or once the form is minimized', async () => {
-    mocks.useMobile.mockReturnValue(true)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 480 })
+    installMatchMedia(true)
 
-    const { rerender } = render(renderTree())
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+    const { eventStream } = renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      session: viewedSession(),
+      forms: formsRoute(() => []),
+    })
+
+    await waitFor(() => expect(screen.getByTestId('prompt-overlay')).toBeInTheDocument())
     expect(screen.getByTestId('prompt-overlay')).not.toHaveClass('top-0')
 
-    formsState.bySession[VIEWED_SESSION_ID] = viewedSessionForm
-    rerender(renderTree())
+    await connectTestEventStream(eventStream)
+    act(() => {
+      eventStream?.message({
+        id: 'evt_form_created',
+        created: 2,
+        type: 'form.created',
+        data: { form: viewedSessionForm },
+        directory: '/test/repo',
+      })
+    })
 
-    await waitFor(() => expect(screen.getAllByText('Continue A')[0]).toBeInTheDocument())
-    expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0')
+    await waitFor(() => expect(screen.getByTestId('prompt-overlay')).toHaveClass('top-0'))
 
-    await userEvent.click(screen.getByRole('button', { name: 'Continue A' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Drag to minimize' }))
 
     await waitFor(() => expect(screen.getByTestId('prompt-overlay')).not.toHaveClass('top-0'))
   })
 
-  it('forgets pending actions for a session that no longer exists', async () => {
-    mocks.useSession.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new FetchError('Session not found', 404),
+  it('does not show a pending form for a session that no longer exists', async () => {
+    renderSessionPage({
+      route: `/repos/1/sessions/${VIEWED_SESSION_ID}`,
+      sessionRespond: () => sessionPageStatus(404, { name: 'SessionNotFoundError', message: 'Session not found' }),
+      forms: formsRoute(() => [viewedSessionForm]),
     })
 
-    render(renderTree())
-
-    await waitFor(() => expect(screen.getByText('Session not found')).toBeInTheDocument())
-    expect(formsState.forgetPendingActionsForSession).toHaveBeenCalledWith(VIEWED_SESSION_ID)
+    expect(await screen.findByText('Session not found')).toBeInTheDocument()
+    expect(screen.queryByText('Continue A')).not.toBeInTheDocument()
   })
 })

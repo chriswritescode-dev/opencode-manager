@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
   FileDiffInfo,
+  OpenCodeApi,
   SessionInfo,
   SessionMessageInfo,
+  SessionMessageUser,
 } from '@opencode-manager/shared/opencode'
 import { FUSION_PROMPT_MAX_LENGTH } from '@opencode-manager/shared/schemas'
 import type { MultiRunEntryRecord } from '../../src/db/multi-runs'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import {
   FUSION_MIN_SOURCE_CONTEXT,
   FusionContextLimitError,
@@ -16,6 +17,7 @@ import {
 } from '../../src/services/multi-run-fusion'
 import { SESSION_REPLY_TRUNCATION_MARKER } from '../../src/services/session-reply'
 import { assistantMessage } from '../helpers/stub-schedule-api'
+import { createStubOpenCodeClient, sessionInfo as stubSessionInfo } from '../helpers/stub-opencode-client'
 
 function entry(overrides: Partial<MultiRunEntryRecord> = {}): MultiRunEntryRecord {
   return {
@@ -33,11 +35,11 @@ function entry(overrides: Partial<MultiRunEntryRecord> = {}): MultiRunEntryRecor
 }
 
 function sessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
-  return { id: 'ses-1', outcome: 'succeeded', ...overrides } as SessionInfo
+  return stubSessionInfo({ id: 'ses-1', outcome: 'succeeded', ...overrides })
 }
 
-function userMessage(id: string): SessionMessageInfo {
-  return { id, type: 'user', time: { created: 0 }, text: id } as SessionMessageInfo
+function userMessage(id: string): SessionMessageUser {
+  return { id, type: 'user', time: { created: 0 }, text: id }
 }
 
 interface FakeSession {
@@ -60,7 +62,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
   })
 
   const sessionActive = vi.fn(async () => {
-    const active: Record<string, unknown> = {}
+    const active: Record<string, { type: 'running' }> = {}
     for (const [id, config] of Object.entries(sessions)) {
       if (config.activeError) {
         throw config.activeError
@@ -72,7 +74,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
     return active
   })
 
-  const messageList = vi.fn(async (input: { sessionID: string; type?: string; order?: 'asc' | 'desc' }) => {
+  const messageList = vi.fn(async (input: Parameters<OpenCodeApi['message']['list']>[0]) => {
     const config = sessions[input.sessionID]
     if (input.type === 'user') {
       const message = input.order === 'asc' ? config?.firstUser : config?.lastUser
@@ -92,11 +94,18 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
     return config?.diff ?? []
   })
 
-  const sessionPrompt = vi.fn(async () => ({}))
-  const sessionCreate = vi.fn(async () => ({}))
-  const sessionInterrupt = vi.fn(async () => ({}))
+  const sessionPrompt = vi.fn(async (input: Parameters<OpenCodeApi['session']['prompt']>[0]) => ({
+    id: `msg_${input.sessionID}`,
+    sessionID: input.sessionID,
+    time: { created: 0 },
+    type: 'user' as const,
+    payload: { text: input.text },
+    delivery: 'steer' as const,
+  }))
+  const sessionCreate = vi.fn(async () => stubSessionInfo({ id: 'ses-created' }))
+  const sessionInterrupt = vi.fn(async () => ({ interrupted: true }))
 
-  const client = {
+  const client = createStubOpenCodeClient({
     api: {
       session: {
         get: sessionGet,
@@ -108,8 +117,7 @@ function createFakeClient(sessions: Record<string, FakeSession>) {
       },
       message: { list: messageList },
     },
-    forwardRaw: vi.fn(),
-  } as unknown as OpenCodeClient
+  })
 
   return { client, sessionGet, sessionActive, messageList, sessionDiff, sessionPrompt, sessionCreate, sessionInterrupt }
 }
@@ -528,7 +536,7 @@ describe('buildFusionPrompt', () => {
   })
 
   it('throws FusionContextLimitError when the fixed sections leave too little room per source', () => {
-    let error: unknown
+    let error: Error | null = null
     try {
       buildFusionPrompt({
         runName: 'Oversized',
@@ -540,14 +548,14 @@ describe('buildFusionPrompt', () => {
         ],
       })
     } catch (caught) {
+      if (!(caught instanceof Error)) throw caught
       error = caught
     }
 
-    expect(error).toBeInstanceOf(FusionContextLimitError)
-    const limitError = error as FusionContextLimitError
-    expect(limitError.status).toBe(413)
-    expect(limitError.code).toBe('FUSION_CONTEXT_LIMIT')
-    expect(limitError.details).toEqual({
+    if (!(error instanceof FusionContextLimitError)) throw new Error('Expected FusionContextLimitError')
+    expect(error.status).toBe(413)
+    expect(error.code).toBe('FUSION_CONTEXT_LIMIT')
+    expect(error.details).toEqual({
       requiredPerSource: FUSION_MIN_SOURCE_CONTEXT,
       availablePerSource: expect.any(Number),
     })

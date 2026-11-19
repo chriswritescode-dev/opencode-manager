@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { mkdirSync } from 'node:fs'
+import path from 'node:path'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { createNodeWebSocket } from '@hono/node-ws'
+import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
-import type { Repo } from '@opencode-manager/shared/types'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { createRepoTerminalSocketRoutes } from '../../src/routes/repo-terminal-socket'
 import { TerminalService } from '../../src/services/terminal'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
-import type { CredentialProvider } from '../../src/services/credential-provider'
+import { CredentialProvider } from '../../src/services/credential-provider'
 import type { Session } from '../../src/auth'
 import {
   closeSessionConnections,
@@ -18,42 +19,22 @@ import {
 } from '../../src/services/session-connections'
 import { startWebSocketServer, type WebSocketTestServer } from '../helpers/websocket-server'
 import { rawWebSocketHandshake } from '../helpers/raw-websocket-handshake'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-vi.mock('../../src/services/repo', () => ({
-  resolveRepoOrAssistant: vi.fn(),
-  resolveRepoWorkingDirectory: vi.fn(),
-  listRepoSiblings: vi.fn(),
-}))
+type PtyInfo = Awaited<ReturnType<OpenCodeApi['pty']['list']>>['data'][number]
 
-import { resolveRepoOrAssistant, resolveRepoWorkingDirectory, listRepoSiblings } from '../../src/services/repo'
-
-const readyRepo = { id: 1, fullPath: '/tmp/repo', cloneStatus: 'ready' } as Repo
-const database = {} as Database
-const gitAuthService = { getGitEnvironment: vi.fn(() => ({})) } as unknown as GitAuthService
-
-function createPty(id: string) {
-  return { id, title: 'Terminal', command: 'sh', args: [], cwd: '/tmp/repo', status: 'running' as const, pid: 1 }
+function buildPty(id: string, cwd: string): PtyInfo {
+  return { id, title: 'Terminal', command: 'sh', args: [], cwd, status: 'running', pid: 1 }
 }
 
-const openCodeClient = {
-  api: {
-    pty: {
-      list: vi.fn(async ({ location }: { location: { directory: string } }) => ({
-        location,
-        data: [createPty('pty-1'), createPty('pty-4404')],
-      })),
-      connect: {
-        token: vi.fn(async () => ({
-          location: { directory: '/tmp/repo' },
-          data: { ticket: 'stub-ticket', expires_in: 60 },
-        })),
-      },
-    },
-  },
-} as unknown as OpenCodeClient
-
-const credentialProvider = { getGhCliEnv: vi.fn(() => ({})) } as unknown as CredentialProvider
+let workspace: TempWorkspace
+let db: Database
+let repoId = 0
+let repoDirectory = ''
 
 let upstream: WebSocketTestServer
 let manager: WebSocketTestServer
@@ -81,30 +62,18 @@ upstreamApp.get(
         ws.send(new Uint8Array([0, ...textEncoder.encode('{"cursor":0}')]))
       },
       onMessage(event, ws) {
-        if (typeof event.data === 'string') ws.send(event.data)
+        const payload = z.string().safeParse(event.data)
+        if (payload.success) ws.send(payload.data)
       },
     }
   }),
 )
 
-const terminalService = new TerminalService(
-  { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalEnv: true },
-  credentialProvider,
-  createStubRepoEnvService(),
-)
+let terminalService: TerminalService
+let openCodeClient: ReturnType<typeof createStubOpenCodeClient>
 
 const managerApp = new Hono()
 const managerWs = createNodeWebSocket({ app: managerApp })
-managerApp.route(
-  '/',
-  createRepoTerminalSocketRoutes(
-    database,
-    gitAuthService,
-    openCodeClient,
-    terminalService,
-    managerWs.upgradeWebSocket,
-  ),
-)
 
 const TRUSTED_ORIGIN = 'http://localhost:5003'
 const authenticatedApp = new Hono()
@@ -117,17 +86,6 @@ authenticatedApp.use('/*', async (c, next) => {
   }
   await next()
 })
-authenticatedApp.route(
-  '/',
-  createRepoTerminalSocketRoutes(
-    database,
-    gitAuthService,
-    openCodeClient,
-    terminalService,
-    authenticatedWs.upgradeWebSocket,
-    [TRUSTED_ORIGIN],
-  ),
-)
 
 let authenticatedPort = 0
 
@@ -145,27 +103,17 @@ sessionApp.use('/*', async (c, next) => {
   })
   await next()
 })
-sessionApp.route(
-  '/',
-  createRepoTerminalSocketRoutes(
-    database,
-    gitAuthService,
-    openCodeClient,
-    terminalService,
-    sessionWs.upgradeWebSocket,
-  ),
-)
 
 let sessionPort = 0
 
-function clientUrl(ptyID: string, directory = '/tmp/repo'): string {
-  const url = new URL(`ws://127.0.0.1:${managerPort}/1/terminals/${ptyID}/connect`)
+function clientUrl(ptyID: string, directory = repoDirectory): string {
+  const url = new URL(`ws://127.0.0.1:${managerPort}/${repoId}/terminals/${ptyID}/connect`)
   url.searchParams.set('directory', directory)
   return url.toString()
 }
 
-function sessionClientUrl(ptyID: string, directory = '/tmp/repo'): string {
-  const url = new URL(`ws://127.0.0.1:${sessionPort}/1/terminals/${ptyID}/connect`)
+function sessionClientUrl(ptyID: string, directory = repoDirectory): string {
+  const url = new URL(`ws://127.0.0.1:${sessionPort}/${repoId}/terminals/${ptyID}/connect`)
   url.searchParams.set('directory', directory)
   return url.toString()
 }
@@ -179,6 +127,18 @@ function openEvent(socket: WebSocket): Promise<void> {
     socket.addEventListener('open', () => resolve(), { once: true })
     socket.addEventListener('error', () => reject(new Error('WebSocket error before open')), { once: true })
   })
+}
+
+const WebSocketFrameSchema = z.union([z.string(), z.instanceof(ArrayBuffer)])
+
+function collectFrames(socket: WebSocket): Array<string | ArrayBuffer> {
+  socket.binaryType = 'arraybuffer'
+  const messages: Array<string | ArrayBuffer> = []
+  socket.addEventListener('message', (event) => {
+    const frame = WebSocketFrameSchema.safeParse(event.data)
+    if (frame.success) messages.push(frame.data)
+  })
+  return messages
 }
 
 function settle(socket: WebSocket): Promise<'open' | 'error' | 'close'> {
@@ -198,24 +158,66 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 beforeAll(async () => {
+  workspace = createTempWorkspace('ocm-terminal-socket-')
+  db = createTestDatabase()
+  const repo = seedRepo(db, { localPath: 'repo' })
+  repoId = repo.id
+  repoDirectory = repo.fullPath
+  mkdirSync(repoDirectory, { recursive: true })
+
+  openCodeClient = createStubOpenCodeClient({
+    api: {
+      pty: {
+        list: async (input) => ({
+          location: { directory: input?.location?.directory ?? repoDirectory },
+          data: [buildPty('pty-1', repoDirectory), buildPty('pty-4404', repoDirectory)],
+        }),
+        connect: {
+          token: async () => ({
+            location: { directory: repoDirectory },
+            data: { ticket: 'stub-ticket', expires_in: 60 },
+          }),
+        },
+      },
+    },
+  })
+  terminalService = new TerminalService(
+    { client: openCodeClient, baseUrl: () => upstreamBase, includeLocalEnv: true },
+    new CredentialProvider(db),
+    createStubRepoEnvService(),
+  )
+  const gitAuthService = createGitAuthService()
+
   upstream = await startWebSocketServer({ app: upstreamApp, injectWebSocket: upstreamWs.injectWebSocket })
   upstreamBase = `http://127.0.0.1:${upstream.port}`
 
+  managerApp.route(
+    '/',
+    createRepoTerminalSocketRoutes(db, gitAuthService, openCodeClient, terminalService, managerWs.upgradeWebSocket),
+  )
   manager = await startWebSocketServer({ app: managerApp, injectWebSocket: managerWs.injectWebSocket })
   managerPort = manager.port
 
+  authenticatedApp.route(
+    '/',
+    createRepoTerminalSocketRoutes(
+      db,
+      gitAuthService,
+      openCodeClient,
+      terminalService,
+      authenticatedWs.upgradeWebSocket,
+      [TRUSTED_ORIGIN],
+    ),
+  )
   authenticated = await startWebSocketServer({ app: authenticatedApp, injectWebSocket: authenticatedWs.injectWebSocket })
   authenticatedPort = authenticated.port
 
+  sessionApp.route(
+    '/',
+    createRepoTerminalSocketRoutes(db, gitAuthService, openCodeClient, terminalService, sessionWs.upgradeWebSocket),
+  )
   sessionServer = await startWebSocketServer({ app: sessionApp, injectWebSocket: sessionWs.injectWebSocket })
   sessionPort = sessionServer.port
-
-  vi.mocked(resolveRepoOrAssistant).mockImplementation((_db, id) => (id === 1 ? readyRepo : null))
-  vi.mocked(resolveRepoWorkingDirectory).mockImplementation(async (_repo, directory) => {
-    if (directory === undefined || directory === '/tmp/repo') return '/tmp/repo'
-    return null
-  })
-  vi.mocked(listRepoSiblings).mockResolvedValue([])
 })
 
 afterAll(async () => {
@@ -227,23 +229,22 @@ afterAll(async () => {
   await manager.close()
   await authenticated.close()
   await sessionServer.close()
+  db.close()
+  workspace.restore()
 })
 
 describe('Repo Terminal Socket Route', () => {
   it('bridges the binary meta frame and echoes text through the upstream', async () => {
     const socket = new WebSocket(clientUrl('pty-1'))
-    socket.binaryType = 'arraybuffer'
-    const messages: Array<string | ArrayBuffer> = []
-    socket.addEventListener('message', (event) => {
-      messages.push(event.data as string | ArrayBuffer)
-    })
+    const messages = collectFrames(socket)
 
     await openEvent(socket)
     await waitFor(() => messages.length === 1)
 
     const meta = messages[0]
     expect(meta).toBeInstanceOf(ArrayBuffer)
-    const bytes = new Uint8Array(meta as ArrayBuffer)
+    if (!(meta instanceof ArrayBuffer)) throw new Error('expected the meta frame to be binary')
+    const bytes = new Uint8Array(meta)
     expect(bytes[0]).toBe(0)
     expect(new TextDecoder().decode(bytes.subarray(1))).toBe('{"cursor":0}')
 
@@ -252,13 +253,13 @@ describe('Repo Terminal Socket Route', () => {
     expect(messages[1]).toBe('echo me')
 
     expect(capturedUrl?.searchParams.get('ticket')).toBe('stub-ticket')
-    expect(capturedUrl?.searchParams.get('location[directory]')).toBe('/tmp/repo')
+    expect(capturedUrl?.searchParams.get('location[directory]')).toBe(repoDirectory)
 
     socket.close()
   })
 
   it('fails the handshake for a directory outside the repository', async () => {
-    const socket = new WebSocket(clientUrl('pty-1', '/tmp/other'))
+    const socket = new WebSocket(clientUrl('pty-1', path.join(workspace.path, 'other')))
 
     const outcome = await settle(socket)
 
@@ -281,11 +282,7 @@ describe('Repo Terminal Socket Route', () => {
 describe('Repo Terminal Socket session binding', () => {
   it('closes the socket when its session is deleted', async () => {
     const socket = new WebSocket(sessionClientUrl('pty-1'))
-    socket.binaryType = 'arraybuffer'
-    const messages: Array<string | ArrayBuffer> = []
-    socket.addEventListener('message', (event) => {
-      messages.push(event.data as string | ArrayBuffer)
-    })
+    const messages = collectFrames(socket)
 
     await openEvent(socket)
     await waitFor(() => messages.length === 1)
@@ -307,11 +304,7 @@ describe('Repo Terminal Socket session binding', () => {
 
   it('unregisters the socket so a repeated session close does not fire again', async () => {
     const socket = new WebSocket(sessionClientUrl('pty-1'))
-    socket.binaryType = 'arraybuffer'
-    const messages: Array<string | ArrayBuffer> = []
-    socket.addEventListener('message', (event) => {
-      messages.push(event.data as string | ArrayBuffer)
-    })
+    const messages = collectFrames(socket)
 
     await openEvent(socket)
     await waitFor(() => messages.length === 1)
@@ -332,12 +325,14 @@ describe('Repo Terminal Socket session binding', () => {
 })
 
 describe('Repo Terminal Socket Origin validation', () => {
-  const path = `/1/terminals/pty-1/connect?directory=${encodeURIComponent('/tmp/repo')}`
+  function handshakePath(): string {
+    return `/${repoId}/terminals/pty-1/connect?directory=${encodeURIComponent(repoDirectory)}`
+  }
 
   it('accepts a trusted Origin with a valid session cookie', async () => {
     const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
-      path,
+      path: handshakePath(),
       origin: TRUSTED_ORIGIN,
       cookie: 'session=valid',
     })
@@ -346,7 +341,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   })
 
   it('allows a non-browser client without an Origin header', async () => {
-    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path, cookie: 'session=valid' })
+    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path: handshakePath(), cookie: 'session=valid' })
 
     expect(outcome).toEqual({ upgraded: true })
   })
@@ -354,7 +349,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   it('rejects an untrusted same-site Origin before the upgrade', async () => {
     const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
-      path,
+      path: handshakePath(),
       origin: 'http://localhost:5004',
       cookie: 'session=valid',
     })
@@ -365,7 +360,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   it('rejects a null Origin before the upgrade', async () => {
     const outcome = await rawWebSocketHandshake({
       port: authenticatedPort,
-      path,
+      path: handshakePath(),
       origin: 'null',
       cookie: 'session=valid',
     })
@@ -374,7 +369,7 @@ describe('Repo Terminal Socket Origin validation', () => {
   })
 
   it('rejects the upgrade without a session cookie', async () => {
-    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path, origin: TRUSTED_ORIGIN })
+    const outcome = await rawWebSocketHandshake({ port: authenticatedPort, path: handshakePath(), origin: TRUSTED_ORIGIN })
 
     expect(outcome).toEqual({ upgraded: false, status: 401 })
   })

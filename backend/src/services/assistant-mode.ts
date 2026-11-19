@@ -13,9 +13,9 @@ import {
 } from './file-operations'
 import { ASSISTANT_NOTIFICATION_LIMITS, AssistantSettingsPatchSchema, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_LEADER_KEY, MANAGER_TOOL_NAME } from '@opencode-manager/shared/schemas'
 import { MANAGER_COLOR_THEME_ID, OPENCODE_THEMES } from '@opencode-manager/shared/themes'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, isRecord, parseJsonc } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, ASSISTANT_OPENCODE_DIR_NAME, JsonValueSchema, parseJsonc, parseJsonObject, parseJsonString, type JsonObject, type JsonValue } from '@opencode-manager/shared/utils'
 import { getAssistantModePath, getReposPath } from '@opencode-manager/shared/config/env'
-import type { OpenCodeAgentConfig, OpenCodeApi, OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
+import type { OpenCodeApi, OpenCodeConfigInfo } from '@opencode-manager/shared/opencode'
 import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import type { Database } from 'bun:sqlite'
 import { ensureAssistantRepo } from '../db/queries'
@@ -227,8 +227,7 @@ function matchesGeneratedAssistantDefaultAgentMd(content: string): boolean {
   return contentHash === currentHash || contentHash === previousHash || contentHash === legacyHash
 }
 
-function matchesGeneratedAssistantAgentPrompt(content: unknown): content is string {
-  if (typeof content !== 'string') return false
+function matchesGeneratedAssistantAgentPrompt(content: string): boolean {
   const currentHash = hashContent(buildAssistantAgentPrompt())
   const previousHash = hashContent(buildPreviousAssistantAgentPrompt())
   const legacyHash = hashContent(buildLegacyAssistantAgentPrompt())
@@ -307,7 +306,17 @@ function buildAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; shell: 'allow'; external_directory: 'ask' } {
+interface AssistantAgentPermission {
+  read: 'allow'
+  edit: 'allow'
+  glob: 'allow'
+  grep: 'allow'
+  list: 'allow'
+  shell: 'allow'
+  external_directory: 'ask'
+}
+
+function buildAssistantAgentPermission(): AssistantAgentPermission {
   return {
     read: 'allow',
     edit: 'allow',
@@ -590,18 +599,15 @@ Sending is rate limited to **10 notifications per minute**. Beyond that the tool
 `
 }
 
-type AssistantSettingsKey = keyof typeof AssistantSettingsPatchSchema.shape
-
-const ASSISTANT_SETTINGS_KEY_NOTES: Partial<Record<AssistantSettingsKey, string>> = {
-  tts: 'Non-secret TTS preferences (`enabled`, `provider`, `autoPlay`, `voice`, `model`, `speed`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).',
-  stt: 'Non-secret STT preferences (`enabled`, `provider`, `model`, `language`). STT must already be configured in the UI (the endpoint returns 400 otherwise).',
-}
+const ASSISTANT_SETTINGS_KEY_NOTES = new Map<string, string>([
+  ['tts', 'Non-secret TTS preferences (`enabled`, `provider`, `autoPlay`, `voice`, `model`, `speed`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).'],
+  ['stt', 'Non-secret STT preferences (`enabled`, `provider`, `model`, `language`). STT must already be configured in the UI (the endpoint returns 400 otherwise).'],
+])
 
 function buildAllowedSettingsKeysList(): string {
-  const keys = Object.keys(AssistantSettingsPatchSchema.shape) as AssistantSettingsKey[]
-  return keys
+  return [...AssistantSettingsPatchSchema.keyof().options]
     .map((key) => {
-      const note = ASSISTANT_SETTINGS_KEY_NOTES[key]
+      const note = ASSISTANT_SETTINGS_KEY_NOTES.get(key)
       return note === undefined ? `- \`${key}\`` : `- \`${key}\` — ${note}`
     })
     .join('\n')
@@ -1134,11 +1140,6 @@ Fork a session, optionally before a specific message. Omit \`beforeMessageId\` t
 `
 }
 
-/**
- * Builds the canonical Assistant `opencode.json` document: the assistant agent as default agent, its
- * allowed permissions, and a `primary` agent entry. The result is schema-validated, and an invalid
- * result throws rather than returning a config OpenCode would reject.
- */
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
   const permission = buildAssistantAgentPermission()
   const config: OpenCodeConfigInfo = {
@@ -1163,12 +1164,6 @@ export function buildAssistantOpenCodeConfig(): OpenCodeConfigInfo {
   return config
 }
 
-/**
- * Creates or repairs the Assistant workspace for `repo`: writes AGENTS.md, the assistant OpenCode
- * config, the bundled skills and the default agent file, updating the config under a file lock and
- * preserving customized content unless the matching `overwrite*` option is set. Returns the
- * resulting status, including warnings for instruction updates it declined to apply.
- */
 export async function ensureAssistantMode(
   repo: Repo,
   options?: AssistantModeInitRequest,
@@ -1216,7 +1211,7 @@ export async function ensureAssistantMode(
       ? undefined
       : parseAssistantOpenCodeConfig(existingOpenCodeJsonContent)
     const hasV1OpenCodeConfig = parsedOpenCodeConfig !== undefined && hasAssistantV1OpenCodeConfig(parsedOpenCodeConfig)
-    const existingOpenCodeConfig = parsedOpenCodeConfig as OpenCodeConfigInfo | undefined
+    const existingOpenCodeConfig = parsedOpenCodeConfig
 
     if (!opencodeJsonExists || overwriteOpenCodeConfig) {
       await writeFileContent(opencodeJsonPath, JSON.stringify(buildAssistantOpenCodeConfig(), null, 2))
@@ -1362,22 +1357,14 @@ export async function ensureAssistantMode(
   }
 }
 
-/**
- * Parses JSONC config text into a config object, returning `undefined` when the text is malformed or
- * its root is not an object.
- */
-function parseAssistantOpenCodeConfig(rawContent: string): Record<string, unknown> | undefined {
+function parseAssistantOpenCodeConfig(rawContent: string): JsonObject | undefined {
   try {
-    const parsed = parseJsonc(rawContent)
-    return isRecord(parsed) ? parsed : undefined
+    return parseJsonObject(JsonValueSchema.optional().parse(parseJsonc(rawContent))) ?? undefined
   } catch {
     return undefined
   }
 }
 
-/**
- * Resolves the v1 container that OpenCode converts into the given v2 container.
- */
 function resolveV1EntityPath(v2Path: readonly string[]): string[] {
   const mapping = V1_ENTITY_PATHS.find(
     (entry) => entry.v2Path.length === v2Path.length && entry.v2Path.every((segment, index) => segment === v2Path[index]),
@@ -1391,108 +1378,96 @@ function resolveV1EntityPath(v2Path: readonly string[]): string[] {
 const ASSISTANT_V1_AGENT_PATH = resolveV1EntityPath(['agents'])
 const ASSISTANT_V1_PERMISSION_PATH = resolveV1EntityPath(['permissions'])
 
-/**
- * Reports whether the config still carries v1 keys, which mark a file that has not been converted to
- * the v2 shape yet.
- */
-function hasAssistantV1OpenCodeConfig(config: Record<string, unknown>): boolean {
+function hasAssistantV1OpenCodeConfig(config: JsonObject): boolean {
   if (readConfigValueAtPath(config, ASSISTANT_V1_PERMISSION_PATH) !== undefined) return true
-  const v1Agents = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
-  return isRecord(v1Agents) && isRecord(v1Agents[ASSISTANT_DEFAULT_AGENT_NAME])
+  const v1Agents = parseJsonObject(readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH))
+  return v1Agents !== null && parseJsonObject(v1Agents[ASSISTANT_DEFAULT_AGENT_NAME]) !== null
 }
 
-/**
- * Reports whether an existing Assistant config lacks what `ensureAssistantMode` requires: the
- * assistant as default agent, an enabled agent entry with a valid mode, and no generated persona left
- * inline.
- */
-function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInfo): boolean {
+function assistantOpenCodeConfigNeedsRepair(config: JsonObject): boolean {
   if (config.default_agent !== ASSISTANT_DEFAULT_AGENT_NAME) return true
-  const agents = config.agents
-  if (!agents || typeof agents !== 'object') return true
-  const assistantAgent = agents[ASSISTANT_DEFAULT_AGENT_NAME]
-  if (!assistantAgent || typeof assistantAgent !== 'object') return true
+  const agents = parseJsonObject(config.agents)
+  if (agents === null) return true
+  const assistantAgent = parseJsonObject(agents[ASSISTANT_DEFAULT_AGENT_NAME])
+  if (assistantAgent === null) return true
   if (assistantAgent.mode !== 'primary' && assistantAgent.mode !== 'all') return true
   if (assistantAgent.disabled === true) return true
   if (assistantOpenCodeConfigHasGeneratedAgentPersona(config)) return true
   return false
 }
 
-function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInfo): boolean {
-  return normalizeAssistantAgent(config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]) !== undefined
+function assistantOpenCodeConfigHasGeneratedAgentPersona(config: JsonObject): boolean {
+  return normalizeAssistantAgent(parseJsonObject(config.agents)?.[ASSISTANT_DEFAULT_AGENT_NAME]) !== undefined
 }
 
-/** Returns the agent's `mode` when it is `primary` or `all`, otherwise falling back to `primary`. */
-function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
-  const mode = (agent as { mode?: unknown } | undefined)?.mode
+function resolveValidAssistantMode(agent: JsonValue | undefined): 'primary' | 'all' {
+  const mode = parseJsonObject(agent)?.mode
   return mode === 'primary' || mode === 'all' ? mode : 'primary'
 }
 
-/**
- * Reduces a generated assistant persona to a mode-only agent, leaving a customized persona to the caller.
- */
-function normalizeAssistantAgent(agent: unknown): OpenCodeAgentConfig | undefined {
-  if (!isRecord(agent) || !matchesGeneratedAssistantAgentPrompt(agent.system)) return undefined
-  return { mode: resolveValidAssistantMode(agent) }
+type NormalizedAssistantAgent = { mode: 'primary' | 'all' }
+
+function normalizeAssistantAgent(agent: JsonValue | undefined): NormalizedAssistantAgent | undefined {
+  const agentRecord = parseJsonObject(agent)
+  if (agentRecord === null) return undefined
+  const system = parseJsonString(agentRecord.system)
+  if (system === null || !matchesGeneratedAssistantAgentPrompt(system)) return undefined
+  return { mode: resolveValidAssistantMode(agentRecord) }
 }
 
-/**
- * Rewrites the assistant agent entry to a mode-only value, dropping a generated `system` prompt so it
- * comes from the agent markdown file rather than opaque config text.
- */
-function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInfo): OpenCodeConfigInfo {
-  const existingAssistantAgent = config.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
+function normalizeAssistantAgentConfig(agent: JsonValue | undefined): JsonObject {
+  const normalized = normalizeAssistantAgent(agent)
+  return normalized === undefined ? { mode: resolveValidAssistantMode(agent) } : { mode: normalized.mode }
+}
+
+function stripGeneratedAssistantAgentPersona(config: JsonObject): JsonObject {
+  const existingAssistantAgent = parseJsonObject(config.agents)?.[ASSISTANT_DEFAULT_AGENT_NAME]
 
   return {
     ...config,
     agents: {
-      ...(config.agents ?? {}),
-      [ASSISTANT_DEFAULT_AGENT_NAME]: normalizeAssistantAgent(existingAssistantAgent) ?? {
-        mode: resolveValidAssistantMode(existingAssistantAgent),
-      },
+      ...(parseJsonObject(config.agents) ?? {}),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: normalizeAssistantAgentConfig(existingAssistantAgent),
     },
   }
 }
 
-/**
- * Merges an existing Assistant config over a freshly generated one, keeping user settings and extra
- * agents while forcing the assistant as default agent and re-enabling its entry.
- */
-function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInfo): OpenCodeConfigInfo {
-  const generated = buildAssistantOpenCodeConfig()
-  const existingAssistantAgent = existing?.agents?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  const validMode = resolveValidAssistantMode(existingAssistantAgent)
-  const mergedAssistantAgent: OpenCodeAgentConfig = normalizeAssistantAgent(existingAssistantAgent) ?? {
-    ...(existingAssistantAgent ?? {}),
-    mode: validMode,
+function assistantOpenCodeConfigJson(): JsonObject {
+  return parseJsonObject(buildAssistantOpenCodeConfig()) ?? {}
+}
+
+function mergeAssistantOpenCodeConfig(existing?: JsonObject): JsonObject {
+  const generated = assistantOpenCodeConfigJson()
+  const existingAgents = parseJsonObject(existing?.agents) ?? {}
+  const existingAssistantAgent = existingAgents[ASSISTANT_DEFAULT_AGENT_NAME]
+  const mergedAssistantAgent = normalizeAssistantAgent(existingAssistantAgent) ?? {
+    ...(parseJsonObject(existingAssistantAgent) ?? {}),
+    mode: resolveValidAssistantMode(existingAssistantAgent),
     disabled: false,
   }
 
-  return {
+  const merged: JsonObject = {
     ...generated,
-    ...existing,
+    ...(existing ?? {}),
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    permissions: existing?.permissions ?? generated.permissions,
     agents: {
-      ...(existing?.agents ?? {}),
+      ...existingAgents,
       [ASSISTANT_DEFAULT_AGENT_NAME]: mergedAssistantAgent,
     },
   }
+  const permissions = existing?.permissions ?? generated.permissions
+  if (permissions !== undefined) merged.permissions = permissions
+  return merged
 }
 
-/**
- * Lists the v1 paths to delete after a conversion: the assistant agent entry, widened to the whole v1
- * `agents` container when that container held nothing else, plus `permissions` when a v2 counterpart
- * has just been written.
- */
 function buildAssistantV1ConfigRemovalPaths(
-  config: Record<string, unknown>,
-  convertedPermissions: unknown,
+  config: JsonObject,
+  convertedPermissions: JsonValue | undefined,
 ): string[][] {
-  const v1Agent = readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH)
-  const removeWholeAgent = isRecord(v1Agent) &&
+  const v1Agent = parseJsonObject(readConfigValueAtPath(config, ASSISTANT_V1_AGENT_PATH))
+  const removeWholeAgent = v1Agent !== null &&
     Object.keys(v1Agent).length === 1 &&
-    isRecord(v1Agent[ASSISTANT_DEFAULT_AGENT_NAME])
+    parseJsonObject(v1Agent[ASSISTANT_DEFAULT_AGENT_NAME]) !== null
 
   const paths: string[][] = [
     removeWholeAgent ? ASSISTANT_V1_AGENT_PATH : [...ASSISTANT_V1_AGENT_PATH, ASSISTANT_DEFAULT_AGENT_NAME],
@@ -1503,40 +1478,25 @@ function buildAssistantV1ConfigRemovalPaths(
   return paths
 }
 
-/**
- * Picks the assistant agent written back to the converted file, preferring OpenCode's converted entry,
- * then the agent passed in, then a mode derived from the v1 definition.
- */
-function resolveConvertedAssistantAgent(
-  agent: OpenCodeAgentConfig | undefined,
-  v1Agent: unknown,
-): OpenCodeAgentConfig {
-  return normalizeAssistantAgent(agent) ?? agent ?? { mode: resolveValidAssistantMode(v1Agent) }
+function resolveConvertedAssistantAgent(agent: JsonValue | undefined, v1Agent: JsonValue | undefined): JsonObject {
+  const normalized = normalizeAssistantAgent(agent)
+  if (normalized !== undefined) return { mode: normalized.mode }
+  return parseJsonObject(agent) ?? normalizeAssistantAgentConfig(v1Agent)
 }
 
-/**
- * Puts the raw `{env:…}` and `{file:…}` references from the original file back into the converted
- * assistant agent, returning the agent unchanged when no restored entry can be read.
- */
 function restoreAssistantAgentReferences(
-  agent: OpenCodeAgentConfig,
+  agent: JsonObject,
   resolved: OpenCodeConfigInfo,
-  raw: Record<string, unknown>,
-): OpenCodeAgentConfig {
+  raw: JsonObject,
+): JsonObject {
   const restored = restoreOpenCodeConfigReferences(
     { agents: { [ASSISTANT_DEFAULT_AGENT_NAME]: agent } },
-    resolved as Record<string, unknown>,
+    resolved,
     raw,
   )
-  const restoredAgent = readConfigValueAtPath(restored, ['agents', ASSISTANT_DEFAULT_AGENT_NAME])
-  if (typeof restoredAgent !== 'object' || restoredAgent === null) return agent
-  return restoredAgent as OpenCodeAgentConfig
+  return parseJsonObject(readConfigValueAtPath(restored, ['agents', ASSISTANT_DEFAULT_AGENT_NAME])) ?? agent
 }
 
-/**
- * Rewrites a v1 Assistant `opencode.json` to the v2 shape using OpenCode's own conversion,
- * keeping comments and formatting. The file is left untouched when OpenCode is unreachable.
- */
 export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Promise<boolean> {
   const assistantDir = getAssistantModeDirectory()
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
@@ -1548,11 +1508,6 @@ export async function convertAssistantOpenCodeConfigToV2(api: OpenCodeApi): Prom
   }
 }
 
-/**
- * Converts one Assistant `opencode.json` in place when it still holds v1 keys, writing OpenCode's
- * converted agent and permissions while preserving comments. Returns `false` without writing when the
- * file is absent, already v2, unreadable by OpenCode, or the rewritten text fails validation.
- */
 async function convertAssistantOpenCodeConfigFile(
   api: OpenCodeApi,
   assistantDir: string,
@@ -1568,9 +1523,9 @@ async function convertAssistantOpenCodeConfigFile(
   const documentInfo = documents.get(path.resolve(opencodeJsonPath))
   if (documentInfo === undefined) return false
 
-  const v1Assistants = readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH)
-  const v1AssistantAgent = isRecord(v1Assistants) ? v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME] : undefined
-  if (isRecord(v1AssistantAgent) && documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME] === undefined) {
+  const v1Assistants = parseJsonObject(readConfigValueAtPath(rawConfig, ASSISTANT_V1_AGENT_PATH))
+  const v1AssistantAgent = v1Assistants === null ? undefined : v1Assistants[ASSISTANT_DEFAULT_AGENT_NAME]
+  if (v1AssistantAgent !== undefined && documentInfo.agents?.[ASSISTANT_DEFAULT_AGENT_NAME] === undefined) {
     logger.warn('Skipped the Assistant OpenCode config conversion: OpenCode returned no converted assistant agent')
     return false
   }
@@ -1596,7 +1551,7 @@ async function convertAssistantOpenCodeConfigFile(
     updatedText = removeOpenCodeConfigProperty(updatedText, removalPath)
   }
 
-  const validation = validateOpenCodeConfig(parseJsonc(updatedText))
+  const validation = validateOpenCodeConfig(JsonValueSchema.optional().parse(parseJsonc(updatedText)))
   if (!validation.success) {
     logger.warn('Skipped the Assistant OpenCode config conversion: the converted config is invalid', validation.issues)
     return false

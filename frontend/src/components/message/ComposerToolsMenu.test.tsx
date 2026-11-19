@@ -1,17 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ComposerToolsMenu } from './ComposerToolsMenu'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
-import { useSessionPermissionMode, useSetSessionPermissionMode } from '@/hooks/useSessionPermissionMode'
-import { useSessionSandbox, useSetSessionSandbox } from '@/hooks/useSessionSandbox'
-import { FetchError } from '@/api/fetchWrapper'
+import { renderWithProviders } from '@/test/render'
+import { makeSettingsResponse } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
+import { SetSessionPermissionModeRequestSchema } from '@opencode-manager/shared/schemas'
 import type { SessionPermissionModeState, SessionSandboxState } from '@opencode-manager/shared/schemas'
 
-vi.mock('@/hooks/useSessionPermissionMode')
-vi.mock('@/hooks/useSessionSandbox')
-
-const baseState: SessionPermissionModeState = {
+const basePermissionState: SessionPermissionModeState = {
   sessionId: 'ses_1',
   rootSessionId: 'ses_1',
   mode: 'ask',
@@ -29,115 +26,115 @@ const baseSandboxState: SessionSandboxState = {
   available: true,
 }
 
-function mockPermissionMode(state: Partial<SessionPermissionModeState> = {}, mutate = vi.fn()) {
-  vi.mocked(useSessionPermissionMode).mockReturnValue({
-    data: { ...baseState, ...state },
-    isError: false,
-  } as ReturnType<typeof useSessionPermissionMode>)
-  vi.mocked(useSetSessionPermissionMode).mockReturnValue({
-    mutate,
-    isPending: false,
-  } as unknown as ReturnType<typeof useSetSessionPermissionMode>)
-  return mutate
+interface MenuFixture {
+  permission?: Partial<SessionPermissionModeState>
+  sandbox?: Partial<SessionSandboxState>
+  sandboxError?: { status: number, message: string }
+  goalArmed?: boolean
+  goalDisabled?: boolean
+  goalLabel?: string
+  sessionID?: string
+  remote?: boolean
 }
 
-function mockSandbox(
-  state: Partial<SessionSandboxState> = {},
-  mutateAsync = vi.fn().mockResolvedValue(undefined),
-) {
-  const mutate = vi.fn()
-  vi.mocked(useSessionSandbox).mockReturnValue({
-    data: { ...baseSandboxState, ...state },
-    isError: false,
-  } as ReturnType<typeof useSessionSandbox>)
-  vi.mocked(useSetSessionSandbox).mockReturnValue({
-    mutate,
-    mutateAsync,
-    isPending: false,
-  } as unknown as ReturnType<typeof useSetSessionSandbox>)
-  return { mutate, mutateAsync }
-}
-
-function renderMenu(overrides: Partial<React.ComponentProps<typeof ComposerToolsMenu>> = {}) {
+async function renderMenu(fixture: MenuFixture = {}) {
+  const user = userEvent.setup()
+  const sessionID = fixture.sessionID ?? 'ses_1'
+  const permissionState = { ...basePermissionState, sessionId: sessionID, rootSessionId: sessionID, ...fixture.permission }
+  const sandboxState = { ...baseSandboxState, sessionId: sessionID, rootSessionId: sessionID, ...fixture.sandbox }
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: `/api/session-permission-modes/${sessionID}`,
+      respond: () => ({ json: permissionState }),
+    },
+    {
+      method: 'PUT',
+      path: `/api/session-permission-modes/${sessionID}`,
+      respond: (request) => {
+        const parsed = SetSessionPermissionModeRequestSchema.safeParse(request.body)
+        return { json: { ...permissionState, mode: parsed.success ? parsed.data.mode : 'ask' } }
+      },
+    },
+    {
+      method: 'GET',
+      path: `/api/session-sandbox/${sessionID}`,
+      respond: () => ({ json: sandboxState }),
+    },
+    {
+      method: 'PUT',
+      path: `/api/session-sandbox/${sessionID}`,
+      respond: () => {
+        if (fixture.sandboxError) {
+          return { status: fixture.sandboxError.status, json: { error: fixture.sandboxError.message } }
+        }
+        return { json: sandboxState }
+      },
+    },
+    { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse() }) },
+  ]
   const props = {
-    sessionID: 'ses_1',
+    sessionID,
     directory: '/repo',
-    goalArmed: false,
-    goalDisabled: false,
-    goalLabel: 'Goal mode: the next message becomes the objective',
+    goalArmed: fixture.goalArmed ?? false,
+    goalDisabled: fixture.goalDisabled ?? false,
+    goalLabel: fixture.goalLabel ?? 'Goal mode: the next message becomes the objective',
     onToggleGoal: vi.fn(),
     onAttachFile: vi.fn(),
-    ...overrides,
   }
-  render(<ComposerToolsMenu {...props} />)
-  return props
+  const options = { auth: false, theme: false, toaster: false, fetchRoutes: routes } as const
+  const result = fixture.remote
+    ? renderWithProviders(<ComposerToolsMenu {...props} />, { ...options, serverId: 'srv_remote' })
+    : renderWithProviders(<ComposerToolsMenu {...props} />, options)
+  const scopeSuffix = fixture.remote ? ['srv_remote'] : []
+  await waitFor(() => {
+    expect(result.queryClient.getQueryData(['session-permission-mode', sessionID, ...scopeSuffix])).toBeDefined()
+  })
+  if (!fixture.remote) {
+    await waitFor(() => expect(result.queryClient.getQueryData(['session-sandbox', sessionID])).toBeDefined())
+  }
+  return { ...result, ...props, user, sessionID }
 }
 
-function renderRemoteMenu(overrides: Partial<React.ComponentProps<typeof ComposerToolsMenu>> = {}) {
-  const props = {
-    sessionID: 'ses_remote',
-    directory: '/remote/repo',
-    goalArmed: false,
-    goalDisabled: false,
-    goalLabel: 'Goal mode: the next message becomes the objective',
-    onToggleGoal: vi.fn(),
-    onAttachFile: vi.fn(),
-    ...overrides,
-  }
-  render(
-    <OpenCodeServerProvider serverId="srv_remote">
-      <ComposerToolsMenu {...props} />
-    </OpenCodeServerProvider>,
-  )
-  return props
+async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Composer options' }))
 }
 
 describe('ComposerToolsMenu', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockSandbox()
-  })
-
-  it('does not highlight the trigger when no tool is active', () => {
-    mockPermissionMode()
-    renderMenu()
+  it('does not highlight the trigger when no tool is active', async () => {
+    const { user } = await renderMenu()
 
     expect(screen.getByRole('button', { name: 'Composer options' })).not.toHaveClass('bg-highlight')
+    await openMenu(user)
+    expect(await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })).toHaveAttribute('aria-checked', 'false')
   })
 
-  it('highlights the trigger while permissions accept everything', () => {
-    mockPermissionMode({ mode: 'auto' })
-    renderMenu()
-
-    expect(screen.getByRole('button', { name: 'Composer options' })).toHaveClass('bg-highlight')
-  })
-
-  it('highlights the trigger while goal mode is armed', () => {
-    mockPermissionMode()
-    renderMenu({ goalArmed: true })
+  it.each([
+    ['permissions accept everything', { permission: { mode: 'auto' } }],
+    ['goal mode is armed', { goalArmed: true }],
+    ['commands are sandboxed', { sandbox: { sandboxed: true } }],
+  ] satisfies Array<[string, MenuFixture]>)('highlights the trigger while %s', async (_case, fixture) => {
+    await renderMenu(fixture)
 
     expect(screen.getByRole('button', { name: 'Composer options' })).toHaveClass('bg-highlight')
   })
 
   it('switches permissions to accept everything', async () => {
-    const user = userEvent.setup()
-    const mutate = mockPermissionMode()
-    renderMenu()
+    const { user, fetchFake, sessionID } = await renderMenu()
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
-    expect(item).toHaveAttribute('aria-checked', 'false')
     await user.click(item)
 
-    expect(mutate).toHaveBeenCalledWith({ directory: '/repo', mode: 'auto' })
+    expect(fetchFake.lastRequest('PUT', `/api/session-permission-modes/${sessionID}`)?.body).toMatchObject({
+      directory: '/repo',
+      mode: 'auto',
+    })
   })
 
   it('offers permission and goal controls on a remote server without sandbox controls', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    renderRemoteMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const { user } = await renderMenu({ remote: true })
+    await openMenu(user)
 
     expect(await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitemcheckbox', { name: /Goal mode/ })).toBeInTheDocument()
@@ -145,70 +142,44 @@ describe('ComposerToolsMenu', () => {
   })
 
   it('shows why permissions cannot be changed', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode({ lockedReason: 'child' })
-    renderMenu()
+    const { user } = await renderMenu({ permission: { lockedReason: 'child' } })
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
 
     expect(item).toHaveAttribute('aria-disabled', 'true')
     expect(item).toHaveTextContent('Inherited from parent session')
   })
 
-  it('highlights the trigger while commands are sandboxed', () => {
-    mockPermissionMode()
-    mockSandbox({ sandboxed: true })
-    renderMenu()
-
-    expect(screen.getByRole('button', { name: 'Composer options' })).toHaveClass('bg-highlight')
-  })
-
   it('shows the sandbox item checked while commands are sandboxed', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    mockSandbox({ sandboxed: true })
-    renderMenu()
+    const { user } = await renderMenu({ sandbox: { sandboxed: true } })
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
-    const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
-
-    expect(item).toHaveAttribute('aria-checked', 'true')
+    expect(await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('toggles sandboxing via the sandbox endpoint', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    const { mutate } = mockSandbox()
-    renderMenu()
+  it('toggles sandboxing through the sandbox endpoint', async () => {
+    const { user, fetchFake, sessionID } = await renderMenu()
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
     expect(item).toHaveAttribute('aria-checked', 'false')
     await user.click(item)
 
-    expect(mutate).toHaveBeenCalledWith({ sandboxed: true })
+    expect(fetchFake.lastRequest('PUT', `/api/session-sandbox/${sessionID}`)?.body).toMatchObject({ sandboxed: true })
   })
 
   it('hides the sandbox item when sandboxing is unavailable', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    mockSandbox({ available: false })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
-    await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
+    const { user } = await renderMenu({ sandbox: { available: false } })
+    await openMenu(user)
 
     expect(screen.queryByRole('menuitemcheckbox', { name: /Sandbox commands/ })).not.toBeInTheDocument()
   })
 
   it('shows why sandboxing cannot be changed', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    mockSandbox({ lockedReason: 'child' })
-    renderMenu()
+    const { user } = await renderMenu({ sandbox: { lockedReason: 'child' } })
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(item).toHaveAttribute('aria-disabled', 'true')
@@ -216,22 +187,18 @@ describe('ComposerToolsMenu', () => {
   })
 
   it('toggles goal mode', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    const props = renderMenu()
+    const { user, onToggleGoal } = await renderMenu()
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     await user.click(await screen.findByRole('menuitemcheckbox', { name: /Goal mode/ }))
 
-    expect(props.onToggleGoal).toHaveBeenCalledTimes(1)
+    expect(onToggleGoal).toHaveBeenCalledTimes(1)
   })
 
   it('shows why goal mode is unavailable', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    renderMenu({ goalDisabled: true, goalLabel: 'A goal is already active for this session' })
+    const { user } = await renderMenu({ goalDisabled: true, goalLabel: 'A goal is already active for this session' })
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitemcheckbox', { name: /Goal mode/ })
 
     expect(item).toHaveAttribute('aria-disabled', 'true')
@@ -239,124 +206,88 @@ describe('ComposerToolsMenu', () => {
   })
 
   it('opens the file picker', async () => {
-    const user = userEvent.setup()
-    mockPermissionMode()
-    const props = renderMenu()
+    const { user, onAttachFile } = await renderMenu()
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Attach image or PDF' }))
 
-    expect(props.onAttachFile).toHaveBeenCalledTimes(1)
+    expect(onAttachFile).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the 44px control size for the trigger', () => {
-    mockPermissionMode()
-    renderMenu()
+  it('uses the 44px control size for the trigger', async () => {
+    await renderMenu()
 
-    const trigger = screen.getByRole('button', { name: 'Composer options' })
+    const trigger = await screen.findByRole('button', { name: 'Composer options' })
     expect(trigger).toHaveClass('size-11', 'p-0')
     expect(trigger).not.toHaveClass('p-2')
   })
 })
 
 describe('ComposerToolsMenu sandbox resources', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockPermissionMode()
-    mockSandbox()
-  })
-
-  async function openResources(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+  async function openResources(fixture: MenuFixture) {
+    const result = await renderMenu({ ...fixture, sandbox: { sandboxed: true, ...fixture.sandbox } })
+    await openMenu(result.user)
     const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
-    await user.click(item)
+    await result.user.click(item)
     await screen.findByRole('dialog')
+    return result
   }
 
   it('hides the resources item when the session is not sandboxed', async () => {
-    const user = userEvent.setup()
-    mockSandbox({ sandboxed: false })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const { user } = await renderMenu({ sandbox: { sandboxed: false } })
+    await openMenu(user)
     await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
   it('hides the resources item for a child session', async () => {
-    const user = userEvent.setup()
-    mockSandbox({ sandboxed: true, lockedReason: 'child' })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
+    const { user } = await renderMenu({ sandbox: { sandboxed: true, lockedReason: 'child' } })
+    await openMenu(user)
     await screen.findByRole('menuitemcheckbox', { name: /Sandbox commands/ })
 
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
   it('hides the resources item when sandboxing is unavailable', async () => {
-    const user = userEvent.setup()
-    mockSandbox({ sandboxed: true, available: false })
-    renderMenu()
-
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
-    await screen.findByRole('menuitemcheckbox', { name: /Accept all permissions/ })
+    const { user } = await renderMenu({ sandbox: { sandboxed: true, available: false } })
+    await openMenu(user)
 
     expect(screen.queryByRole('menuitem', { name: /Sandbox resources/ })).not.toBeInTheDocument()
   })
 
   it('shows the effective values with a custom marker when an override exists', async () => {
-    const user = userEvent.setup()
-    mockSandbox({
-      sandboxed: true,
-      resources: { cpus: 8, memoryMib: 2048 },
-      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    const { user } = await renderMenu({
+      sandbox: { sandboxed: true, resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
     })
-    renderMenu()
+    await openMenu(user)
 
-    await user.click(screen.getByRole('button', { name: 'Composer options' }))
     const item = await screen.findByRole('menuitem', { name: /Sandbox resources/ })
 
     expect(item).toHaveTextContent('8 CPUs · 2 GiB · custom')
   })
 
   it('prefills the dialog from the override', async () => {
-    const user = userEvent.setup()
-    mockSandbox({
-      sandboxed: true,
-      resources: { cpus: 8, memoryMib: 2048 },
-      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    await openResources({
+      sandbox: { resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
     })
-    renderMenu()
-
-    await openResources(user)
 
     expect(screen.getByLabelText('CPUs')).toHaveValue(8)
     expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(2)
   })
 
   it('prefills the dialog from the effective values without an override', async () => {
-    const user = userEvent.setup()
-    mockSandbox({ sandboxed: true, resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } })
-    renderMenu()
-
-    await openResources(user)
+    await openResources({ sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } } })
 
     expect(screen.getByLabelText('CPUs')).toHaveValue(2)
     expect(screen.getByLabelText('Memory (GiB)')).toHaveValue(4)
   })
 
   it('saves the entered resources', async () => {
-    const user = userEvent.setup()
-    const { mutateAsync } = mockSandbox({
-      sandboxed: true,
-      resources: null,
-      effectiveResources: { cpus: 2, memoryMib: 4096 },
+    const { fetchFake, sessionID, user } = await openResources({
+      sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
     })
-    renderMenu()
 
-    await openResources(user)
     const cpus = screen.getByLabelText('CPUs')
     await user.clear(cpus)
     await user.type(cpus, '4')
@@ -365,33 +296,27 @@ describe('ComposerToolsMenu sandbox resources', () => {
     await user.type(memory, '3')
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(mutateAsync).toHaveBeenCalledWith({ resources: { cpus: 4, memoryMib: 3072 } })
+    expect(fetchFake.lastRequest('PUT', `/api/session-sandbox/${sessionID}`)?.body).toMatchObject({
+      resources: { cpus: 4, memoryMib: 3072 },
+    })
   })
 
   it('clears the override with Use defaults', async () => {
-    const user = userEvent.setup()
-    const { mutateAsync } = mockSandbox({
-      sandboxed: true,
-      resources: { cpus: 8, memoryMib: 2048 },
-      effectiveResources: { cpus: 8, memoryMib: 2048 },
+    const { fetchFake, sessionID, user } = await openResources({
+      sandbox: { resources: { cpus: 8, memoryMib: 2048 }, effectiveResources: { cpus: 8, memoryMib: 2048 } },
     })
-    renderMenu()
 
-    await openResources(user)
     await user.click(screen.getByRole('button', { name: 'Use defaults' }))
 
-    expect(mutateAsync).toHaveBeenCalledWith({ resources: null })
+    expect(fetchFake.lastRequest('PUT', `/api/session-sandbox/${sessionID}`)?.body).toMatchObject({ resources: null })
   })
 
   it('shows the server error when saving resources fails', async () => {
-    const user = userEvent.setup()
-    mockSandbox(
-      { sandboxed: true, resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
-      vi.fn().mockRejectedValue(new FetchError('Requested resources exceed the host', 400)),
-    )
-    renderMenu()
+    const { user } = await openResources({
+      sandbox: { resources: null, effectiveResources: { cpus: 2, memoryMib: 4096 } },
+      sandboxError: { status: 400, message: 'Requested resources exceed the host' },
+    })
 
-    await openResources(user)
     await user.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Requested resources exceed the host')

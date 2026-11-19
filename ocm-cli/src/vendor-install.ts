@@ -3,6 +3,8 @@ import { randomBytes } from 'crypto'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { applyEdits, modify, parse as parseJsonc, type ParseError } from 'jsonc-parser/lib/esm/main.js'
+import { z } from 'zod'
+import { JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
 import { removeQuietly } from './json-store.js'
 
 export const OCM_PLUGIN_NAME = 'ocm-cli'
@@ -71,28 +73,35 @@ function realPath(filePath: string): string {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+const CliConfigSchema = z.looseObject({ plugins: JsonValueSchema.optional() })
+
+function pluginEntrySpec(entry: JsonValue): string | undefined {
+  const spec = z.string().safeParse(entry)
+  if (spec.success) return spec.data
+  const entryArray = z.array(JsonValueSchema).safeParse(entry)
+  if (!entryArray.success) return undefined
+  const first = z.string().safeParse(entryArray.data[0])
+  return first.success ? first.data : undefined
 }
 
-function pluginEntrySpec(entry: unknown): string | undefined {
-  if (typeof entry === 'string') return entry
-  if (Array.isArray(entry) && typeof entry[0] === 'string') return entry[0]
-  return undefined
+export interface CliConfigPatch {
+  text: string
+  changed: boolean
 }
 
-export function addPluginToCliConfig(text: string | null, spec = OCM_PLUGIN_SPEC): { text: string; changed: boolean } {
+export function addPluginToCliConfig(text: string | null, spec = OCM_PLUGIN_SPEC): CliConfigPatch {
   if (!text || text.trim() === '') {
     return { text: `${JSON.stringify({ $schema: CLI_CONFIG_SCHEMA, plugins: [spec] }, null, 2)}\n`, changed: true }
   }
 
   const errors: ParseError[] = []
-  const parsed = parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false })
-  if (errors.length > 0 || !isRecord(parsed)) {
+  const parsed: JsonValue = parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false })
+  const config = CliConfigSchema.safeParse(parsed)
+  if (errors.length > 0 || !config.success) {
     throw new InstallError('cli.json is not valid JSONC; add the plugin entry manually')
   }
 
-  const plugins = parsed.plugins
+  const plugins = config.data.plugins
   if (plugins !== undefined && !Array.isArray(plugins)) {
     throw new InstallError('cli.json "plugins" is not an array; add the plugin entry manually')
   }
@@ -122,7 +131,11 @@ function writeTextAtomic(filePath: string, text: string): void {
     mode = undefined
   }
   try {
-    writeFileSync(tmp, text, { encoding: 'utf-8', ...(mode === undefined ? {} : { mode }) })
+    if (mode === undefined) {
+      writeFileSync(tmp, text, { encoding: 'utf-8' })
+    } else {
+      writeFileSync(tmp, text, { encoding: 'utf-8', mode })
+    }
     renameSync(tmp, filePath)
   } catch (err) {
     removeQuietly(tmp)
@@ -130,7 +143,12 @@ function writeTextAtomic(filePath: string, text: string): void {
   }
 }
 
-function linkBinary(paths: VendorPaths, force: boolean): { changed: boolean; pathMissing: boolean } {
+interface LinkBinaryResult {
+  changed: boolean
+  pathMissing: boolean
+}
+
+function linkBinary(paths: VendorPaths, force: boolean): LinkBinaryResult {
   const target = join(paths.pluginDistDir, 'ocm.js')
   if (!existsSync(target)) {
     throw new InstallError(`vendored ocm.js missing at ${target}; re-run the install`)

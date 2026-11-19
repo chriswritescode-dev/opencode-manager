@@ -12,13 +12,6 @@ function isLocalRoute(pathname: string): boolean {
     || parseChatSessionRoute(pathname) !== null
 }
 
-/**
- * Keeps the sidebar server selection in step with the location and the linked server list: a linked
- * server route selects that server, a local repo or assistant route selects local, and a selected
- * server that is missing or disabled in a successfully loaded list falls back to local. Mounted once
- * inside `AuthProvider` by the app shell so the selection follows the route even when no sidebar
- * consumer is rendered; the server list is only loaded once authenticated.
- */
 export function useSidebarServerRouteSync(): void {
   const { pathname } = useLocation()
   const routeServerId = useMatch('/servers/:serverId/*')?.params.serverId
@@ -47,10 +40,6 @@ export function useSidebarServerRouteSync(): void {
   }, [isSuccess, servers, serverId, selectServer])
 }
 
-/**
- * The linked server selected in the sidebar, defaulting to the local server. Selecting a server
- * never navigates; `useSidebarServerRouteSync` keeps the selection aligned with the route.
- */
 export function useSidebarServerSelection(): [string, (serverId: string) => void] {
   const serverId = useSidebarServerStore((state) => state.serverId)
   const selectServer = useSidebarServerStore((state) => state.selectServer)

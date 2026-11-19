@@ -1,889 +1,448 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
-import { SessionDetail } from '../SessionDetail'
-import { LocationCatcher } from '@/test/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, fireEvent, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { z } from 'zod'
 import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
-
-const mocks = vi.hoisted(() => ({
-  useSession: vi.fn(),
-  useSessionTranscript: vi.fn(),
-  useSSE: vi.fn(),
-  useRepoActivity: vi.fn(),
-  usePermissions: vi.fn(),
-  useForms: vi.fn(),
-  useSSEHealth: vi.fn(),
-  useConfig: vi.fn(),
-  useMobile: vi.fn(),
-  useAutoScroll: vi.fn(),
-  dialogSetters: {} as Record<string, ReturnType<typeof vi.fn>>,
-  openSettings: vi.fn(),
-  openSettingsTab: vi.fn(),
-  useSessionStatusForSession: vi.fn(),
-  compactSession: vi.fn(),
-  listSessionMessages: vi.fn(),
-  forkSession: vi.fn(),
-  updateSession: vi.fn(),
-  createSession: vi.fn(),
-  updateSettings: vi.fn(),
-  copyTextToClipboard: vi.fn(),
-  downloadMarkdown: vi.fn(),
-  setStatus: vi.fn(),
-  beginCompaction: vi.fn(),
-  endCompaction: vi.fn(),
-  setPromptValue: vi.fn(),
-  openModelPicker: vi.fn(),
-  promptInputProps: null as Record<string, unknown> | null,
-  scrollIntoView: vi.fn(),
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    loading: vi.fn(),
-    promise: vi.fn(),
-    dismiss: vi.fn(),
-  },
-}))
-
-vi.mock('@/config', () => ({
-  OPENCODE_API_ENDPOINT: 'http://localhost:5551/api/opencode',
-  API_BASE_URL: 'http://localhost:5551',
-  SERVER_PORT: 5003,
-  OPENCODE_PORT: 5551,
-  FILE_LIMITS: {},
-  DEFAULTS: {},
-  ALLOWED_MIME_TYPES: [],
-  GIT_PROVIDERS: [],
-}))
-
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return {
-    ...actual,
-    compactSession: mocks.compactSession,
-    listSessionMessages: mocks.listSessionMessages,
-    forkSession: mocks.forkSession,
-  }
-})
-
-vi.mock('@/lib/exportSession', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/exportSession')>()
-  return {
-    ...actual,
-    downloadMarkdown: mocks.downloadMarkdown,
-  }
-})
-
-vi.mock('@/lib/clipboard', () => ({
-  copyTextToClipboard: mocks.copyTextToClipboard,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: mocks.showToast,
-}))
-
-vi.mock('@/hooks/useOpenCode', () => ({
-  useSession: mocks.useSession,
-  useInterruptSession: vi.fn(() => ({ mutate: vi.fn() })),
-  useUpdateSession: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: mocks.updateSession })),
-  useCreateSession: vi.fn(() => ({ mutateAsync: mocks.createSession })),
-  useConfig: mocks.useConfig,
-  useSendPrompt: vi.fn(() => ({ mutate: vi.fn() })),
-  useSendShell: vi.fn(() => ({ mutate: vi.fn() })),
-  useAgents: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useSessionTranscript', () => ({
-  useSessionTranscript: mocks.useSessionTranscript,
-}))
-
-vi.mock('@/hooks/useRepoSiblings', () => ({
-  useRepoSiblings: vi.fn(() => ({ data: [] })),
-}))
-
-vi.mock('@/hooks/useModelSelection', () => ({
-  useModelSelection: vi.fn(() => ({ model: null, modelString: null, modelRef: null })),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: vi.fn(() => ({ isEnabled: false })),
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: vi.fn(() => ({
-    preferences: { expandToolCalls: false },
-    updateSettings: mocks.updateSettings,
-  })),
-}))
-
-vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: vi.fn(() => ({ open: mocks.openSettings, openTab: mocks.openSettingsTab })),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: mocks.useMobile,
-  useSwipeBack: vi.fn(() => ({ ref: vi.fn() })),
-  useSwipeDismiss: vi.fn(() => ({ bind: vi.fn(), swipeProgress: 0, swipeStyles: {} })),
-}))
-
-vi.mock('@/hooks/useVisualViewport', () => ({
-  useVisualViewport: vi.fn(() => ({ keyboardHeight: 0 })),
-}))
-
-vi.mock('@/contexts/KeyboardShortcutsContext', () => ({
-  useShortcutActions: vi.fn(),
-}))
-
-vi.mock('@/hooks/useAutoScroll', () => ({
-  useAutoScroll: mocks.useAutoScroll,
-}))
-
-vi.mock('@/hooks/useDialogParam', () => ({
-  useDialogParam: vi.fn((name: string) => [false, mocks.dialogSetters[name]]),
-}))
-
-vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
-  getAssistantText: vi.fn(() => ''),
-  getLatestPlayableAssistantMessage: vi.fn(() => null),
-  useAutoPlayLastResponse: vi.fn(() => {}),
-}))
-
-vi.mock('@/stores/uiStateStore', () => ({
-  useUIState: vi.fn((selector?: (state: Record<string, unknown>) => unknown) =>
-    typeof selector === 'function'
-      ? selector({ isEditingMessage: false })
-      : false
-  ),
-}))
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn((selector: (state: {
-    setStatus: typeof mocks.setStatus
-    beginCompaction: typeof mocks.beginCompaction
-    endCompaction: typeof mocks.endCompaction
-  }) => unknown) =>
-    selector({
-      setStatus: mocks.setStatus,
-      beginCompaction: mocks.beginCompaction,
-      endCompaction: mocks.endCompaction,
-    })
-  ),
-  useSessionStatusForSession: mocks.useSessionStatusForSession,
-}))
-
-vi.mock('@/hooks/useSSE', () => ({
-  useSSE: mocks.useSSE,
-}))
-
-vi.mock('@/hooks/useRepoActivity', () => ({
-  useRepoActivity: mocks.useRepoActivity,
-}))
-
-vi.mock('@/contexts/EventContext', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...(actual as object),
-    usePermissions: mocks.usePermissions,
-    useForms: mocks.useForms,
-    useSSEHealth: mocks.useSSEHealth,
-  }
-})
-
-vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn(() => Promise.resolve({
-    id: 1,
-    repoUrl: 'https://github.com/test/repo',
-    localPath: '/test/repo',
-    sourcePath: null,
-    fullPath: '/test/repo',
-    branch: 'main',
-    currentBranch: 'main',
-    fullSlug: 'test/repo',
-    repoType: 'github' as const,
-  })),
-  initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/test/repo' })),
-}))
-
-vi.mock('@/components/session/BackgroundWorkBar', () => ({ BackgroundWorkBar: vi.fn(() => null) }))
-vi.mock('@/components/session/SessionGoalBar', () => ({ SessionGoalBar: vi.fn(() => null) }))
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: vi.fn(() => ({ data: undefined })),
-  useSessionGoalCommand: vi.fn(() => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false })),
-}))
-vi.mock('@/components/session/SideQuestionDialog', () => ({ SideQuestionDialog: vi.fn(() => null) }))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({ ChangesWalkthroughSheet: vi.fn(() => null) }))
-vi.mock('@/components/navigation/ToolSidePanel', () => ({ ToolSidePanel: vi.fn(() => null) }))
-vi.mock('@/components/file-browser/FileBrowserSheet', () => ({ FileBrowserSheet: vi.fn(() => null) }))
-vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpDialog: vi.fn(() => null) }))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsDialog: vi.fn(() => null) }))
-vi.mock('@/components/repo/ResetPermissionsDialog', () => ({ ResetPermissionsDialog: vi.fn(() => null) }))
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsDialog: vi.fn(() => null) }))
-vi.mock('@/components/source-control', () => ({ SourceControlPanel: vi.fn(() => null) }))
-vi.mock('@/components/session/FormPrompt', () => ({ FormPrompt: vi.fn(() => null) }))
-vi.mock('@/components/session/MinimizedFormIndicator', () => ({ MinimizedFormIndicator: vi.fn(() => null) }))
-vi.mock('@/components/notifications/PendingActionsGroup', () => ({ PendingActionsGroup: vi.fn(() => null) }))
-vi.mock('@/components/message/MessageThread', async () => {
-  const { createElement } = await import('react')
-  return {
-    MessageThread: ({ messages }: { messages: SessionMessageInfo[] }) =>
-      createElement(
-        'div',
-        null,
-        messages.map((message) =>
-          createElement('div', { key: message.id, 'data-message-id': message.id }),
-        ),
-      ),
-  }
-})
-vi.mock('@/components/message/PromptInput', async () => {
-  const { forwardRef, useImperativeHandle } = await import('react')
-  return {
-    PromptInput: forwardRef((props: Record<string, unknown>, ref) => {
-      mocks.promptInputProps = props
-      useImperativeHandle(ref, () => ({
-        setPromptValue: mocks.setPromptValue,
-        openModelPicker: mocks.openModelPicker,
-      }))
-      return null
-    }),
-  }
-})
+import { promptTextarea } from '@/test/promptInput'
+import { installClipboard, installMatchMedia, installObjectUrl } from '@/test/browserFakes'
+import { makeSession, makeUserMessage } from '@/test/fixtures/api'
+import { renderSessionPage, sessionPageStatus } from '@/test/sessionPage'
+import type { SessionMessageInfo } from '@opencode-manager/shared/opencode'
 
 const SESSION_ID = 'session-1'
 
-const createSession = (revert?: { messageID: string }) => ({
-  id: SESSION_ID,
-  title: 'Command Session',
-  time: { created: 1000, updated: 2000 },
-  location: { directory: '/test/repo' },
-  ...(revert ? { revert } : {}),
-})
+function userMessage(id: string, text: string): SessionMessageInfo {
+  return makeUserMessage({ id, text })
+}
 
-function createUserMessage(id: string, text: string): SessionMessageInfo {
-  return {
-    id,
-    type: 'user',
-    text,
-    time: { created: 1000 },
-  } as SessionMessageInfo
+function baseSession(revertMessageID?: string) {
+  const session = makeSession({ id: SESSION_ID, title: 'Command Session', location: { directory: '/test/repo' } })
+  return revertMessageID ? { ...session, revert: { messageID: revertMessageID } } : session
+}
+
+async function waitForComposer() {
+  await waitFor(() => {
+    expect(document.querySelector('[data-prompt-input]')).not.toBeNull()
+  })
+}
+
+function submitComposer(value: string) {
+  fireEvent.change(promptTextarea(), { target: { value } })
+  fireEvent.click(screen.getByTitle('Send'))
+}
+
+function readBlobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(z.string().parse(reader.result))
+    reader.onerror = () => reject(new Error('Could not read the exported blob'))
+    reader.readAsText(blob)
+  })
+}
+
+function pagedMessageRespond(pages: {
+  newest: { messages: SessionMessageInfo[], nextCursor?: string }
+  older?: { messages: SessionMessageInfo[] }
+}) {
+  return (request: { searchParams: URLSearchParams }) => {
+    if (request.searchParams.get('cursor')) {
+      return { json: { data: pages.older?.messages ?? [], cursor: {} } }
+    }
+    return { json: { data: pages.newest.messages, cursor: pages.newest.nextCursor ? { next: pages.newest.nextCursor } : {} } }
+  }
 }
 
 describe('SessionDetail command actions', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.promptInputProps = null
-
-    mocks.useSession.mockReturnValue({ data: createSession(), isLoading: false })
-    mocks.useSessionTranscript.mockReturnValue({
-      messages: [],
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
-    mocks.useRepoActivity.mockReturnValue(undefined)
-    mocks.usePermissions.mockReturnValue({ pendingCount: 0, syncForSession: vi.fn() })
-    mocks.useForms.mockReturnValue({
-      current: null,
-      getForSession: vi.fn(() => null),
-      pendingCount: 0,
-      reply: vi.fn(),
-      cancel: vi.fn(),
-      syncForSession: vi.fn(),
-    })
-    mocks.useSSEHealth.mockReturnValue({ isHealthy: true })
-    mocks.useConfig.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useAutoScroll.mockReturnValue({ scrollToBottom: vi.fn() })
-    mocks.dialogSetters = {
-      files: vi.fn(),
-      mcp: vi.fn(),
-      skills: vi.fn(),
-      sourceControl: vi.fn(),
-      resetPermissions: vi.fn(),
-      walkthrough: vi.fn(),
-    }
-    mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
-    mocks.compactSession.mockResolvedValue(undefined)
-    mocks.listSessionMessages.mockResolvedValue({ messages: [] })
-    mocks.downloadMarkdown.mockResolvedValue(true)
-    Element.prototype.scrollIntoView = mocks.scrollIntoView
+    installMatchMedia(false)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 })
   })
 
-  const sessionDetailElement = (
-    captured?: { search: { current: string }; pathname: { current: string } },
-  ) => (
-    <MemoryRouter initialEntries={[`/repos/1/sessions/${SESSION_ID}`]}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        {captured && (
-          <LocationCatcher
-            capturedSearch={captured.search}
-            capturedPathname={captured.pathname}
-          />
-        )}
-        <Routes>
-          <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-        </Routes>
-      </QueryClientProvider>
-    </MemoryRouter>
-  )
-
-  const renderSessionDetail = (
-    captured?: { search: { current: string }; pathname: { current: string } },
-  ) => render(sessionDetailElement(captured))
-
-  const commandHandler = async (name: string) => {
-    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
-    const commandActions = mocks.promptInputProps?.commandActions as Record<string, (argument?: string) => Promise<void>>
-    const handler = commandActions[name]
-    expect(handler).toBeTypeOf('function')
-    return handler
-  }
-
-  const mockTranscriptMessages = (messages: SessionMessageInfo[]) => {
-    mocks.useSessionTranscript.mockReturnValue({
-      messages,
-      pending: [],
-      status: 'idle',
-      isLoading: false,
-      fetchOlder: vi.fn(),
-      hasOlder: false,
-    })
-  }
-
-  it('compacts the session through the shared handler and resolves the toast', async () => {
-    renderSessionDetail()
-    const compact = await commandHandler('compact')
-
-    await act(async () => {
-      await compact()
-    })
-
-    expect(mocks.beginCompaction).toHaveBeenCalledWith(SESSION_ID)
-    expect(mocks.compactSession).toHaveBeenCalledWith(SESSION_ID, 'local')
-    expect(mocks.showToast.loading).toHaveBeenCalledWith('Compacting session...', { id: `compact-${SESSION_ID}` })
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Compaction requested', { id: `compact-${SESSION_ID}` })
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
-  it('resets the session status to idle when compaction fails', async () => {
-    mocks.compactSession.mockRejectedValueOnce(new Error('nope'))
-    renderSessionDetail()
-    const compact = await commandHandler('compact')
+  it('compacts the session from the composer command', async () => {
+    const { fetchFake } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    await act(async () => {
-      await compact()
-    })
-
-    expect(mocks.endCompaction).toHaveBeenCalledWith(SESSION_ID)
-    expect(mocks.showToast.error).toHaveBeenCalledWith('Compact failed: nope', { id: `compact-${SESSION_ID}` })
+    submitComposer('/compact')
+    expect(await screen.findByText('Compaction requested')).toBeInTheDocument()
+    expect(fetchFake.findRequests('POST', `/api/opencode/api/session/${SESSION_ID}/compact`)).toHaveLength(1)
   })
 
-  it('renames the session through the shared handler', async () => {
-    renderSessionDetail()
-    const renameSession = await commandHandler('renameSession')
-
-    await act(async () => {
-      await renameSession('  New name ')
+  it('reports a failed compaction', async () => {
+    renderSessionPage({
+      session: baseSession(),
+      compactRespond: () => sessionPageStatus(500, { error: 'nope' }),
     })
+    await waitForComposer()
 
-    expect(mocks.updateSession).toHaveBeenCalledWith({ sessionID: SESSION_ID, title: 'New name' })
-    expect(mocks.showToast.success).not.toHaveBeenCalled()
+    submitComposer('/compact')
+
+    expect(await screen.findByText(/Compact failed:/)).toBeInTheDocument()
   })
 
-  it('regenerates the title when the command has no argument', async () => {
-    renderSessionDetail()
-    const renameSession = await commandHandler('renameSession')
+  it('renames the session with the command argument', async () => {
+    const { fetchFake } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    await act(async () => {
-      await renameSession('')
+    submitComposer('/rename   New name  ')
+
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('PATCH', `/api/opencode/api/session/${SESSION_ID}`)?.body).toEqual({
+        title: 'New name',
+      })
     })
-
-    expect(mocks.updateSession).toHaveBeenCalledWith({ sessionID: SESSION_ID, title: '' })
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Session title regenerated')
   })
 
-  it('shows the error toast when renaming fails', async () => {
-    mocks.updateSession.mockRejectedValueOnce(new Error('nope'))
-    renderSessionDetail()
-    const renameSession = await commandHandler('renameSession')
+  it('regenerates the title when the rename command has no argument', async () => {
+    const { fetchFake } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    await act(async () => {
-      await renameSession('New name')
+    submitComposer('/rename')
+
+    expect(await screen.findByText('Session title regenerated')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('PATCH', `/api/opencode/api/session/${SESSION_ID}`)?.body).toEqual({
+        title: '',
+      })
     })
-
-    expect(mocks.showToast.error).toHaveBeenCalledWith('Rename failed: nope')
   })
 
-  it('copies the complete history across pages to the clipboard', async () => {
-    mocks.listSessionMessages.mockImplementation(
-      (_sessionID: string, input: { cursor?: string } = {}) => {
-        if (!input.cursor) {
-          return Promise.resolve({
-            messages: [
-              createUserMessage('2', 'middle-marker'),
-              createUserMessage('3', 'newest-marker'),
-            ],
-            nextCursor: 'cursor-1',
-          })
-        }
-        return Promise.resolve({
-          messages: [
-            createUserMessage('1', 'oldest-marker'),
-            createUserMessage('2', 'middle-marker'),
-          ],
-        })
-      },
-    )
-    mocks.copyTextToClipboard.mockResolvedValue(true)
-
-    renderSessionDetail()
-    const copyTranscript = await commandHandler('copyTranscript')
-
-    await act(async () => {
-      await copyTranscript()
+  it('reports a failed rename', async () => {
+    renderSessionPage({
+      session: baseSession(),
+      updateSessionRespond: () => sessionPageStatus(500, { error: 'nope' }),
     })
+    await waitForComposer()
 
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' }, 'local')
-    expect(mocks.copyTextToClipboard).toHaveBeenCalledTimes(1)
+    submitComposer('/rename New name')
 
-    const content = await (mocks.copyTextToClipboard.mock.calls[0][0] as Promise<string>)
+    expect(await screen.findByText(/Rename failed:/)).toBeInTheDocument()
+  })
+
+  it('copies the complete history across pages to the clipboard in order', async () => {
+    const clipboard = installClipboard()
+    renderSessionPage({
+      session: baseSession(),
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('3', 'newest-marker'), userMessage('2', 'middle-marker')], nextCursor: 'cursor-1' },
+        older: { messages: [userMessage('2', 'middle-marker'), userMessage('1', 'oldest-marker')] },
+      }),
+    })
+    await waitForComposer()
+
+    submitComposer('/copy')
+
+    expect(await screen.findByText('Session transcript copied')).toBeInTheDocument()
+    const content = z.string().parse(clipboard.writeText.mock.calls[0]?.[0])
     expect(content.match(/oldest-marker/g)).toHaveLength(1)
     expect(content.match(/middle-marker/g)).toHaveLength(1)
     expect(content.match(/newest-marker/g)).toHaveLength(1)
     expect(content.indexOf('oldest-marker')).toBeLessThan(content.indexOf('middle-marker'))
     expect(content.indexOf('middle-marker')).toBeLessThan(content.indexOf('newest-marker'))
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Session transcript copied')
+  })
+
+  it('reports a transcript fetch failure while copying', async () => {
+    installClipboard()
+    renderSessionPage({
+      session: baseSession(),
+      messageRespond: () => sessionPageStatus(500, { error: 'page fetch failed' }),
+    })
+    await waitForComposer()
+
+    submitComposer('/copy')
+
+    expect(await screen.findByText('Failed to copy session transcript')).toBeInTheDocument()
+    expect(screen.queryByText('Session transcript copied')).not.toBeInTheDocument()
   })
 
   it('opens the side question dialog with the command argument', async () => {
-    const { SideQuestionDialog } = await import('@/components/session/SideQuestionDialog')
+    renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    renderSessionDetail()
-    const askSideQuestion = await commandHandler('askSideQuestion')
+    submitComposer('/btw why?')
 
-    await act(async () => {
-      await askSideQuestion('why?')
-    })
-
-    expect(vi.mocked(SideQuestionDialog)).toHaveBeenCalled()
-    const props = vi.mocked(SideQuestionDialog).mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(props).toMatchObject({
-      open: true,
-      sessionID: SESSION_ID,
-      initialQuestion: 'why?',
-    })
+    expect(await screen.findByText('Side question')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ask a side question')).toHaveValue('why?')
   })
 
   it('opens the sessions panel from the sessions command on desktop', async () => {
-    const captured = { search: { current: '' }, pathname: { current: '' } }
+    const { capturedSearch } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    renderSessionDetail(captured)
-    const showSessions = await commandHandler('showSessions')
+    submitComposer('/sessions')
 
-    await act(async () => {
-      await showSessions()
-    })
-
-    await waitFor(() => expect(captured.search.current).toBe('?panel=sessions'))
+    await waitFor(() => expect(capturedSearch.current).toContain('panel=sessions'))
   })
 
   it('opens the mobile sessions sheet instead of the panel from the sessions command', async () => {
-    mocks.useMobile.mockReturnValue(true)
-    const captured = { search: { current: '' }, pathname: { current: '' } }
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 480 })
+    installMatchMedia(true)
+    const { capturedSearch } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    renderSessionDetail(captured)
-    const showSessions = await commandHandler('showSessions')
+    submitComposer('/sessions')
 
-    await act(async () => {
-      await showSessions()
-    })
-
-    await waitFor(() => expect(captured.search.current).toBe('?mobileTab=sessions'))
-  })
-
-  it('shows the error toast when the transcript fetch fails', async () => {
-    mocks.listSessionMessages.mockRejectedValueOnce(new Error('page fetch failed'))
-    mocks.copyTextToClipboard.mockImplementation(async (content: string | Promise<string>) => {
-      try {
-        await content
-        return true
-      } catch {
-        return false
-      }
-    })
-
-    renderSessionDetail()
-    const copyTranscript = await commandHandler('copyTranscript')
-
-    await act(async () => {
-      await copyTranscript()
-    })
-
-    expect(mocks.showToast.error).toHaveBeenCalledWith('Failed to copy session transcript')
-    expect(mocks.showToast.success).not.toHaveBeenCalled()
-  })
-
-  it('opens the fork picker from the forkSession command action', async () => {
-    renderSessionDetail()
-    const forkSessionAction = await commandHandler('forkSession')
-
-    await act(async () => {
-      await forkSessionAction()
-    })
-
-    expect(await screen.findByText('Entire conversation')).toBeInTheDocument()
+    await waitFor(() => expect(capturedSearch.current).toContain('mobileTab=sessions'))
   })
 
   it('lists the full session history when forking', async () => {
-    mockTranscriptMessages([createUserMessage('1', 'first prompt')])
-    mocks.listSessionMessages.mockResolvedValue({
-      messages: [
-        createUserMessage('1', 'first prompt'),
-        createUserMessage('2', 'history-only prompt'),
-      ],
+    renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'first prompt')],
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('1', 'first prompt')], nextCursor: 'cursor-1' },
+        older: { messages: [userMessage('2', 'history-only prompt')] },
+      }),
     })
+    await waitForComposer()
 
-    renderSessionDetail()
-    const forkSessionAction = await commandHandler('forkSession')
-    await act(async () => {
-      await forkSessionAction()
-    })
+    submitComposer('/fork')
 
+    expect(await screen.findByText('Entire conversation')).toBeInTheDocument()
     expect(await screen.findByText('history-only prompt')).toBeInTheDocument()
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
   })
 
   it('forks before the chosen message and pre-fills the composer', async () => {
-    mockTranscriptMessages([
-      createUserMessage('1', 'first prompt'),
-      createUserMessage('2', 'second prompt'),
-    ])
-    mocks.listSessionMessages.mockResolvedValue({
-      messages: [
-        createUserMessage('1', 'first prompt'),
-        createUserMessage('2', 'second prompt'),
-      ],
+    const { fetchFake, capturedPathname } = renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'first prompt'), userMessage('2', 'second prompt')],
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('1', 'first prompt'), userMessage('2', 'second prompt')] },
+      }),
     })
-    mocks.forkSession.mockResolvedValue({ id: 'session-2' })
-    const captured = { search: { current: '' }, pathname: { current: '' } }
+    await waitForComposer()
 
-    renderSessionDetail(captured)
-    const forkSessionAction = await commandHandler('forkSession')
-    await act(async () => {
-      await forkSessionAction()
+    submitComposer('/fork')
+    const picker = await screen.findByRole('dialog', { name: 'Fork session' })
+    fireEvent.click(within(picker).getByText('second prompt'))
+
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('POST', `/api/opencode/api/session/${SESSION_ID}/fork`)?.body).toMatchObject({
+        before: '2',
+      })
     })
-
-    fireEvent.click(await screen.findByText('second prompt'))
-
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2', 'local'))
-    expect(mocks.setPromptValue).toHaveBeenCalledWith('second prompt')
-    await waitFor(() => expect(captured.pathname.current).toBe('/repos/1/sessions/session-2'))
-    expect(mocks.showToast.success).toHaveBeenCalledWith('Session forked')
+    await waitFor(() => expect(promptTextarea()).toHaveValue('second prompt'))
+    await waitFor(() => expect(capturedPathname.current).toBe('/repos/1/sessions/session-2'))
+    expect(await screen.findByText('Session forked')).toBeInTheDocument()
   })
 
-  it('pre-fills the composer from a full-history message that is not in the loaded transcript', async () => {
-    mockTranscriptMessages([createUserMessage('1', 'first prompt')])
-    mocks.listSessionMessages.mockResolvedValue({
-      messages: [
-        createUserMessage('1', 'first prompt'),
-        createUserMessage('2', 'history-only prompt'),
-      ],
+  it('pre-fills the composer from a full-history message outside the loaded transcript', async () => {
+    const { fetchFake } = renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'first prompt')],
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('1', 'first prompt')], nextCursor: 'cursor-1' },
+        older: { messages: [userMessage('2', 'history-only prompt')] },
+      }),
     })
-    mocks.forkSession.mockResolvedValue({ id: 'session-2' })
+    await waitForComposer()
 
-    renderSessionDetail()
-    const forkSessionAction = await commandHandler('forkSession')
-    await act(async () => {
-      await forkSessionAction()
+    submitComposer('/fork')
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Fork session' })).getByText('history-only prompt'))
+
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('POST', `/api/opencode/api/session/${SESSION_ID}/fork`)?.body).toMatchObject({
+        before: '2',
+      })
     })
-
-    fireEvent.click(await screen.findByText('history-only prompt'))
-
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, '2', 'local'))
-    expect(mocks.setPromptValue).toHaveBeenCalledWith('history-only prompt')
+    await waitFor(() => expect(promptTextarea()).toHaveValue('history-only prompt'))
   })
 
-  it('forks the entire conversation from the leading option without pre-filling', async () => {
-    mockTranscriptMessages([createUserMessage('1', 'first prompt')])
-    mocks.forkSession.mockResolvedValue({ id: 'session-2' })
-
-    renderSessionDetail()
-    const forkSessionAction = await commandHandler('forkSession')
-    await act(async () => {
-      await forkSessionAction()
+  it('forks the entire conversation without pre-filling the composer', async () => {
+    const { fetchFake } = renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'first prompt')],
     })
+    await waitForComposer()
 
-    fireEvent.click(await screen.findByText('Entire conversation'))
+    submitComposer('/fork')
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Fork session' })).getByText('Entire conversation'))
 
-    await waitFor(() => expect(mocks.forkSession).toHaveBeenCalledWith(SESSION_ID, undefined, 'local'))
-    expect(mocks.setPromptValue).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(fetchFake.findRequests('POST', `/api/opencode/api/session/${SESSION_ID}/fork`)).toHaveLength(1)
+    })
+    expect(promptTextarea()).toHaveValue('')
   })
 
-  it('closes the fork picker and shows an error when the history fetch fails', async () => {
-    mocks.listSessionMessages.mockRejectedValueOnce(new Error('history failed'))
-
-    renderSessionDetail()
-    const forkSessionAction = await commandHandler('forkSession')
-    await act(async () => {
-      await forkSessionAction()
+  it('closes the fork picker and reports a failed history fetch', async () => {
+    renderSessionPage({
+      session: baseSession(),
+      messageRespond: () => sessionPageStatus(500, { error: 'history failed' }),
     })
+    await waitForComposer()
 
-    await waitFor(() => expect(mocks.showToast.error).toHaveBeenCalledWith('Failed to load messages'))
+    submitComposer('/fork')
+
+    expect(await screen.findByText('Failed to load messages')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('Entire conversation')).not.toBeInTheDocument())
   })
 
   it('jumps to the chosen message from the timeline picker', async () => {
-    mockTranscriptMessages([
-      createUserMessage('1', 'first prompt'),
-      createUserMessage('2', 'second prompt'),
-    ])
-
-    renderSessionDetail()
-    const jumpToMessage = await commandHandler('jumpToMessage')
-    await act(async () => {
-      await jumpToMessage()
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'first prompt'), userMessage('2', 'second prompt')],
     })
+    await waitForComposer()
 
-    expect(await screen.findByText('Jump to message')).toBeInTheDocument()
-    fireEvent.click(await screen.findByText('second prompt'))
+    submitComposer('/timeline')
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Jump to message' })).getByText('second prompt'))
 
-    await waitFor(() => expect(mocks.scrollIntoView).toHaveBeenCalled())
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
     const target = document.querySelector('[data-message-id="2"]')
     expect(target).not.toBeNull()
-    expect(mocks.scrollIntoView.mock.instances.at(-1)).toBe(target)
-    expect(mocks.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(target)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
   })
 
   it('lists only the loaded transcript in the timeline picker', async () => {
-    mockTranscriptMessages([createUserMessage('1', 'visible-transcript')])
-    mocks.listSessionMessages.mockResolvedValue({
-      messages: [createUserMessage('2', 'history-only prompt')],
+    const { fetchFake } = renderSessionPage({
+      session: baseSession(),
+      messages: [userMessage('1', 'visible transcript')],
     })
+    await waitForComposer()
 
-    renderSessionDetail()
-    const jumpToMessage = await commandHandler('jumpToMessage')
-    await act(async () => {
-      await jumpToMessage()
-    })
+    submitComposer('/timeline')
 
-    expect(await screen.findByText('visible-transcript')).toBeInTheDocument()
-    expect(screen.queryByText('history-only prompt')).not.toBeInTheDocument()
-    expect(mocks.listSessionMessages).not.toHaveBeenCalled()
+    const picker = await screen.findByRole('dialog', { name: 'Jump to message' })
+    expect(within(picker).getByText('visible transcript')).toBeInTheDocument()
+    expect(fetchFake.findRequests('GET', `/api/opencode/api/session/${SESSION_ID}/message`)).toHaveLength(1)
   })
 
   it('mounts no picker while no picker mode is active', async () => {
-    renderSessionDetail()
-    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
+    renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
     expect(screen.queryByText('Fork session')).not.toBeInTheDocument()
     expect(screen.queryByText('Jump to message')).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Search messages')).not.toBeInTheDocument()
   })
 
-  it('opens the model picker from the showModels command action', async () => {
-    renderSessionDetail()
-    const showModels = await commandHandler('showModels')
+  it('opens the model picker from the models command', async () => {
+    renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    await act(async () => {
-      await showModels()
+    submitComposer('/models')
+
+    expect(await screen.findByRole('dialog', { name: 'Select model' })).toBeInTheDocument()
+  })
+
+  it.each([
+    { command: '/mcp', parameter: 'mcp' },
+    { command: '/skills', parameter: 'skills' },
+    { command: '/walkthrough', parameter: 'walkthrough' },
+  ])('opens the $parameter dialog from $command', async ({ command, parameter }) => {
+    const { capturedSearch } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
+
+    submitComposer(command)
+
+    await waitFor(() => expect(capturedSearch.current).toMatch(new RegExp(`(?:dialog|panel)=${parameter}`)))
+  })
+
+  it('opens settings from the help command', async () => {
+    const { capturedSearch } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
+
+    submitComposer('/help')
+
+    await waitFor(() => expect(capturedSearch.current).toContain('settings=open'))
+  })
+
+  it('opens the providers tab from the connect command', async () => {
+    const { capturedSearch } = renderSessionPage({ session: baseSession() })
+    await waitForComposer()
+
+    submitComposer('/connect')
+
+    await waitFor(() => expect(capturedSearch.current).toContain('settingsTab=providers'))
+  })
+
+  it('exports the complete history across pages in oldest-first order', async () => {
+    const download = installObjectUrl()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const { fetchFake } = renderSessionPage({
+      session: baseSession(),
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('3', 'newest-marker'), userMessage('2', 'middle-marker')], nextCursor: 'cursor-1' },
+        older: { messages: [userMessage('2', 'middle-marker'), userMessage('1', 'oldest-marker')] },
+      }),
     })
+    await waitForComposer()
 
-    expect(mocks.openModelPicker).toHaveBeenCalledTimes(1)
-  })
+    submitComposer('/export')
 
-  it('keeps commandActions referentially stable across re-renders', async () => {
-    const view = renderSessionDetail()
-    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
-    const firstActions = mocks.promptInputProps?.commandActions
-
-    mockTranscriptMessages([createUserMessage('9', 'changed transcript')])
-    view.rerender(sessionDetailElement())
-
-    await waitFor(() => expect(mocks.promptInputProps?.commandActions).toBe(firstActions))
-  })
-
-  it('opens the MCP dialog from the showMcp command action', async () => {
-    renderSessionDetail()
-    const showMcp = await commandHandler('showMcp')
-
-    await act(async () => {
-      await showMcp()
-    })
-
-    expect(mocks.dialogSetters.mcp).toHaveBeenCalledWith(true)
-  })
-
-  it('opens the skills dialog from the showSkills command action', async () => {
-    renderSessionDetail()
-    const showSkills = await commandHandler('showSkills')
-
-    await act(async () => {
-      await showSkills()
-    })
-
-    expect(mocks.dialogSetters.skills).toHaveBeenCalledWith(true)
-  })
-
-  it('opens the walkthrough dialog from the showWalkthrough command action', async () => {
-    renderSessionDetail()
-    const showWalkthrough = await commandHandler('showWalkthrough')
-
-    await act(async () => {
-      await showWalkthrough()
-    })
-
-    expect(mocks.dialogSetters.walkthrough).toHaveBeenCalledWith(true)
-  })
-
-  it('opens settings from the showSettings command action', async () => {
-    renderSessionDetail()
-    const showSettings = await commandHandler('showSettings')
-
-    await act(async () => {
-      await showSettings()
-    })
-
-    expect(mocks.openSettings).toHaveBeenCalledTimes(1)
-  })
-
-  it('maps the help command to the showSettings action', () => {
-    expect(BUILTIN_COMMANDS.find((command) => command.name === 'help')?.action).toBe('showSettings')
-  })
-
-  it('opens the providers tab from the connectProvider command action', async () => {
-    renderSessionDetail()
-    const connectProvider = await commandHandler('connectProvider')
-
-    await act(async () => {
-      await connectProvider()
-    })
-
-    expect(mocks.openSettingsTab).toHaveBeenCalledWith('providers')
-  })
-
-  it('exports complete history across pages in oldest-first order without duplicates', async () => {
-    mocks.listSessionMessages.mockImplementation(
-      (_sessionID: string, input: { cursor?: string } = {}) => {
-        if (!input.cursor) {
-          return Promise.resolve({
-            messages: [
-              createUserMessage('2', 'middle-marker'),
-              createUserMessage('3', 'newest-marker'),
-            ],
-            nextCursor: 'cursor-1',
-          })
-        }
-        return Promise.resolve({
-          messages: [
-            createUserMessage('1', 'oldest-marker'),
-            createUserMessage('2', 'middle-marker'),
-          ],
-        })
-      },
-    )
-
-    renderSessionDetail()
-    const handler = await commandHandler('exportSession')
-
-    await act(async () => {
-      await handler()
-    })
-
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, {}, 'local')
-    expect(mocks.listSessionMessages).toHaveBeenCalledWith(SESSION_ID, { cursor: 'cursor-1' }, 'local')
-    expect(mocks.downloadMarkdown).toHaveBeenCalledTimes(1)
-
-    const content = mocks.downloadMarkdown.mock.calls[0][0] as string
+    expect(await screen.findByText(/Exported to .*\.md/)).toBeInTheDocument()
+    expect(download.createObjectURL).toHaveBeenCalledTimes(1)
+    const blob = z.instanceof(Blob).parse(download.createObjectURL.mock.calls[0]?.[0])
+    const content = await readBlobText(blob)
     expect(content.match(/oldest-marker/g)).toHaveLength(1)
     expect(content.match(/middle-marker/g)).toHaveLength(1)
     expect(content.match(/newest-marker/g)).toHaveLength(1)
     expect(content.indexOf('oldest-marker')).toBeLessThan(content.indexOf('middle-marker'))
     expect(content.indexOf('middle-marker')).toBeLessThan(content.indexOf('newest-marker'))
-    expect(mocks.showToast.error).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('GET', `/api/opencode/api/session/${SESSION_ID}/message`).length).toBeGreaterThanOrEqual(2)
   })
 
   it('does not download a partial export when a later page fails', async () => {
-    mocks.listSessionMessages
-      .mockResolvedValueOnce({
-        messages: [createUserMessage('3', 'newest-marker')],
-        nextCursor: 'cursor-1',
-      })
-      .mockRejectedValueOnce(new Error('page fetch failed'))
-
-    renderSessionDetail()
-    const handler = await commandHandler('exportSession')
-
-    await act(async () => {
-      await handler()
+    const download = installObjectUrl()
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    renderSessionPage({
+      session: baseSession(),
+      messageRespond: (request) => request.searchParams.get('cursor')
+        ? sessionPageStatus(500, { error: 'page fetch failed' })
+        : { json: { data: [userMessage('3', 'newest-marker')], cursor: { next: 'cursor-1' } } },
     })
+    await waitForComposer()
 
-    expect(mocks.downloadMarkdown).not.toHaveBeenCalled()
-    expect(mocks.showToast.error).toHaveBeenCalledWith('Failed to export session')
-    expect(mocks.showToast.success).not.toHaveBeenCalled()
+    submitComposer('/export')
+
+    expect(await screen.findByText('Failed to export session')).toBeInTheDocument()
+    expect(anchorClick).not.toHaveBeenCalled()
+    expect(download.createObjectURL).not.toHaveBeenCalled()
   })
 
   it('applies the staged-revert boundary to the complete history', async () => {
-    mocks.useSession.mockReturnValue({
-      data: createSession({ messageID: '2' }),
-      isLoading: false,
+    const download = installObjectUrl()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    renderSessionPage({
+      session: baseSession('2'),
+      messageRespond: pagedMessageRespond({
+        newest: { messages: [userMessage('3', 'newest-marker'), userMessage('2', 'middle-marker')], nextCursor: 'cursor-1' },
+        older: { messages: [userMessage('1', 'oldest-marker')] },
+      }),
     })
-    mocks.listSessionMessages.mockImplementation(
-      (_sessionID: string, input: { cursor?: string } = {}) => {
-        if (!input.cursor) {
-          return Promise.resolve({
-            messages: [
-              createUserMessage('2', 'middle-marker'),
-              createUserMessage('3', 'newest-marker'),
-            ],
-            nextCursor: 'cursor-1',
-          })
-        }
-        return Promise.resolve({
-          messages: [createUserMessage('1', 'oldest-marker')],
-        })
-      },
-    )
+    await waitForComposer()
 
-    renderSessionDetail()
-    const handler = await commandHandler('exportSession')
+    submitComposer('/export')
 
-    await act(async () => {
-      await handler()
-    })
-
-    const content = mocks.downloadMarkdown.mock.calls[0][0] as string
+    expect(await screen.findByText(/Exported to .*\.md/)).toBeInTheDocument()
+    const blob = z.instanceof(Blob).parse(download.createObjectURL.mock.calls[0]?.[0])
+    const content = await readBlobText(blob)
     expect(content).toContain('oldest-marker')
     expect(content).not.toContain('middle-marker')
     expect(content).not.toContain('newest-marker')
   })
 
   it('hides the floating Clear button while composer suggestions are open', async () => {
-    renderSessionDetail()
-    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
+    const user = userEvent.setup()
+    renderSessionPage({ session: baseSession() })
+    await waitForComposer()
 
-    act(() => {
-      (mocks.promptInputProps?.onPromptChange as (hasContent: boolean) => void)(true)
-    })
-    expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument()
+    await user.type(promptTextarea(), 'hello')
+    expect(await screen.findByRole('button', { name: 'Clear' })).toBeInTheDocument()
 
-    act(() => {
-      (mocks.promptInputProps?.onSuggestionsOpenChange as (open: boolean) => void)(true)
-    })
-    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
+    fireEvent.change(promptTextarea(), { target: { value: '/rev' } })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument())
   })
+})
 
-  it('leaves the composer pointer events to the page so a modal menu can lock them', async () => {
-    renderSessionDetail()
-    await waitFor(() => expect(mocks.promptInputProps).not.toBeNull())
-
-    const wrapper = screen.getByTestId('prompt-overlay').firstElementChild as HTMLElement
-    expect(wrapper).toHaveClass('relative')
-    expect(wrapper).not.toHaveClass('pointer-events-auto')
+describe('builtin command actions', () => {
+  it('maps the help command to the settings action', () => {
+    expect(BUILTIN_COMMANDS.find((command) => command.name === 'help')?.action).toBe('showSettings')
   })
 })

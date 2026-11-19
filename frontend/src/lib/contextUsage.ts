@@ -6,13 +6,13 @@ export interface ContextUsage {
 
 export type ContextUsageTone = 'success' | 'warning' | 'destructive'
 
-export const CONTEXT_USAGE_TEXT_CLASS: Record<ContextUsageTone, string> = {
+export const CONTEXT_USAGE_TEXT_CLASS = {
   success: 'text-success',
   warning: 'text-warning',
   destructive: 'text-destructive',
 }
 
-export const CONTEXT_USAGE_BG_CLASS: Record<ContextUsageTone, string> = {
+export const CONTEXT_USAGE_BG_CLASS = {
   success: 'bg-success',
   warning: 'bg-warning',
   destructive: 'bg-destructive',

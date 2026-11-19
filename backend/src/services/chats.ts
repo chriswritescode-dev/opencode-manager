@@ -47,7 +47,6 @@ function formatChatTimestamp(now: Date): string {
   ].join('')
 }
 
-/** Owns the lifecycle of chat folders and the OpenCode sessions created inside them. */
 export class ChatService {
   constructor(
     private readonly openCodeClient: OpenCodeClient,
@@ -61,11 +60,9 @@ export class ChatService {
     const ordered = cursor ? chatIds.filter((id) => id < cursor) : chatIds
     const page = ordered.slice(0, limit)
     const nextCursor = ordered.length > limit ? page[page.length - 1] : undefined
+    const chats = page.map((id) => this.toChat(id))
 
-    return {
-      chats: page.map((id) => this.toChat(id)),
-      ...(nextCursor ? { nextCursor } : {}),
-    }
+    return nextCursor ? { chats, nextCursor } : { chats }
   }
 
   async resolve(chatId: string): Promise<Chat | null> {
@@ -108,9 +105,9 @@ export class ChatService {
     try {
       const model = input.model ? parseOpenCodeModelRef(input.model) : undefined
       const session = await this.openCodeClient.api.session.create({
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.agent !== undefined ? { agent: input.agent } : {}),
-        ...(model ? { model } : {}),
+        title: input.title,
+        agent: input.agent,
+        model,
         location: { directory },
       })
       return { chat: this.toChat(id), sessionId: session.id }
@@ -173,7 +170,7 @@ export class ChatService {
         await fs.mkdir(directory)
         return { id, directory }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error
       }
     }
     throw new Error('Failed to allocate a unique chat folder')

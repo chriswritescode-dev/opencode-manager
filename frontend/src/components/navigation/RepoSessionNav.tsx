@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { Bell, ChevronDown, ChevronRight, HelpCircle, Loader2, Pin, Plus, X } from 'lucide-react'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { RepoActivityIndicator } from '@/components/activity/RepoActivityIndicator'
-import { useForms, usePermissions } from '@/contexts/EventContext'
+import { useForms, usePermissions } from '@/contexts/event-context'
 import { useCreateSession } from '@/hooks/useOpenCode'
 import { useCreateChat } from '@/hooks/useChats'
 import { useRepoSiblings } from '@/hooks/useRepoSiblings'
@@ -384,10 +384,6 @@ interface LocalRepoNewSessionButtonProps {
   onOpenSession: (path: string) => void
 }
 
-/**
- * Creates a session in a local repository, deriving the session directory, accessible label, and
- * session route from the repository so callers only choose what to render and where to navigate.
- */
 export function LocalRepoNewSessionButton({ repo, onOpenSession }: LocalRepoNewSessionButtonProps) {
   return (
     <NewSessionButton

@@ -3,7 +3,9 @@ import { AssistantNotificationRequestSchema } from '@opencode-manager/shared/sch
 import type { NotificationService } from '../../services/notification'
 import { TokenBucketRateLimiter } from '../../utils/rate-limit'
 
-export function createInternalNotificationRoutes(notificationService: NotificationService) {
+export type NotificationRoutesService = Pick<NotificationService, 'getScheduleRunReportUrl' | 'isConfigured' | 'sendToUser'>
+
+export function createInternalNotificationRoutes(notificationService: NotificationRoutesService) {
   const app = new Hono()
   const limiter = new TokenBucketRateLimiter({ capacity: 10, refillPerMs: 60_000 })
 

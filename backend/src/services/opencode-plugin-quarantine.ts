@@ -4,6 +4,9 @@ import path from 'path'
 import { OPENCODE_CONFIG_SOURCE_NAMES } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { mkdirSafe } from '../utils/fs-safe'
+import { z } from 'zod'
+import { getErrorCode } from './error-code'
+import { JsonValueSchema, type JsonValue } from '@opencode-manager/shared/utils'
 import { restoreLegacyOpenCodeConfigBackup } from './opencode-config-file'
 import { getOpenCodeHome } from './opencode-home'
 import { getOpenCodePluginDir } from './opencode/plugin-registry'
@@ -11,15 +14,17 @@ import { getOpenCodePluginDir } from './opencode/plugin-registry'
 const QUARANTINE_CONFLICT_SUFFIX = '.ocm-conflict'
 const QUARANTINE_MANIFEST_FILENAME = '.ocm-quarantine-manifest.json'
 
-type QuarantineManifestEntry = {
-  original: string
-  order: number
-}
+const quarantineManifestEntrySchema = z.object({
+  original: z.string(),
+  order: z.number(),
+})
 
-type QuarantineManifest = {
-  version: 1
-  entries: Record<string, QuarantineManifestEntry>
-}
+const quarantineManifestSchema = z.object({
+  version: z.literal(1),
+  entries: z.record(z.string(), JsonValueSchema),
+})
+
+type QuarantineManifest = z.infer<typeof quarantineManifestSchema>
 
 function getPluginDirs(configHome: string): string[] {
   const home = getOpenCodeHome()
@@ -89,8 +94,7 @@ async function requireRealDirectory(dir: string, purpose: string): Promise<boole
   try {
     stat = await lstat(dir)
   } catch (error) {
-    const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-    if (errorCode === 'ENOENT') return false
+    if (getErrorCode(error) === 'ENOENT') return false
     throw new Error(`cannot inspect ${purpose} ${dir}: ${error instanceof Error ? error.message : String(error)}`)
   }
   if (stat.isSymbolicLink()) {
@@ -141,23 +145,20 @@ async function readQuarantineManifest(quarantineDir: string): Promise<Quarantine
   try {
     content = await fs.readFile(manifestPath, 'utf-8')
   } catch (error) {
-    const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-    if (errorCode === 'ENOENT') return { version: 1, entries: {} }
+    if (getErrorCode(error) === 'ENOENT') return { version: 1, entries: {} }
     throw new Error(`cannot read quarantine manifest ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`)
   }
-  let parsed: unknown
+  let parsed: JsonValue
   try {
-    parsed = JSON.parse(content)
+    parsed = JsonValueSchema.parse(JSON.parse(content))
   } catch {
     throw new Error(`quarantine manifest ${manifestPath} is not valid JSON`)
   }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const record = parsed as { version?: unknown; entries?: unknown }
-    if (record.version === 1 && record.entries && typeof record.entries === 'object' && !Array.isArray(record.entries)) {
-      return { version: 1, entries: record.entries as Record<string, QuarantineManifestEntry> }
-    }
+  const manifest = quarantineManifestSchema.safeParse(parsed)
+  if (!manifest.success) {
+    throw new Error(`quarantine manifest ${manifestPath} is malformed`)
   }
-  throw new Error(`quarantine manifest ${manifestPath} is malformed`)
+  return manifest.data
 }
 
 async function restorePluginEntries(dir: string): Promise<void> {
@@ -167,8 +168,7 @@ async function restorePluginEntries(dir: string): Promise<void> {
   try {
     entries = await fs.readdir(quarantineDir)
   } catch (error) {
-    const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-    if (errorCode === 'ENOENT') return
+    if (getErrorCode(error) === 'ENOENT') return
     throw error
   }
 
@@ -183,18 +183,15 @@ async function restorePluginEntries(dir: string): Promise<void> {
   const byOriginal = new Map<string, Array<{ stored: string; order: number }>>()
   const manifestless: string[] = []
   for (const stored of storedNames) {
-    const record = manifest.entries[stored]
+    const record = quarantineManifestEntrySchema.safeParse(manifest.entries[stored])
     if (
-      record &&
+      record.success &&
       isSingleBasenameComponent(stored) &&
-      typeof record.original === 'string' &&
-      isSingleBasenameComponent(record.original) &&
-      typeof record.order === 'number' &&
-      Number.isFinite(record.order)
+      isSingleBasenameComponent(record.data.original)
     ) {
-      const list = byOriginal.get(record.original) ?? []
-      list.push({ stored, order: record.order })
-      byOriginal.set(record.original, list)
+      const list = byOriginal.get(record.data.original) ?? []
+      list.push({ stored, order: record.data.order })
+      byOriginal.set(record.data.original, list)
     } else {
       manifestless.push(stored)
     }

@@ -23,25 +23,35 @@ const shellNotice = (
   shellID: string,
   state: 'completed' | 'error',
   exit?: number,
-): SessionMessageInfo => ({
-  id,
-  type: 'synthetic',
-  text: '',
-  metadata: { source: 'shell', shellID, state, ...(exit === undefined ? {} : { exit }) },
-  time: { created: 1 },
-})
+): SessionMessageInfo => {
+  const notice: SessionMessageInfo = {
+    id,
+    type: 'synthetic',
+    text: '',
+    metadata: { source: 'shell', shellID, state },
+    time: { created: 1 },
+  }
+  if (exit !== undefined) notice.metadata = { ...notice.metadata, exit }
+  return notice
+}
 
-const shell = (id: string, status: ShellRecord['status'], exit?: number, started = 1): ShellRecord => ({
-  id,
-  status,
-  command: `npm run ${id}`,
-  cwd: '/repo',
-  shell: 'zsh',
-  file: `/tmp/${id}.log`,
-  metadata: { sessionID: 'session-1' },
-  time: { started, ...(exit === undefined ? {} : { completed: started + 1 }) },
-  ...(exit === undefined ? {} : { exit }),
-})
+const shell = (id: string, status: ShellRecord['status'], exit?: number, started = 1): ShellRecord => {
+  const record: ShellRecord = {
+    id,
+    status,
+    command: `npm run ${id}`,
+    cwd: '/repo',
+    shell: 'zsh',
+    file: `/tmp/${id}.log`,
+    metadata: { sessionID: 'session-1' },
+    time: { started },
+  }
+  if (exit !== undefined) {
+    record.time = { ...record.time, completed: started + 1 }
+    record.exit = exit
+  }
+  return record
+}
 
 describe('shellLifecycle', () => {
   it('maps every shell status to a lifecycle state', () => {

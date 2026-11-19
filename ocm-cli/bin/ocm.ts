@@ -118,7 +118,7 @@ async function requireAuth(): Promise<{ auth: ManagerAuthOk; state: OcmState }> 
   return { auth, state: readState()! }
 }
 
-async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<never> {
+async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd: string): Promise<void> {
   try {
     await warmRepoProxy(managerUrl, token, repo.repoId)
   } catch (err) {
@@ -132,13 +132,9 @@ async function attach(managerUrl: string, token: string, repo: ManagerRepo, cwd:
   })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
-  return undefined as never
 }
 
-function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | undefined {
-  if (typeof needle === 'number') {
-    return repos.find((r) => r.repoId === needle)
-  }
+function findRepo(repos: ManagerRepo[], needle: string): ManagerRepo | undefined {
   const asNum = Number(needle)
   if (!Number.isNaN(asNum)) {
     const byId = repos.find((r) => r.repoId === asNum)
@@ -149,7 +145,13 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
 
 const LOGIN_USAGE = 'usage: ocm login <url> [token] [--name <name>]'
 
-function parseLoginArgs(args: string[]): { url: string; token?: string; managerName?: string } {
+interface LoginArgs {
+  url: string
+  token?: string
+  managerName?: string
+}
+
+function parseLoginArgs(args: string[]): LoginArgs {
   const positional: string[] = []
   const managerNames: string[] = []
   for (let index = 0; index < args.length; index++) {
@@ -362,7 +364,7 @@ async function cmdDefault(): Promise<void> {
   }
 }
 
-function runLocalOpencode(reason: 'no-match' | 'no-target'): never {
+function runLocalOpencode(reason: 'no-match' | 'no-target'): void {
   const message = reason === 'no-match'
     ? 'no Manager repo matches $PWD; launching local opencode'
     : 'no last repo; launching local opencode'
@@ -370,7 +372,6 @@ function runLocalOpencode(reason: 'no-match' | 'no-target'): never {
   const child = spawn('opencode', [], { stdio: 'inherit' })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
-  return undefined as never
 }
 
 function toManagerRepo(repo: { repoId: number; name: string; branch: string | null; directory: string }): ManagerRepo {
@@ -616,15 +617,17 @@ export async function cmdInstall(args: string[]): Promise<void> {
 const LINK_USAGE = `usage: ocm link [--url <url>] [--password <pw>] [--username <name>] [--name <name>]
                  [--pair-host <host>] [--pair-port <port>] [--ttl <seconds>] [--no-qr]`
 
-const LINK_FLAGS: Record<string, 'url' | 'password' | 'username' | 'name' | 'pairHost' | 'pairPort' | 'ttl'> = {
-  '--url': 'url',
-  '--password': 'password',
-  '--username': 'username',
-  '--name': 'name',
-  '--pair-host': 'pairHost',
-  '--pair-port': 'pairPort',
-  '--ttl': 'ttl',
-}
+type LinkFlag = 'url' | 'password' | 'username' | 'name' | 'pairHost' | 'pairPort' | 'ttl'
+
+const LINK_FLAGS = new Map<string, LinkFlag>([
+  ['--url', 'url'],
+  ['--password', 'password'],
+  ['--username', 'username'],
+  ['--name', 'name'],
+  ['--pair-host', 'pairHost'],
+  ['--pair-port', 'pairPort'],
+  ['--ttl', 'ttl'],
+])
 
 const PAIRING_MAX_ATTEMPTS = 3
 
@@ -672,7 +675,7 @@ function parseLinkArgs(args: string[]): LinkCommandOptions {
       showQr = false
       continue
     }
-    const key = LINK_FLAGS[arg]
+    const key = LINK_FLAGS.get(arg)
     if (!key) die(`unknown option: ${arg}. run \`ocm --help\``)
     const value = args[index + 1]
     if (!value || value.startsWith('--')) die(LINK_USAGE)
@@ -823,7 +826,6 @@ async function main(): Promise<void> {
   }
 }
 
-// Only run main when executed directly (not imported by tests).
 const entryUrl = process.argv[1] ? `file://${process.argv[1]}` : ''
 if (entryUrl === import.meta.url || process.argv[1]?.endsWith('/ocm.js') || process.argv[1]?.endsWith('/ocm')) {
   void main()

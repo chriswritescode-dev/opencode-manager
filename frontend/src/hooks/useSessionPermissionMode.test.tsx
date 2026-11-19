@@ -1,63 +1,69 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import type { SessionPermissionModeState } from '@opencode-manager/shared/schemas'
 import { useSessionPermissionMode, useSetSessionPermissionMode } from './useSessionPermissionMode'
-import { getSessionPermissionMode, setSessionPermissionMode } from '@/api/sessionPermissionModes'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { renderHookWithProviders } from '@/test/render'
 
-vi.mock('@/api/sessionPermissionModes', () => ({
-  getSessionPermissionMode: vi.fn(),
-  setSessionPermissionMode: vi.fn(),
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: { error: vi.fn() },
-}))
-
-function createWrapper(queryClient: QueryClient, serverId: string) {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <OpenCodeServerProvider serverId={serverId}>{children}</OpenCodeServerProvider>
-    </QueryClientProvider>
-  )
+const remoteState: SessionPermissionModeState = {
+  sessionId: 'ses_1',
+  rootSessionId: 'ses_1',
+  mode: 'auto',
+  lockedReason: null,
 }
 
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+  toaster: false,
+  serverId: 'srv_remote',
+} as const
+
 describe('useSessionPermissionMode', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('reads the mode for the current server', async () => {
+    const { result, fetchFake } = renderHookWithProviders(
+      () => useSessionPermissionMode('ses_1'),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          {
+            method: 'GET',
+            path: '/api/session-permission-modes/ses_1',
+            respond: () => ({ json: remoteState }),
+          },
+        ],
+      },
+    )
+
+    await waitFor(() => expect(result.current.data).toEqual(remoteState))
+
+    expect(fetchFake.lastRequest('GET', '/api/session-permission-modes/ses_1')?.searchParams.get('serverId')).toBe('srv_remote')
   })
 
-  it('reads the mode for the current server and scopes its cache key', async () => {
-    const state = { sessionId: 'ses_1', rootSessionId: 'ses_1', mode: 'auto' as const, lockedReason: null }
-    vi.mocked(getSessionPermissionMode).mockResolvedValue(state)
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    renderHook(() => useSessionPermissionMode('ses_1'), { wrapper: createWrapper(queryClient, 'srv_remote') })
-
-    await waitFor(() => expect(getSessionPermissionMode).toHaveBeenCalledWith('ses_1', 'srv_remote'))
-
-    expect(queryClient.getQueryCache().find({ queryKey: ['session-permission-mode', 'ses_1', 'srv_remote'] })).toBeDefined()
-  })
-
-  it('writes the mode through the current server', async () => {
-    const state = { sessionId: 'ses_1', rootSessionId: 'ses_1', mode: 'auto' as const, lockedReason: null }
-    vi.mocked(setSessionPermissionMode).mockResolvedValue(state)
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result } = renderHook(() => useSetSessionPermissionMode('ses_1'), {
-      wrapper: createWrapper(queryClient, 'srv_remote'),
-    })
+  it('writes the mode through the current server and updates the cached state', async () => {
+    const { result, queryClient, fetchFake } = renderHookWithProviders(
+      () => useSetSessionPermissionMode('ses_1'),
+      {
+        ...hookProviders,
+        fetchRoutes: [
+          {
+            method: 'PUT',
+            path: '/api/session-permission-modes/ses_1',
+            respond: () => ({ json: remoteState }),
+          },
+        ],
+      },
+    )
 
     await act(async () => {
       await result.current.mutateAsync({ directory: '/repo', mode: 'auto' })
     })
 
-    expect(setSessionPermissionMode).toHaveBeenCalledWith(
-      'ses_1',
-      { directory: '/repo', mode: 'auto' },
-      'srv_remote',
-    )
-    expect(
-      queryClient.getQueryData(['session-permission-mode', 'ses_1', 'srv_remote']),
-    ).toEqual(state)
+    expect(fetchFake.lastRequest('PUT', '/api/session-permission-modes/ses_1')?.body).toMatchObject({
+      directory: '/repo',
+      mode: 'auto',
+      serverId: 'srv_remote',
+    })
+    expect(queryClient.getQueryData(['session-permission-mode', 'ses_1', 'srv_remote'])).toEqual(remoteState)
   })
 })

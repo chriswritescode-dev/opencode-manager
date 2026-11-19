@@ -1,22 +1,25 @@
+import { vi } from 'vitest'
 import { createInternalRoutes } from '../../src/routes/internal'
+import { GitAuthService } from '../../src/services/git-auth'
+import { SettingsService } from '../../src/services/settings'
 import { createStubOpenCodeClient } from './stub-opencode-client'
 import { createStubRepoEnvService } from './stub-repo-env-service'
 
 type CreateInternalRoutesParams = Parameters<typeof createInternalRoutes>
 
-type InternalTestAppOverrides = Partial<{
-  scheduleService: CreateInternalRoutesParams[1]
-  notificationService: CreateInternalRoutesParams[2]
-  settingsService: CreateInternalRoutesParams[3]
-  openCodeClient: CreateInternalRoutesParams[4]
-  permissionModes: CreateInternalRoutesParams[5]
-  repoWorkspaces: CreateInternalRoutesParams[6]
-  gitAuthService: CreateInternalRoutesParams[7]
-  multiRuns: CreateInternalRoutesParams[8]
-  changeWalkthroughService: CreateInternalRoutesParams[9]
-  sessionSandbox: CreateInternalRoutesParams[10]
-  repoEnvService: CreateInternalRoutesParams[11]
-}>
+export interface InternalTestAppOverrides {
+  scheduleService?: CreateInternalRoutesParams[1]
+  notificationService?: CreateInternalRoutesParams[2]
+  settingsService?: CreateInternalRoutesParams[3]
+  openCodeClient?: CreateInternalRoutesParams[4]
+  permissionModes?: CreateInternalRoutesParams[5]
+  repoWorkspaces?: CreateInternalRoutesParams[6]
+  gitAuthService?: CreateInternalRoutesParams[7]
+  multiRuns?: CreateInternalRoutesParams[8]
+  changeWalkthroughService?: CreateInternalRoutesParams[9]
+  sessionSandbox?: CreateInternalRoutesParams[10]
+  repoEnvService?: CreateInternalRoutesParams[11]
+}
 
 export function createInternalTestApp(
   db: CreateInternalRoutesParams[0],
@@ -24,16 +27,69 @@ export function createInternalTestApp(
 ) {
   return createInternalRoutes(
     db,
-    overrides.scheduleService ?? ({} as CreateInternalRoutesParams[1]),
-    overrides.notificationService ?? ({} as CreateInternalRoutesParams[2]),
-    overrides.settingsService ?? ({} as CreateInternalRoutesParams[3]),
+    overrides.scheduleService ?? {
+      cancelRun: vi.fn(),
+      cancelServerRun: vi.fn(),
+      clearRunHistory: vi.fn(),
+      clearServerRunHistory: vi.fn(),
+      countUnreadRuns: vi.fn(),
+      createJob: vi.fn(),
+      createServerJob: vi.fn(),
+      deleteJob: vi.fn(),
+      deleteRun: vi.fn(),
+      deleteServerJob: vi.fn(),
+      deleteServerRun: vi.fn(),
+      getJob: vi.fn(),
+      getRun: vi.fn(),
+      getServerJob: vi.fn(),
+      getServerRun: vi.fn(),
+      listAllJobsWithRepos: vi.fn(),
+      listAllRuns: vi.fn(),
+      listJobs: vi.fn(),
+      listRuns: vi.fn(),
+      listServerJobs: vi.fn(),
+      listServerRuns: vi.fn(),
+      listUnreadRuns: vi.fn(),
+      listWorktrees: vi.fn(),
+      markAllRunsViewed: vi.fn(),
+      markRunViewed: vi.fn(),
+      removeWorktrees: vi.fn(),
+      runJob: vi.fn(),
+      runServerJob: vi.fn(),
+      updateJob: vi.fn(),
+      updateServerJob: vi.fn(),
+    },
+    overrides.notificationService ?? {
+      getScheduleRunReportUrl: vi.fn(),
+      isConfigured: vi.fn(),
+      sendToUser: vi.fn(),
+    },
+    overrides.settingsService ?? new SettingsService(db),
     overrides.openCodeClient ?? createStubOpenCodeClient(),
-    overrides.permissionModes ?? ({} as CreateInternalRoutesParams[5]),
-    overrides.repoWorkspaces ?? ({} as CreateInternalRoutesParams[6]),
-    overrides.gitAuthService ?? ({} as CreateInternalRoutesParams[7]),
-    overrides.multiRuns ?? ({} as CreateInternalRoutesParams[8]),
-    overrides.changeWalkthroughService ?? ({} as CreateInternalRoutesParams[9]),
-    overrides.sessionSandbox ?? ({} as CreateInternalRoutesParams[10]),
+    overrides.permissionModes ?? { pinAsk: vi.fn() },
+    overrides.repoWorkspaces ?? { create: vi.fn(), remove: vi.fn() },
+    overrides.gitAuthService ?? new GitAuthService(),
+    overrides.multiRuns ?? {
+      discard: vi.fn(),
+      fuse: vi.fn(),
+      launch: vi.fn(),
+      list: vi.fn(),
+    },
+    overrides.changeWalkthroughService ?? {
+      cancelGeneration: vi.fn(),
+      getState: vi.fn(),
+      listHelperSessionIds: vi.fn(),
+      publishFromWalkthroughSession: vi.fn(),
+      readChangesForWalkthroughSession: vi.fn(),
+      refine: vi.fn(),
+      startGeneration: vi.fn(),
+    },
+    overrides.sessionSandbox ?? {
+      getClaim: vi.fn(),
+      getState: vi.fn(),
+      resolveShellTarget: vi.fn(),
+      update: vi.fn(),
+    },
     overrides.repoEnvService ?? createStubRepoEnvService(),
   )
 }

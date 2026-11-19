@@ -1,4 +1,4 @@
-import { useThemeMode } from '@/contexts/ThemeContext'
+import { useThemeMode } from '@/contexts/theme-context'
 import { getDocumentThemeMode } from '@/lib/theme/colorTheme'
 
 export function useTheme(): 'light' | 'dark' {

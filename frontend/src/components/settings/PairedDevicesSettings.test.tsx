@@ -1,19 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { z } from 'zod'
 import type { PairedDevice } from '@opencode-manager/shared/schemas'
 import { PairedDevicesSettings } from './PairedDevicesSettings'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  listPairedDevices: vi.fn(),
-  revokePairedDevice: vi.fn(),
-}))
-
-vi.mock('@/api/devicePairing', () => ({
-  listPairedDevices: mocks.listPairedDevices,
-  revokePairedDevice: mocks.revokePairedDevice,
-}))
+const revokeRequestSchema = z.object({ id: z.string() })
 
 const IPHONE_SAFARI_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
@@ -39,28 +33,35 @@ const IPHONE_DEVICE: PairedDevice = {
   isCurrent: false,
 }
 
-function renderSettings() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
+interface DevicesServerOptions {
+  devices?: PairedDevice[]
+  revoke?: () => void
+}
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <PairedDevicesSettings />
-    </QueryClientProvider>,
-  )
+function renderSettings(options: DevicesServerOptions = {}) {
+  let devices = options.devices ?? [CURRENT_DEVICE]
+  const fetchRoutes: FetchRoute[] = [
+    { method: 'GET', path: '/api/auth/device-pairing/devices', respond: () => ({ json: { devices } }) },
+    {
+      method: 'POST',
+      path: '/api/auth/device-pairing/devices/revoke',
+      respond: (request) => {
+        if (options.revoke) options.revoke()
+        const body = revokeRequestSchema.parse(request.body)
+        devices = devices.filter((device) => device.id !== body.id)
+        return { status: 200 }
+      },
+    },
+  ]
+  return renderWithProviders(<PairedDevicesSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
+  })
 }
 
 describe('PairedDevicesSettings', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.listPairedDevices.mockResolvedValue([CURRENT_DEVICE])
-    mocks.revokePairedDevice.mockResolvedValue(undefined)
-  })
-
   it('shows the device name when one is set', async () => {
     renderSettings()
 
@@ -68,48 +69,55 @@ describe('PairedDevicesSettings', () => {
   })
 
   it('shows when the device signed in', async () => {
-    mocks.listPairedDevices.mockResolvedValue([{ ...CURRENT_DEVICE, ipAddress: null }])
-    renderSettings()
+    renderSettings({ devices: [{ ...CURRENT_DEVICE, ipAddress: null }] })
 
     expect(await screen.findByText(/^Signed in /)).toBeInTheDocument()
   })
 
   it('falls back to a user-agent label when the device has no name', async () => {
-    mocks.listPairedDevices.mockResolvedValue([IPHONE_DEVICE])
-    renderSettings()
+    renderSettings({ devices: [IPHONE_DEVICE] })
 
     expect(await screen.findByText('Safari on iPhone')).toBeInTheDocument()
   })
 
   it('marks the current device and hides its revoke button', async () => {
-    mocks.listPairedDevices.mockResolvedValue([CURRENT_DEVICE])
-    renderSettings()
+    renderSettings({ devices: [CURRENT_DEVICE] })
 
     expect(await screen.findByText('This device')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Revoke / })).not.toBeInTheDocument()
   })
 
   it('revokes a paired device after confirmation and refetches the list', async () => {
-    mocks.listPairedDevices.mockResolvedValue([CURRENT_DEVICE, IPHONE_DEVICE])
     const user = userEvent.setup()
-    renderSettings()
+    const { fetchFake } = renderSettings({ devices: [CURRENT_DEVICE, IPHONE_DEVICE] })
 
     await user.click(await screen.findByRole('button', { name: 'Revoke Safari on iPhone' }))
     await user.click(await screen.findByRole('button', { name: 'Delete' }))
 
-    await waitFor(() => expect(mocks.revokePairedDevice).toHaveBeenCalledWith('session-iphone'))
-    await waitFor(() => expect(mocks.listPairedDevices).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(fetchFake.lastRequest('POST', '/api/auth/device-pairing/devices/revoke')?.body).toEqual({
+        id: 'session-iphone',
+      }),
+    )
+    await waitFor(() =>
+      expect(fetchFake.findRequests('GET', '/api/auth/device-pairing/devices')).toHaveLength(2),
+    )
+    await waitFor(() => expect(screen.queryByText('Safari on iPhone')).not.toBeInTheDocument())
   })
 
   it('shows the error message when the revoke fails', async () => {
-    mocks.listPairedDevices.mockResolvedValue([CURRENT_DEVICE, IPHONE_DEVICE])
-    mocks.revokePairedDevice.mockRejectedValueOnce(new Error('This device is no longer paired'))
     const user = userEvent.setup()
-    renderSettings()
+    renderSettings({
+      devices: [CURRENT_DEVICE, IPHONE_DEVICE],
+      revoke: () => {
+        throw new Error('This device is no longer paired')
+      },
+    })
 
     await user.click(await screen.findByRole('button', { name: 'Revoke Safari on iPhone' }))
     await user.click(await screen.findByRole('button', { name: 'Delete' }))
 
     expect(await screen.findByText('This device is no longer paired')).toBeInTheDocument()
+    expect(screen.getByText('Safari on iPhone')).toBeInTheDocument()
   })
 })

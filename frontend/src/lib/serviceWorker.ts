@@ -1,4 +1,10 @@
+import { z } from "zod";
 import "../sw?worker";
+
+const NotificationClickMessageSchema = z.object({
+  type: z.string().optional(),
+  url: z.string().optional(),
+});
 
 type UpdateCallback = () => void;
 
@@ -101,9 +107,9 @@ export function onNotificationClick(handler: (url: string) => void): () => void 
   if (!("serviceWorker" in navigator)) return () => {};
 
   const listener = (event: MessageEvent) => {
-    const data = event.data as { type?: string; url?: string } | null;
-    if (data?.type === "NOTIFICATION_CLICK" && typeof data.url === "string") {
-      handler(data.url);
+    const data = NotificationClickMessageSchema.safeParse(event.data);
+    if (data.success && data.data.type === "NOTIFICATION_CLICK" && data.data.url !== undefined) {
+      handler(data.data.url);
     }
   };
   navigator.serviceWorker.addEventListener("message", listener);

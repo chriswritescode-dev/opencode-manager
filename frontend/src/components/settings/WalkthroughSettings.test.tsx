@@ -1,154 +1,136 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { act, screen } from '@testing-library/react'
+import { fireEvent } from '@testing-library/react'
 import { WalkthroughSettings } from './WalkthroughSettings'
-import { useSettings } from '@/hooks/useSettings'
-import type { UserPreferences } from '@/api/types/settings'
-import type { Provider } from '@/api/providers'
-import { createUseSettingsMock } from '@/test/test-utils'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import type { FetchRoute } from '@/test/fetchFake'
 
-vi.mock('@/hooks/useSettings')
-
-const mocks = vi.hoisted(() => ({
-  useProviders: vi.fn(),
-  useOpenCodeModelState: vi.fn(),
-  useOpenCodeDefaultModel: vi.fn(),
-}))
-
-vi.mock('@/hooks/useProviders', () => ({ useProviders: mocks.useProviders }))
-vi.mock('@/hooks/useModelSelection', () => ({
-  useOpenCodeModelState: mocks.useOpenCodeModelState,
-  useOpenCodeDefaultModel: mocks.useOpenCodeDefaultModel,
-}))
-
-const providers: Provider[] = [
+const catalogs: FetchRoute[] = [
   {
-    id: 'anthropic',
-    name: 'Anthropic',
-    models: [
-      { id: 'claude-sonnet-4', modelID: 'claude-sonnet-4', name: 'Claude Sonnet 4', released: 0, free: false },
-    ],
+    method: 'GET',
+    path: '/api/opencode/api/provider',
+    respond: () => ({ json: { data: [{ id: 'anthropic', name: 'Anthropic', activation: 'enabled' }] } }),
+  },
+  {
+    method: 'GET',
+    path: '/api/opencode/api/model',
+    respond: () => ({
+      json: {
+        data: [{
+          id: 'claude-sonnet-4',
+          modelID: 'claude-sonnet-4',
+          name: 'Claude Sonnet 4',
+          providerID: 'anthropic',
+          capabilities: { tools: true, input: ['text'], output: ['text'] },
+          variants: [],
+          enabled: true,
+          status: 'active',
+          limit: { context: 200000, output: 64000 },
+          time: { released: 1 },
+          cost: [{ input: 3, output: 15 }],
+        }],
+      },
+    }),
+  },
+  { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { data: null } }) },
+  { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: {} }) },
+  {
+    method: 'GET',
+    path: '/api/providers/model-state',
+    respond: () => ({ json: { favorite: [], recent: [], variant: {} } }),
   },
 ]
 
-const basePreferences: UserPreferences = {
-  theme: 'dark',
-  mode: 'build',
-  autoScroll: true,
-  expandDiffs: true,
-  expandToolCalls: false,
-  showReasoning: false,
-  simpleChatMode: false,
-  keyboardShortcuts: {},
-  customCommands: [],
+function renderWalkthrough(initial: Parameters<typeof createSettingsServer>[0] = {}) {
+  const settings = createSettingsServer(initial)
+  const result = renderWithProviders(<WalkthroughSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: [...settings.routes, ...catalogs],
+  })
+  return { ...result, settings }
 }
 
-function mockUseSettings(overrides: Partial<ReturnType<typeof useSettings>> = {}) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences: basePreferences, ...overrides }))
+async function waitForAutosave() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 900))
+  })
+}
+
+async function openModelList() {
+  const input = await screen.findByLabelText('Walkthrough model')
+  fireEvent.focus(input)
+  return screen.findByRole('option', { name: /Claude Sonnet 4/ })
 }
 
 describe('WalkthroughSettings', () => {
-  beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
+  it('saves a chosen model after the autosave delay', async () => {
+    const { fetchFake } = renderWalkthrough()
+
+    fireEvent.click(await openModelList())
+    await waitForAutosave()
+
+    expect(fetchFake.lastRequest('PATCH', '/api/settings')?.body).toEqual({
+      preferences: { walkthroughModel: 'anthropic/claude-sonnet-4' },
+    })
   })
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useProviders.mockReturnValue({ data: { providers, models: [] } })
-    mocks.useOpenCodeModelState.mockReturnValue({ data: { favorite: [], recent: [], variant: {} } })
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: null })
+  it('clears the walkthrough model to an empty string', async () => {
+    const { fetchFake } = renderWalkthrough({ walkthroughModel: 'anthropic/claude-sonnet-4' })
+
+    await screen.findByRole('button', { name: 'Clear' })
+    await waitForAutosave()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitForAutosave()
+
+    expect(fetchFake.lastRequest('PATCH', '/api/settings')?.body).toEqual({
+      preferences: { walkthroughModel: '' },
+    })
+    expect(screen.getByLabelText('Walkthrough model')).toHaveValue('')
   })
 
-  it('saves a chosen model after the debounce', () => {
-    vi.useFakeTimers()
-    try {
-      const updateSettings = vi.fn()
-      mockUseSettings({ updateSettings })
-      render(<WalkthroughSettings />)
+  it('does not save an unchanged stored value', async () => {
+    const { fetchFake } = renderWalkthrough({ walkthroughModel: 'anthropic/claude-sonnet-4' })
 
-      fireEvent.focus(screen.getByLabelText('Walkthrough model'))
-      fireEvent.click(screen.getByRole('option', { name: /Claude Sonnet 4/ }))
-      act(() => {
-        vi.advanceTimersByTime(800)
-      })
+    await screen.findByLabelText('Walkthrough model')
+    await waitForAutosave()
 
-      expect(updateSettings).toHaveBeenCalledTimes(1)
-      expect(updateSettings).toHaveBeenCalledWith({ walkthroughModel: 'anthropic/claude-sonnet-4' })
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(fetchFake.findRequests('PATCH', '/api/settings')).toHaveLength(0)
   })
 
-  it('clears the walkthrough model to an empty string', () => {
-    vi.useFakeTimers()
-    try {
-      const updateSettings = vi.fn()
-      mockUseSettings({
-        preferences: { ...basePreferences, walkthroughModel: 'anthropic/claude-sonnet-4' },
-        updateSettings,
-      })
-      render(<WalkthroughSettings />)
+  it('does not save when no model is stored and the field is empty', async () => {
+    const { fetchFake } = renderWalkthrough()
 
-      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
-      act(() => {
-        vi.advanceTimersByTime(800)
-      })
+    await screen.findByLabelText('Walkthrough model')
+    await waitForAutosave()
 
-      expect(updateSettings).toHaveBeenCalledTimes(1)
-      expect(updateSettings).toHaveBeenCalledWith({ walkthroughModel: '' })
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(fetchFake.findRequests('PATCH', '/api/settings')).toHaveLength(0)
   })
 
-  it('does not save an unchanged value', () => {
-    vi.useFakeTimers()
-    try {
-      const updateSettings = vi.fn()
-      mockUseSettings({
-        preferences: { ...basePreferences, walkthroughModel: 'anthropic/claude-sonnet-4' },
-        updateSettings,
-      })
-      render(<WalkthroughSettings />)
+  it('does not offer the OpenCode default as a stored value', async () => {
+    const settings = createSettingsServer()
+    const fetchRoutes: FetchRoute[] = [
+      ...settings.routes,
+      ...catalogs.filter((route) => route.path !== '/api/opencode/api/model/default'),
+      {
+        method: 'GET',
+        path: '/api/opencode/api/model/default',
+        respond: () => ({ json: { data: { providerID: 'anthropic', id: 'claude-sonnet-4' } } }),
+      },
+    ]
+    renderWithProviders(<WalkthroughSettings />, {
+      auth: false,
+      theme: false,
+      tts: false,
+      fetchRoutes,
+    })
 
-      act(() => {
-        vi.advanceTimersByTime(800)
-      })
+    expect(await screen.findByLabelText('Walkthrough model')).toHaveValue('')
+    fireEvent.focus(screen.getByLabelText('Walkthrough model'))
 
-      expect(updateSettings).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('does not save when no model is stored and the field is empty', () => {
-    vi.useFakeTimers()
-    try {
-      const updateSettings = vi.fn()
-      mockUseSettings({ updateSettings })
-      render(<WalkthroughSettings />)
-
-      act(() => {
-        vi.advanceTimersByTime(800)
-      })
-
-      expect(updateSettings).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('keeps the OpenCode default as a selectable model when the field is unset', () => {
-    mocks.useOpenCodeDefaultModel.mockReturnValue({ data: 'anthropic/claude-sonnet-4' })
-    mockUseSettings()
-    render(<WalkthroughSettings />)
-
-    const input = screen.getByLabelText('Walkthrough model')
-    expect(input).toHaveValue('')
-
-    fireEvent.focus(input)
-    expect(screen.getByRole('option', { name: /Claude Sonnet 4/ })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: /Claude Sonnet 4/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /^Default:/ })).not.toBeInTheDocument()
   })
 })

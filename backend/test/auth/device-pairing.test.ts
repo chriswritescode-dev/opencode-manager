@@ -1,52 +1,23 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import {
   DEVICE_PAIRING_CODE_TTL_SECONDS,
   DEVICE_PAIRING_ERROR_CODES,
   PAIRING_CODE_INVALID_MESSAGE,
   PairedDeviceSchema,
+  PairedDevicesResponseSchema,
+  RedeemDevicePairingCodeResponseSchema,
 } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { createAuth, type AuthInstance } from '../../src/auth'
 import { devicePairing } from '../../src/auth/device-pairing'
 import { AUTH_SOCKET_IP_HEADER } from '../../src/auth/client-ip'
-import { createAuthDatabase } from '../helpers/auth-database'
-
-const { ENV } = vi.hoisted(() => ({
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: {
-      SECRET: 'test-secret-for-encryption-key-32c',
-      TRUSTED_ORIGINS: 'http://localhost:5173,http://localhost:5003',
-      SECURE_COOKIES: false,
-      ADMIN_EMAIL: undefined as string | undefined,
-      ADMIN_PASSWORD: undefined as string | undefined,
-      ADMIN_PASSWORD_RESET: false,
-      GITHUB_CLIENT_ID: undefined as string | undefined,
-      GITHUB_CLIENT_SECRET: undefined as string | undefined,
-      GOOGLE_CLIENT_ID: undefined as string | undefined,
-      GOOGLE_CLIENT_SECRET: undefined as string | undefined,
-      DISCORD_CLIENT_ID: undefined as string | undefined,
-      DISCORD_CLIENT_SECRET: undefined as string | undefined,
-      PASSKEY_RP_ID: 'localhost',
-      PASSKEY_RP_NAME: 'OpenCode Manager',
-      PASSKEY_ORIGIN: 'http://localhost:5003',
-    },
-    LOGGING: { DEBUG: false, LOG_LEVEL: 'info' },
-  },
-}))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV,
-  getTrustedOrigins: () => ENV.AUTH.TRUSTED_ORIGINS
-    .split(',')
-    .map((origin: string) => origin.trim())
-    .filter((origin: string) => origin.length > 0),
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}))
+import { selectRow, selectRows } from '../../src/db/rows'
+import { createTestDatabase } from '../helpers/test-database'
+import { createAuthEnv } from '../helpers/auth-env'
+import { readJson } from '../helpers/read-json'
 
 const ORIGIN = 'http://localhost:5173'
 const SIGN_UP_URL = `${ORIGIN}/api/auth/sign-up/email`
@@ -54,17 +25,20 @@ const REDEEM_URL = `${ORIGIN}/api/auth/device-pairing/redeem`
 const UNROUTABLE_CREATE_URL = `${ORIGIN}/api/auth/device-pairing/create`
 const DEVICES_URL = `${ORIGIN}/api/auth/device-pairing/devices`
 const REVOKE_URL = `${ORIGIN}/api/auth/device-pairing/devices/revoke`
-const PAIRED_DEVICE_KEYS = Object.keys(PairedDeviceSchema.shape).sort()
+type PairedDevice = z.infer<typeof PairedDeviceSchema>
 
-type PairedDeviceBody = {
-  id: string
-  deviceName: string | null
-  userAgent: string | null
-  ipAddress: string | null
-  createdAt: string
-  updatedAt: string
-  isCurrent: boolean
-}
+const PAIRED_DEVICE_KEYS = ['createdAt', 'deviceName', 'id', 'ipAddress', 'isCurrent', 'updatedAt', 'userAgent']
+
+const VerificationRowSchema = z.object({
+  identifier: z.string(),
+  value: z.string(),
+  expiresAt: z.string(),
+})
+const IdentifierRowSchema = z.object({ identifier: z.string() })
+const SessionTokenRowSchema = z.object({ token: z.string() })
+const PushEndpointRowSchema = z.object({ endpoint: z.string() })
+const CountRowSchema = z.object({ count: z.number() })
+const PairingErrorSchema = z.object({ code: z.string(), message: z.string().optional() })
 
 function cookieHeaders(response: Response): Headers {
   const cookies = response.headers.getSetCookie().map((cookie) => cookie.split(';')[0])
@@ -84,14 +58,14 @@ function redeemRequest(code: string, deviceName?: string, ipAddress = '198.51.10
   })
 }
 
-function deviceRequest(url: string, method: 'GET' | 'POST', headers?: Headers, body?: unknown): Request {
-  const requestHeaders: Record<string, string> = {
+function deviceRequest(url: string, method: 'GET' | 'POST', headers?: Headers, body?: JsonValue): Request {
+  const requestHeaders = new Headers({
     origin: ORIGIN,
     'content-type': 'application/json',
     [AUTH_SOCKET_IP_HEADER]: '198.51.100.31',
-  }
+  })
   const cookie = headers?.get('cookie')
-  if (cookie) requestHeaders.cookie = cookie
+  if (cookie) requestHeaders.set('cookie', cookie)
 
   return new Request(url, {
     method,
@@ -105,8 +79,8 @@ describe('devicePairing', () => {
   let auth: AuthInstance
 
   beforeEach(() => {
-    db = createAuthDatabase()
-    auth = createAuth(db)
+    db = createTestDatabase()
+    auth = createAuth(db, createAuthEnv())
   })
 
   afterEach(() => {
@@ -123,10 +97,10 @@ describe('devicePairing', () => {
     return cookieHeaders(response)
   }
 
-  async function listDevices(headers: Headers): Promise<{ status: number; devices: PairedDeviceBody[] }> {
+  async function listDevices(headers: Headers): Promise<{ status: number; devices: PairedDevice[] }> {
     const response = await auth.handler(deviceRequest(DEVICES_URL, 'GET', headers))
-    const body = await response.json() as { devices?: PairedDeviceBody[] }
-    return { status: response.status, devices: body.devices ?? [] }
+    const body = await readJson(response, PairedDevicesResponseSchema)
+    return { status: response.status, devices: body.devices }
   }
 
   async function pairPhone(creatorHeaders: Headers, deviceName: string): Promise<Headers> {
@@ -147,11 +121,11 @@ describe('devicePairing', () => {
     expect(lifetimeMs).toBeGreaterThan((DEVICE_PAIRING_CODE_TTL_SECONDS - 5) * 1000)
     expect(lifetimeMs).toBeLessThanOrEqual((DEVICE_PAIRING_CODE_TTL_SECONDS + 5) * 1000)
 
-    const rows = db.prepare('SELECT identifier, value, expiresAt FROM verification').all() as Array<{
-      identifier: string
-      value: string
-      expiresAt: number
-    }>
+    const rows = selectRows(
+      db,
+      VerificationRowSchema,
+      'SELECT identifier, value, expiresAt FROM verification',
+    )
     expect(rows).toHaveLength(1)
     expect(rows[0]!.identifier).toBe(`device-pairing:${createHash('sha256').update(code).digest('base64url')}`)
     expect(JSON.stringify(rows)).not.toContain(code)
@@ -178,23 +152,22 @@ describe('devicePairing', () => {
     const response = await auth.handler(redeemRequest(code, 'Chris iPhone'))
 
     expect(response.status).toBe(200)
-    const body = await response.json() as { user: { id: string; name: string; email: string } }
-    expect(body.user.id).toBe(creatorSession!.user.id)
+    const body = await readJson(response, RedeemDevicePairingCodeResponseSchema)
+    expect(body.user.id).toBe(creatorSession?.user.id)
     expect(body.user.email).toBe('creator@example.com')
     expect(body.user).not.toHaveProperty('token')
 
     const cookies = response.headers.getSetCookie()
     expect(cookies.length).toBeGreaterThan(0)
     const phoneSession = await auth.api.getSession({ headers: cookieHeaders(response) })
-    expect(phoneSession).not.toBeNull()
-    expect(phoneSession!.user.id).toBe(creatorSession!.user.id)
-    expect(phoneSession!.session.id).not.toBe(creatorSession!.session.id)
-    expect(phoneSession!.session.deviceName).toBe('Chris iPhone')
-    expect(phoneSession!.session.userAgent).toBe('TestPhone/1.0')
+    expect(phoneSession?.user.id).toBe(creatorSession?.user.id)
+    expect(phoneSession!.session.id).not.toBe(creatorSession?.session.id)
+    expect(phoneSession?.session.deviceName).toBe('Chris iPhone')
+    expect(phoneSession?.session.userAgent).toBe('TestPhone/1.0')
 
     const creatorAfter = await auth.api.getSession({ headers: creatorHeaders })
-    expect(creatorAfter?.session.id).toBe(creatorSession!.session.id)
-    expect(db.prepare('SELECT COUNT(*) AS count FROM "session"').get()).toEqual({ count: 2 })
+    expect(creatorAfter?.session.id).toBe(creatorSession?.session.id)
+    expect(selectRow(db, CountRowSchema, 'SELECT COUNT(*) AS count FROM "session"')).toEqual({ count: 2 })
   })
 
   it('consumes a code once', async () => {
@@ -206,7 +179,7 @@ describe('devicePairing', () => {
 
     const second = await auth.handler(redeemRequest(code, 'Second Phone'))
     expect(second.status).toBe(400)
-    const body = await second.json() as { code?: string; message?: string }
+    const body = await readJson(second, PairingErrorSchema)
     expect(body.code).toBe(DEVICE_PAIRING_ERROR_CODES.PAIRING_CODE_INVALID)
     expect(body.message).toBe(PAIRING_CODE_INVALID_MESSAGE)
   })
@@ -219,8 +192,7 @@ describe('devicePairing', () => {
     const response = await auth.handler(redeemRequest(code, 'Late Phone'))
 
     expect(response.status).toBe(400)
-    const body = await response.json() as { code?: string }
-    expect(body.code).toBe(DEVICE_PAIRING_ERROR_CODES.PAIRING_CODE_INVALID)
+    expect((await readJson(response, PairingErrorSchema)).code).toBe(DEVICE_PAIRING_ERROR_CODES.PAIRING_CODE_INVALID)
   })
 
   it('allows exactly one of two concurrent redeems', async () => {
@@ -233,7 +205,7 @@ describe('devicePairing', () => {
     ])
 
     expect(responses.map((response) => response.status).sort()).toEqual([200, 400])
-    expect(db.prepare('SELECT COUNT(*) AS count FROM "session"').get()).toEqual({ count: 2 })
+    expect(selectRow(db, CountRowSchema, 'SELECT COUNT(*) AS count FROM "session"')).toEqual({ count: 2 })
   })
 
   it('creates a session without a device name when none is given', async () => {
@@ -244,8 +216,7 @@ describe('devicePairing', () => {
     expect(response.status).toBe(200)
 
     const session = await auth.api.getSession({ headers: cookieHeaders(response) })
-    expect(session).not.toBeNull()
-    expect(session!.session.deviceName ?? null).toBeNull()
+    expect(session?.session.deviceName ?? null).toBeNull()
   })
 
   it('lists active sessions as paired devices without session tokens', async () => {
@@ -264,10 +235,10 @@ describe('devicePairing', () => {
     expect(updatedAt).toEqual([...updatedAt].sort().reverse())
 
     const creatorSession = await auth.api.getSession({ headers: creatorHeaders })
-    const current = devices.find((device) => device.id === creatorSession!.session.id)
+    const current = devices.find((device) => device.id === creatorSession?.session.id)
     expect(current?.isCurrent).toBe(true)
 
-    const phone = devices.find((device) => device.id !== creatorSession!.session.id)
+    const phone = devices.find((device) => device.id !== creatorSession?.session.id)
     expect(phone).toMatchObject({
       deviceName: 'Chris iPhone',
       userAgent: 'TestPhone/1.0',
@@ -275,7 +246,7 @@ describe('devicePairing', () => {
       isCurrent: false,
     })
 
-    const tokens = db.prepare('SELECT token FROM "session"').all() as Array<{ token: string }>
+    const tokens = selectRows(db, SessionTokenRowSchema, 'SELECT token FROM "session"')
     expect(tokens).toHaveLength(2)
     const serialized = JSON.stringify(devices)
     for (const { token } of tokens) expect(serialized).not.toContain(token)
@@ -287,16 +258,16 @@ describe('devicePairing', () => {
     const creatorSession = await auth.api.getSession({ headers: creatorHeaders })
 
     const { devices } = await listDevices(creatorHeaders)
-    const phone = devices.find((device) => device.id !== creatorSession!.session.id)
+    const phone = devices.find((device) => device.id !== creatorSession?.session.id)
     expect(phone).toBeDefined()
 
-    const response = await auth.handler(deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phone!.id }))
+    const response = await auth.handler(deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phone?.id ?? '' }))
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ status: true })
     expect(await auth.api.getSession({ headers: phoneHeaders })).toBeNull()
     const creatorAfter = await auth.api.getSession({ headers: creatorHeaders })
-    expect(creatorAfter?.session.id).toBe(creatorSession!.session.id)
+    expect(creatorAfter?.session.id).toBe(creatorSession?.session.id)
   })
 
   it('removes only the revoked device push subscriptions', async () => {
@@ -315,12 +286,15 @@ describe('devicePairing', () => {
     insertSubscription.run('default', 'https://push.example.com/legacy', 'p', 'a', 'Legacy', null, 1, 1)
 
     const response = await auth.handler(
-      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phoneSession!.session.id }),
+      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phoneSession?.session.id ?? '' }),
     )
 
     expect(response.status).toBe(200)
-    const endpoints = (db.prepare('SELECT endpoint FROM push_subscriptions ORDER BY endpoint').all() as Array<{ endpoint: string }>)
-      .map((row) => row.endpoint)
+    const endpoints = selectRows(
+      db,
+      PushEndpointRowSchema,
+      'SELECT endpoint FROM push_subscriptions ORDER BY endpoint',
+    ).map((row) => row.endpoint)
     expect(endpoints).toEqual([
       'https://push.example.com/desktop',
       'https://push.example.com/legacy',
@@ -332,12 +306,13 @@ describe('devicePairing', () => {
     const creatorSession = await auth.api.getSession({ headers: creatorHeaders })
 
     const response = await auth.handler(
-      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: creatorSession!.session.id }),
+      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: creatorSession?.session.id ?? '' }),
     )
 
     expect(response.status).toBe(400)
-    const body = await response.json() as { code?: string }
-    expect(body.code).toBe(DEVICE_PAIRING_ERROR_CODES.CANNOT_REVOKE_CURRENT_SESSION)
+    expect((await readJson(response, PairingErrorSchema)).code).toBe(
+      DEVICE_PAIRING_ERROR_CODES.CANNOT_REVOKE_CURRENT_SESSION,
+    )
     expect(await auth.api.getSession({ headers: creatorHeaders })).not.toBeNull()
   })
 
@@ -350,13 +325,13 @@ describe('devicePairing', () => {
       deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: 'unknown-session' }),
     )
     expect(unknown.status).toBe(404)
-    expect((await unknown.json() as { code?: string }).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
+    expect((await readJson(unknown, PairingErrorSchema)).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
 
     const foreign = await auth.handler(
-      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: otherSession!.session.id }),
+      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: otherSession?.session.id ?? '' }),
     )
     expect(foreign.status).toBe(404)
-    expect((await foreign.json() as { code?: string }).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
+    expect((await readJson(foreign, PairingErrorSchema)).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
 
     expect(await auth.api.getSession({ headers: otherHeaders })).not.toBeNull()
   })
@@ -382,10 +357,10 @@ describe('devicePairing', () => {
     expect(devices.map((device) => device.id)).not.toContain(phoneSession!.session.id)
 
     const revoke = await auth.handler(
-      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phoneSession!.session.id }),
+      deviceRequest(REVOKE_URL, 'POST', creatorHeaders, { id: phoneSession?.session.id ?? '' }),
     )
     expect(revoke.status).toBe(404)
-    expect((await revoke.json() as { code?: string }).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
+    expect((await readJson(revoke, PairingErrorSchema)).code).toBe(DEVICE_PAIRING_ERROR_CODES.DEVICE_NOT_FOUND)
   })
 
   it('deletes only expired device pairing codes when minting', async () => {
@@ -408,7 +383,7 @@ describe('devicePairing', () => {
 
     const { code } = await auth.api.createDevicePairingCode({ headers })
 
-    const identifiers = (db.prepare('SELECT identifier FROM verification').all() as Array<{ identifier: string }>)
+    const identifiers = selectRows(db, IdentifierRowSchema, 'SELECT identifier FROM verification')
       .map((row) => row.identifier)
       .sort()
     expect(identifiers).toEqual([

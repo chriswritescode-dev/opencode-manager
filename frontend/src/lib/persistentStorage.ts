@@ -1,3 +1,5 @@
+import type { JsonValue } from '@opencode-manager/shared/utils'
+
 export function readStoredValue(key: string): string | null {
   try {
     return localStorage.getItem(key)
@@ -6,7 +8,7 @@ export function readStoredValue(key: string): string | null {
   }
 }
 
-export function writeStoredValue(key: string, value: unknown): void {
+export function writeStoredValue(key: string, value: JsonValue): void {
   try {
     localStorage.setItem(key, JSON.stringify(value))
   } catch {

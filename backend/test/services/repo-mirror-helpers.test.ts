@@ -1,60 +1,39 @@
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import fs from 'node:fs'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Database } from 'bun:sqlite'
+import { getReposPath } from '@opencode-manager/shared/config/env'
+import { sseAggregator } from '../../src/services/sse-aggregator'
+import { createRepoRow, ensureMirrorTargetPath, isDirectoryInUse, isRepoInUse } from '../../src/services/repo'
+import { getRepoById, listRepos } from '../../src/db/queries'
+import { extractPartsToStaging } from '../../src/routes/internal/repo-mirror-helpers'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-const getRepoById = vi.fn()
-const createRepo = vi.fn()
-const mockGetRepoByLocalPath = vi.fn()
-const mockGetRepoByUrlAndBranch = vi.fn()
+let workspace: TempWorkspace
 
-vi.mock('../../src/db/queries', () => ({
-  getRepoById,
-  createRepo,
-  getRepoByLocalPath: mockGetRepoByLocalPath,
-  getRepoBySourcePath: vi.fn(),
-  updateRepoStatus: vi.fn(),
-  updateRepoBranch: vi.fn(),
-  deleteRepo: vi.fn(),
-  getRepoByUrlAndBranch: mockGetRepoByUrlAndBranch,
-}))
+beforeEach(() => {
+  workspace = createTempWorkspace('ocm-mirror-test-')
+})
 
-const mockGetActiveDirectories = vi.fn().mockReturnValue([])
-vi.mock('../../src/services/sse-aggregator', () => ({
-  sseAggregator: {
-    getActiveDirectories: mockGetActiveDirectories,
-  },
-}))
+afterEach(() => {
+  vi.restoreAllMocks()
+  workspace.restore()
+})
 
-let tmpRoot: string
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getReposPath: () => tmpRoot,
-  getWorkspacePath: vi.fn(() => '/tmp/fake-workspace'),
-}))
+function createDatabase(): Database {
+  return createTestDatabase()
+}
 
 describe('ensureMirrorTargetPath', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    fs.mkdirSync(tmpRoot, { recursive: true })
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
-  })
-
-  it('returns a path under the repos root', async () => {
-    const { ensureMirrorTargetPath } = await import('../../src/services/repo')
+  it('returns a path under the repos root', () => {
     const result = ensureMirrorTargetPath('demo')
 
     expect(result.localPath).toBe('demo')
-    expect(result.fullPath).toBe(path.join(tmpRoot, 'demo'))
+    expect(result.fullPath).toBe(path.join(getReposPath(), 'demo'))
   })
 
-  it('appends -2 when the target directory already exists on disk', async () => {
-    const { ensureMirrorTargetPath } = await import('../../src/services/repo')
-
+  it('appends -2 when the target directory already exists on disk', () => {
     const result1 = ensureMirrorTargetPath('demo')
     expect(result1.localPath).toBe('demo')
 
@@ -62,291 +41,197 @@ describe('ensureMirrorTargetPath', () => {
 
     const result2 = ensureMirrorTargetPath('demo')
     expect(result2.localPath).toBe('demo-2')
-    expect(result2.fullPath).toBe(path.join(tmpRoot, 'demo-2'))
+    expect(result2.fullPath).toBe(path.join(getReposPath(), 'demo-2'))
   })
 
-  it('continues incrementing suffix on successive collisions', async () => {
-    const { ensureMirrorTargetPath } = await import('../../src/services/repo')
-
-    fs.mkdirSync(path.join(tmpRoot, 'demo'), { recursive: true })
-    fs.mkdirSync(path.join(tmpRoot, 'demo-2'), { recursive: true })
-    fs.mkdirSync(path.join(tmpRoot, 'demo-3'), { recursive: true })
+  it('continues incrementing suffix on successive collisions', () => {
+    fs.mkdirSync(path.join(getReposPath(), 'demo'), { recursive: true })
+    fs.mkdirSync(path.join(getReposPath(), 'demo-2'), { recursive: true })
+    fs.mkdirSync(path.join(getReposPath(), 'demo-3'), { recursive: true })
 
     const result = ensureMirrorTargetPath('demo')
     expect(result.localPath).toBe('demo-4')
-    expect(result.fullPath).toBe(path.join(tmpRoot, 'demo-4'))
+    expect(result.fullPath).toBe(path.join(getReposPath(), 'demo-4'))
   })
 
-  it('slugifies names with special characters', async () => {
-    const { ensureMirrorTargetPath } = await import('../../src/services/repo')
+  it('slugifies names with special characters', () => {
     const result = ensureMirrorTargetPath('My Repo Name!')
 
     expect(result.localPath).toBe('my-repo-name')
-    expect(result.fullPath).toBe(path.join(tmpRoot, 'my-repo-name'))
+    expect(result.fullPath).toBe(path.join(getReposPath(), 'my-repo-name'))
   })
 
-  it('falls back to "repo" when slugification produces empty string', async () => {
-    const { ensureMirrorTargetPath } = await import('../../src/services/repo')
+  it('falls back to "repo" when slugification produces empty string', () => {
     const result = ensureMirrorTargetPath('!!!')
 
     expect(result.localPath).toBe('repo')
-    expect(result.fullPath).toBe(path.join(tmpRoot, 'repo'))
+    expect(result.fullPath).toBe(path.join(getReposPath(), 'repo'))
   })
 })
 
 describe('createRepoRow', () => {
+  let db: Database
+  let reposRoot: string
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    fs.mkdirSync(tmpRoot, { recursive: true })
+    db = createDatabase()
+    reposRoot = getReposPath()
   })
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
+    db.close()
   })
 
-  it('creates a repo row with cloneStatus ready and isLocal true when no originUrl', async () => {
-    const database = {} as never
-    const fakeRepo = {
-      id: 1,
-      localPath: 'demo',
-      fullPath: path.join(tmpRoot, 'demo'),
-      branch: undefined,
-      defaultBranch: 'main',
-      cloneStatus: 'ready' as const,
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-    createRepo.mockReturnValue(fakeRepo)
+  it('creates a local repo row that is ready', () => {
+    const result = createRepoRow(db, { name: 'demo', localPath: 'demo', fullPath: path.join(reposRoot, 'demo') })
 
-    const { createRepoRow } = await import('../../src/services/repo')
-    const result = createRepoRow(database, {
-      name: 'demo',
-      localPath: 'demo',
-      fullPath: path.join(tmpRoot, 'demo'),
-    })
-
-    expect(createRepo).toHaveBeenCalledWith(database, expect.objectContaining({
-      cloneStatus: 'ready',
-      isLocal: true,
-    }))
-    expect(result.repo.cloneStatus).toBe('ready')
     expect(result.created).toBe(true)
+    expect(result.repo.cloneStatus).toBe('ready')
+    expect(result.repo.isLocal).toBe(true)
+    expect(result.repo.repoUrl).toBeUndefined()
+    expect(getRepoById(db, result.repo.id)?.localPath).toBe('demo')
   })
 
-  it('creates a repo row with isLocal false when originUrl is provided', async () => {
-    const database = {} as never
-    const fakeRepo = {
-      id: 2,
-      localPath: 'demo',
-      fullPath: path.join(tmpRoot, 'demo'),
-      branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready' as const,
-      clonedAt: Date.now(),
-      isLocal: false,
-    }
-    createRepo.mockReturnValue(fakeRepo)
-
-    const { createRepoRow } = await import('../../src/services/repo')
-    const result = createRepoRow(database, {
+  it('creates a remote repo row when an origin URL is provided', () => {
+    const result = createRepoRow(db, {
       name: 'demo',
       originUrl: 'https://github.com/example/repo.git',
       localPath: 'demo',
-      fullPath: path.join(tmpRoot, 'demo'),
+      fullPath: path.join(reposRoot, 'demo'),
       branch: 'main',
     })
 
-    expect(createRepo).toHaveBeenCalledWith(database, expect.objectContaining({
-      repoUrl: 'https://github.com/example/repo.git',
-      cloneStatus: 'ready',
-      isLocal: false,
-    }))
-    expect(result.repo.cloneStatus).toBe('ready')
     expect(result.created).toBe(true)
+    expect(result.repo.cloneStatus).toBe('ready')
+    expect(result.repo.isLocal).not.toBe(true)
+    expect(result.repo.repoUrl).toBe('https://github.com/example/repo.git')
+    expect(getRepoById(db, result.repo.id)?.repoUrl).toBe('https://github.com/example/repo.git')
   })
 
-  it('uses supplied branch as defaultBranch fallback', async () => {
-    const database = {} as never
-    createRepo.mockReturnValue({ id: 3 })
-
-    const { createRepoRow } = await import('../../src/services/repo')
-    createRepoRow(database, {
+  it('uses supplied branch as defaultBranch fallback', () => {
+    const result = createRepoRow(db, {
       name: 'demo',
       localPath: 'demo',
-      fullPath: path.join(tmpRoot, 'demo'),
+      fullPath: path.join(reposRoot, 'demo'),
       branch: 'develop',
     })
 
-    expect(createRepo).toHaveBeenCalledWith(database, expect.objectContaining({
-      defaultBranch: 'develop',
-      branch: 'develop',
-    }))
+    expect(result.repo.branch).toBe('develop')
+    expect(result.repo.defaultBranch).toBe('develop')
   })
 
-  it('returns existing repo with created false when originUrl matches existing row', async () => {
-    const database = {} as never
-    const existingRepo = {
-      id: 5,
-      localPath: 'existing-repo',
-      fullPath: path.join(tmpRoot, 'existing-repo'),
+  it('returns the existing repo for a matching origin URL', () => {
+    const originUrl = 'https://github.com/example/repo.git'
+    const first = createRepoRow(db, {
+      name: 'demo',
+      originUrl,
+      localPath: 'demo',
+      fullPath: path.join(reposRoot, 'demo'),
       branch: 'main',
-      defaultBranch: 'main',
-      cloneStatus: 'ready' as const,
-      clonedAt: Date.now(),
-      isLocal: false,
-    }
+    })
 
-    mockGetRepoByUrlAndBranch.mockReturnValue(existingRepo)
-
-    const { createRepoRow } = await import('../../src/services/repo')
-    const result = createRepoRow(database, {
+    const second = createRepoRow(db, {
       name: 'new-name',
-      originUrl: 'https://github.com/example/repo.git',
+      originUrl,
       localPath: 'new-name',
-      fullPath: path.join(tmpRoot, 'new-name'),
+      fullPath: path.join(reposRoot, 'new-name'),
       branch: 'main',
     })
 
-    expect(mockGetRepoByUrlAndBranch).toHaveBeenCalledWith(database, 'https://github.com/example/repo.git', 'main')
-    expect(createRepo).not.toHaveBeenCalled()
-    expect(result.repo).toEqual(existingRepo)
-    expect(result.created).toBe(false)
+    expect(second.created).toBe(false)
+    expect(second.repo.id).toBe(first.repo.id)
+    expect(listRepos(db)).toHaveLength(1)
   })
 
-  it('returns existing repo with created false when localPath matches existing row', async () => {
-    const database = {} as never
-    const existingRepo = {
-      id: 6,
+  it('returns the existing repo for a matching local path', () => {
+    const first = createRepoRow(db, {
+      name: 'demo',
       localPath: 'existing-repo',
-      fullPath: path.join(tmpRoot, 'existing-repo'),
-      branch: undefined,
-      defaultBranch: 'main',
-      cloneStatus: 'ready' as const,
-      clonedAt: Date.now(),
-      isLocal: true,
-    }
-
-    mockGetRepoByLocalPath.mockReturnValue(existingRepo)
-
-    const { createRepoRow } = await import('../../src/services/repo')
-    const result = createRepoRow(database, {
-      name: 'new-name',
-      localPath: 'existing-repo',
-      fullPath: path.join(tmpRoot, 'existing-repo'),
+      fullPath: path.join(reposRoot, 'existing-repo'),
     })
 
-    expect(mockGetRepoByLocalPath).toHaveBeenCalledWith(database, 'existing-repo')
-    expect(createRepo).not.toHaveBeenCalled()
-    expect(result.repo).toEqual(existingRepo)
-    expect(result.created).toBe(false)
+    const second = createRepoRow(db, {
+      name: 'new-name',
+      localPath: 'existing-repo',
+      fullPath: path.join(reposRoot, 'existing-repo'),
+    })
+
+    expect(second.created).toBe(false)
+    expect(second.repo.id).toBe(first.repo.id)
+    expect(listRepos(db)).toHaveLength(1)
   })
 })
 
 describe('isDirectoryInUse', () => {
+  let activeDirectories: string[]
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    fs.mkdirSync(tmpRoot, { recursive: true })
+    activeDirectories = []
+    vi.spyOn(sseAggregator, 'getActiveDirectories').mockImplementation(() => activeDirectories)
   })
 
-  afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
-  })
-
-  it('returns true when the active directory differs only by a trailing slash', async () => {
-    const active = path.join(tmpRoot, 'demo')
+  it('returns true when the active directory differs only by a trailing slash', () => {
+    const active = path.join(workspace.path, 'demo')
     fs.mkdirSync(active, { recursive: true })
-    mockGetActiveDirectories.mockReturnValue([`${active}${path.sep}`])
+    activeDirectories = [`${active}${path.sep}`]
 
-    const { isDirectoryInUse } = await import('../../src/services/repo')
     expect(isDirectoryInUse(active)).toBe(true)
   })
 
-  it('returns true when the active directory is a symlink to the queried directory', async () => {
-    const real = path.join(tmpRoot, 'real')
-    const link = path.join(tmpRoot, 'link')
+  it('returns true when the active directory is a symlink to the queried directory', () => {
+    const real = path.join(workspace.path, 'real')
+    const link = path.join(workspace.path, 'link')
     fs.mkdirSync(real, { recursive: true })
     fs.symlinkSync(real, link)
-    mockGetActiveDirectories.mockReturnValue([link])
+    activeDirectories = [link]
 
-    const { isDirectoryInUse } = await import('../../src/services/repo')
     expect(isDirectoryInUse(real)).toBe(true)
   })
 
-  it('returns false when no active directory matches', async () => {
-    mockGetActiveDirectories.mockReturnValue([path.join(tmpRoot, 'other')])
+  it('returns false when no active directory matches', () => {
+    activeDirectories = [path.join(workspace.path, 'other')]
 
-    const { isDirectoryInUse } = await import('../../src/services/repo')
-    expect(isDirectoryInUse(path.join(tmpRoot, 'demo'))).toBe(false)
+    expect(isDirectoryInUse(path.join(workspace.path, 'demo'))).toBe(false)
   })
 })
 
 describe('isRepoInUse', () => {
+  let db: Database
+  let activeDirectories: string[]
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    fs.mkdirSync(tmpRoot, { recursive: true })
+    db = createDatabase()
+    activeDirectories = []
+    vi.spyOn(sseAggregator, 'getActiveDirectories').mockImplementation(() => activeDirectories)
   })
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
+    db.close()
   })
 
-  it('returns false when repo does not exist in DB', async () => {
-    getRepoById.mockReturnValue(null)
-    mockGetActiveDirectories.mockReturnValue([])
-
-    const { isRepoInUse } = await import('../../src/services/repo')
-    const result = isRepoInUse({} as never, 999)
-
-    expect(result).toBe(false)
+  it('returns false when repo does not exist in DB', () => {
+    expect(isRepoInUse(db, 999)).toBe(false)
   })
 
-  it('returns false when no active sessions match repo fullPath', async () => {
-    getRepoById.mockReturnValue({
-      id: 1,
-      fullPath: path.join(tmpRoot, 'demo'),
-      localPath: 'demo',
-    })
-    mockGetActiveDirectories.mockReturnValue([path.join(tmpRoot, 'other')])
+  it('returns false when no active session matches repo fullPath', () => {
+    const repo = seedRepo(db, { sourcePath: path.join(workspace.path, 'demo') })
+    activeDirectories = [path.join(workspace.path, 'other')]
 
-    const { isRepoInUse } = await import('../../src/services/repo')
-    const result = isRepoInUse({} as never, 1)
-
-    expect(result).toBe(false)
+    expect(isRepoInUse(db, repo.id)).toBe(false)
   })
 
-  it('returns true when active session matches repo fullPath', async () => {
-    getRepoById.mockReturnValue({
-      id: 1,
-      fullPath: path.join(tmpRoot, 'demo'),
-      localPath: 'demo',
-    })
-    mockGetActiveDirectories.mockReturnValue([path.join(tmpRoot, 'demo')])
+  it('returns true when active session matches repo fullPath', () => {
+    const repoPath = path.join(workspace.path, 'demo')
+    const repo = seedRepo(db, { sourcePath: repoPath })
+    activeDirectories = [repoPath]
 
-    const { isRepoInUse } = await import('../../src/services/repo')
-    const result = isRepoInUse({} as never, 1)
-
-    expect(result).toBe(true)
+    expect(isRepoInUse(db, repo.id)).toBe(true)
   })
 })
 
 describe('extractPartsToStaging', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    fs.mkdirSync(tmpRoot, { recursive: true })
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true })
-  })
-
   it('rejects zero-part commits before creating a staging directory', async () => {
-    const { extractPartsToStaging } = await import('../../src/routes/internal/repo-mirror-helpers')
-
     await expect(extractPartsToStaging('upload-id', 0, false)).rejects.toThrow('totalParts must be a positive integer')
-    expect(fs.existsSync(path.join(tmpRoot, '.ocm-staging'))).toBe(false)
+    expect(fs.existsSync(path.join(getReposPath(), '.ocm-staging'))).toBe(false)
   })
 })

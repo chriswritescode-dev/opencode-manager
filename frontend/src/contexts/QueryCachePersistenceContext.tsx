@@ -19,27 +19,9 @@ import {
 export interface QueryCachePersistenceProviderProps {
   children?: ReactNode
   persister?: QueryCachePersister
-  /** Spacing between persisted saves; tests lower it instead of waiting a second per write. */
   persistThrottleMs?: number
 }
 
-/**
- * Restores the allowlisted part of the React Query cache for the signed-in account and keeps it
- * persisted while that account stays signed in.
- *
- * This provider owns the cache teardown. Signing out or switching accounts clears both the in-memory
- * client and the persisted cache here, and the persister drops any save still queued for the account
- * that just left, so a trailing write cannot recreate the previous account's cache.
- *
- * The restore starts only once the session resolves to a signed-in user and uses
- * `"<origin>|<userId>"` as the persister buster, so a cache written for another origin or account is
- * discarded instead of hydrating this one. While the restore is in flight the subtree runs under
- * `IsRestoringProvider`, which keeps queries from fetching before the persisted data is available.
- * A first sign-in with nothing on disk subscribes straight away, because there is nothing to wait for.
- *
- * Saves are driven by query cache events whose key is allowlisted and, for an update, whose action
- * changes data or status, so a streaming transcript update costs no dehydrate.
- */
 export function QueryCachePersistenceProvider({
   children,
   persister,

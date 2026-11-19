@@ -1,53 +1,51 @@
+import { z } from 'zod'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 
-export interface TTSModelsResponse {
-  models: string[]
-  cached: boolean
-}
+const ttsModelsResponseSchema = z.object({ models: z.array(z.string()), cached: z.boolean() })
+const ttsVoicesResponseSchema = z.object({ voices: z.array(z.string()), cached: z.boolean() })
+const ttsClearCacheResponseSchema = z.object({ cleared: z.number() })
+const ttsStatusResponseSchema = z.object({
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  cache: z.object({
+    count: z.number(),
+    sizeBytes: z.number(),
+    sizeMB: z.number(),
+    maxSizeMB: z.number(),
+    ttlHours: z.number(),
+  }),
+})
 
-export interface TTSVoicesResponse {
-  voices: string[]
-  cached: boolean
-}
+export type TTSModelsResponse = z.infer<typeof ttsModelsResponseSchema>
 
-export interface TTSClearCacheResponse {
-  cleared: number
-}
+export type TTSVoicesResponse = z.infer<typeof ttsVoicesResponseSchema>
 
-export interface TTSStatusResponse {
-  enabled: boolean
-  configured: boolean
-  cache: {
-    count: number
-    sizeBytes: number
-    sizeMB: number
-    maxSizeMB: number
-    ttlHours: number
-  }
-}
+export type TTSClearCacheResponse = z.infer<typeof ttsClearCacheResponseSchema>
+
+export type TTSStatusResponse = z.infer<typeof ttsStatusResponseSchema>
 
 export const ttsApi = {
   getModels: async (userId = 'default', forceRefresh = false): Promise<TTSModelsResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/tts/models`, {
+    return fetchWrapper(`${API_BASE_URL}/api/tts/models`, ttsModelsResponseSchema, {
       params: { userId, ...(forceRefresh && { refresh: 'true' }) },
     })
   },
 
   getVoices: async (userId = 'default', forceRefresh = false): Promise<TTSVoicesResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/tts/voices`, {
+    return fetchWrapper(`${API_BASE_URL}/api/tts/voices`, ttsVoicesResponseSchema, {
       params: { userId, ...(forceRefresh && { refresh: 'true' }) },
     })
   },
 
   getStatus: async (userId = 'default'): Promise<TTSStatusResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/tts/status`, {
+    return fetchWrapper(`${API_BASE_URL}/api/tts/status`, ttsStatusResponseSchema, {
       params: { userId },
     })
   },
 
   clearCache: async (): Promise<TTSClearCacheResponse> => {
-    return fetchWrapper(`${API_BASE_URL}/api/tts/cache`, {
+    return fetchWrapper(`${API_BASE_URL}/api/tts/cache`, ttsClearCacheResponseSchema, {
       method: 'DELETE',
     })
   },

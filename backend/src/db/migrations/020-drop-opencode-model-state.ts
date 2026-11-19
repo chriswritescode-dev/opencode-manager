@@ -3,25 +3,35 @@ import path from 'node:path'
 import { getOpenCodeModelStatePath } from '@opencode-manager/shared/config/env'
 import type { Migration } from '../migration-runner'
 import { logger } from '../../utils/logger'
+import { JsonObjectSchema, JsonValueSchema } from '@opencode-manager/shared/utils'
+import { z } from 'zod'
+import { selectRow } from '../rows'
 
-interface ModelStateRow {
-  recent: string
-  favorite: string
-  variant: string
-  updated_at: number
-}
+const ModelStateRowSchema = z.object({
+  recent: z.string(),
+  favorite: z.string(),
+  variant: z.string(),
+  updated_at: z.number(),
+})
 
-function readDefaultRow(db: Parameters<Migration['up']>[0]): ModelStateRow | undefined {
+type ModelStateRow = z.infer<typeof ModelStateRowSchema>
+
+function readDefaultRow(db: Parameters<Migration['up']>[0]): ModelStateRow | null {
   try {
-    return db.prepare("SELECT recent, favorite, variant, updated_at FROM opencode_model_state WHERE user_id = 'default'").get() as ModelStateRow | undefined
+    return selectRow(
+      db,
+      ModelStateRowSchema,
+      "SELECT recent, favorite, variant, updated_at FROM opencode_model_state WHERE user_id = 'default'",
+    )
   } catch {
-    return undefined
+    return null
   }
 }
 
-function parseJson<T>(value: string, fallback: T): T {
+function parseJsonText<Schema extends z.ZodType>(value: string, schema: Schema, fallback: z.infer<Schema>): z.infer<Schema> {
   try {
-    return JSON.parse(value) as T
+    const parsed = schema.safeParse(JSON.parse(value))
+    return parsed.success ? parsed.data : fallback
   } catch {
     return fallback
   }
@@ -36,15 +46,15 @@ function restoreModelStateFile(row: ModelStateRow): void {
   }
 
   const existing = fileExists
-    ? parseJson<Record<string, unknown>>(readFileSync(filePath, 'utf8'), {})
+    ? parseJsonText(readFileSync(filePath, 'utf8'), JsonObjectSchema, {})
     : {}
 
   mkdirSync(path.dirname(filePath), { recursive: true })
   writeFileSync(filePath, JSON.stringify({
     ...existing,
-    recent: parseJson<unknown[]>(row.recent, []),
-    favorite: parseJson<unknown[]>(row.favorite, []),
-    variant: parseJson<Record<string, unknown>>(row.variant, {}),
+    recent: parseJsonText(row.recent, z.array(JsonValueSchema), []),
+    favorite: parseJsonText(row.favorite, z.array(JsonValueSchema), []),
+    variant: parseJsonText(row.variant, JsonObjectSchema, {}),
   }, null, 2))
 }
 

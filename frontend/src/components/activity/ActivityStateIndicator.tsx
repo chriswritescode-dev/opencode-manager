@@ -1,10 +1,6 @@
 import { ActivitySpinner } from '@/components/ui/activity-spinner'
 import { cn } from '@/lib/utils'
 
-/**
- * Renders nothing unless a repo or linked server has an active session, then shows the braille
- * spinner in the state colour (info while running, warning when a session needs input).
- */
 export function ActivityStateIndicator({
   state,
   className,

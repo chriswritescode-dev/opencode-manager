@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
-import type { GitAuthService } from '../../src/services/git-auth'
+import { GitAuthService, type GitEnvironment } from '../../src/services/git-auth'
 
 export function git(args: string[], cwd?: string): string {
   return execFileSync('git', args, {
@@ -51,11 +51,26 @@ export function uniqueName(prefix: string): string {
   return `${prefix}-${seq}`
 }
 
+class StubGitAuthService extends GitAuthService {
+  constructor(private readonly stubEnvironment: Record<string, string>) {
+    super()
+  }
+
+  override getGitEnvironment(): GitEnvironment {
+    return this.stubEnvironment
+  }
+
+  override getSSHEnvironment(): GitEnvironment {
+    return {}
+  }
+
+  override async setupSSHForRepoUrl(): Promise<boolean> {
+    return false
+  }
+
+  override async cleanupSSHKey(): Promise<void> {}
+}
+
 export function createGitAuthService(env: Record<string, string> = {}): GitAuthService {
-  return {
-    getGitEnvironment: () => env,
-    getSSHEnvironment: () => ({}),
-    setupSSHForRepoUrl: async () => false,
-    cleanupSSHKey: async () => {},
-  } as unknown as GitAuthService
+  return new StubGitAuthService(env)
 }

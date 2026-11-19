@@ -1,7 +1,7 @@
 import { readFile, readdir, readlink } from 'node:fs/promises'
 import { ENV } from '@opencode-manager/shared/config/env'
 import type { PreviewPort } from '@opencode-manager/shared/schemas'
-import { executeCommand } from '../../utils/process'
+import { executeCommand, type ExecuteCommandResult } from '../../utils/process'
 
 export type PreviewPortEntry = Omit<PreviewPort, 'inDirectory'>
 
@@ -338,8 +338,8 @@ export async function listListeningPorts(deps: PortDiscoveryDeps = defaultPortDe
     .sort((left, right) => left.port - right.port)
 }
 
-function unwrapCommandResult(result: string | { exitCode: number; stdout: string; stderr: string }): string {
-  return typeof result === 'string' ? result : result.stdout
+function unwrapCommandResult(result: ExecuteCommandResult): string {
+  return result.stdout
 }
 
 const defaultPortDeps: PortDiscoveryDeps = {

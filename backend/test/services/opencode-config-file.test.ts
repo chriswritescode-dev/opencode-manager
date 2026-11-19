@@ -1,75 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { access, chmod, mkdir, readFile, readdir, stat, utimes, writeFile } from 'fs/promises'
+import { promises as fsNode } from 'fs'
 import path from 'path'
-
-const paths = vi.hoisted(() => ({ config: '', configDir: '', configHome: '', healthWatch: '' }))
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getConfigPath: () => paths.configDir,
-  getOpenCodeConfigFilePath: () => paths.config,
-  getOpenCodeConfigHome: () => paths.configHome,
-  getOpenCodeHealthWatchPath: () => paths.healthWatch,
-  OPENCODE_CONFIG_SOURCE_NAMES: ['opencode.json', 'opencode.jsonc'],
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}))
-
-const writeFailures = vi.hoisted(() => ({
-  paths: [] as string[],
-  calls: [] as string[],
-  readsAtWrite: [] as Array<{ stat: number; readFile: number }>,
-}))
-
-const fsCalls = vi.hoisted(() => ({ stat: 0, readFile: 0 }))
-
-const writeGate = vi.hoisted(() => ({
-  beforeWrite: null as null | (() => Promise<void>),
-  entered: null as null | (() => void),
-}))
-
-vi.mock('fs/promises', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs/promises')>()
-  return {
-    ...actual,
-    stat: vi.fn((...args: Parameters<typeof actual.stat>) => {
-      fsCalls.stat += 1
-      return actual.stat(...args)
-    }),
-    readFile: vi.fn((...args: Parameters<typeof actual.readFile>) => {
-      fsCalls.readFile += 1
-      return actual.readFile(...args)
-    }),
-  }
-})
-
-vi.mock('../../src/utils/fs-safe', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/utils/fs-safe')>()
-  return {
-    ...actual,
-    writeFileAtomic: vi.fn(async (filePath: string, content: string, options?: { mode?: number }) => {
-      writeFailures.calls.push(filePath)
-      writeFailures.readsAtWrite.push({ stat: fsCalls.stat, readFile: fsCalls.readFile })
-      if (writeGate.beforeWrite) {
-        const gate = writeGate.beforeWrite
-        writeGate.entered?.()
-        await gate()
-      }
-      if (writeFailures.paths.includes(filePath)) {
-        throw new Error(`simulated write failure for ${filePath}`)
-      }
-      return actual.writeFileAtomic(filePath, content, options)
-    }),
-  }
-})
-
+import { z } from 'zod'
 import { LEGACY_OPENCODE_CONFIG_SOURCE_NAME } from '@opencode-manager/shared'
+import { getConfigPath, getOpenCodeConfigHome, getOpenCodeHealthWatchPath } from '@opencode-manager/shared/config/env'
+import { JsonObjectSchema } from '@opencode-manager/shared/utils'
+import * as fsSafe from '../../src/utils/fs-safe'
 import {
   HEALTH_WATCH_MAX_ENTRIES,
   OPENCODE_CONFIG_REDACTED_VALUE,
@@ -93,16 +30,43 @@ import {
   writeOpenCodeConfigFile,
 } from '../../src/services/opencode-config-file'
 import { withFileLock } from '../../src/utils/atomic-json'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+
+const actualWriteFileAtomic = fsSafe.writeFileAtomic
+
+const ArchivedSnapshotSchema = z.object({
+  version: z.number(),
+  sources: z.array(z.object({ name: z.string(), rawContent: z.string() })),
+})
+
+const HealthArtifactSchema = z.object({ capturedAt: z.string() })
+
+interface WriteFailures {
+  paths: string[]
+  calls: string[]
+  readsAtWrite: Array<{ stat: number; readFile: number }>
+}
+
+interface WriteGate {
+  beforeWrite: (() => Promise<void>) | null
+  entered: (() => void) | null
+}
 
 describe('opencode-config-file', () => {
+  let workspace: TempWorkspace
   let workDir: string
+  let healthWatch: string
+  let writeFailures: WriteFailures
+  let writeGate: WriteGate
+  let statSpy: MockInstance<typeof fsNode.stat>
+  let readFileSpy: MockInstance<typeof fsNode.readFile>
 
   function sourcePath(name: string): string {
     return path.join(workDir, name)
   }
 
   function archiveDirectory(): string {
-    return path.join(paths.configHome, 'opencode-configs-archive')
+    return path.join(getOpenCodeConfigHome(), 'opencode-configs-archive')
   }
 
   async function readArchivedLegacyContents(): Promise<string[]> {
@@ -113,25 +77,32 @@ describe('opencode-config-file', () => {
   }
 
   beforeEach(async () => {
-    vi.clearAllMocks()
-    writeFailures.paths = []
-    writeFailures.calls = []
-    writeFailures.readsAtWrite = []
-    fsCalls.stat = 0
-    fsCalls.readFile = 0
-    writeGate.beforeWrite = null
-    writeGate.entered = null
-    workDir = await mkdtemp(path.join(tmpdir(), 'opencode-config-file-'))
-    paths.config = path.join(workDir, 'opencode.json')
-    paths.configDir = workDir
-    paths.configHome = path.join(workDir, '..', `${path.basename(workDir)}-home`)
-    paths.healthWatch = path.join(workDir, 'health-watch')
-    await mkdir(paths.configHome, { recursive: true })
+    workspace = createTempWorkspace('opencode-config-file-')
+    workDir = getConfigPath()
+    await mkdir(workDir, { recursive: true })
+    healthWatch = getOpenCodeHealthWatchPath()
+    writeFailures = { paths: [], calls: [], readsAtWrite: [] }
+    writeGate = { beforeWrite: null, entered: null }
+    statSpy = vi.spyOn(fsNode, 'stat')
+    readFileSpy = vi.spyOn(fsNode, 'readFile')
+    vi.spyOn(fsSafe, 'writeFileAtomic').mockImplementation(async (target, content, options) => {
+      writeFailures.calls.push(target)
+      writeFailures.readsAtWrite.push({ stat: statSpy.mock.calls.length, readFile: readFileSpy.mock.calls.length })
+      const gate = writeGate.beforeWrite
+      if (gate) {
+        writeGate.entered?.()
+        await gate()
+      }
+      if (writeFailures.paths.includes(target)) {
+        throw new Error(`simulated write failure for ${target}`)
+      }
+      await actualWriteFileAtomic(target, content, options)
+    })
   })
 
-  afterEach(async () => {
-    await rm(workDir, { recursive: true, force: true })
-    await rm(paths.configHome, { recursive: true, force: true })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    workspace.restore()
   })
 
   it('returns null when no config source exists', async () => {
@@ -307,7 +278,7 @@ describe('opencode-config-file', () => {
         },
       },
     })
-    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    const onDisk = JsonObjectSchema.parse(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')))
     expect(onDisk).toEqual(updated.content)
   })
 
@@ -317,7 +288,7 @@ describe('opencode-config-file', () => {
     const updated = await updateOpenCodeConfigFile({ small_model: null }, { mode: 'merge' })
 
     expect(updated.content).toEqual({ theme: 'dark' })
-    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    const onDisk = JsonObjectSchema.parse(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')))
     expect(onDisk).toEqual({ theme: 'dark' })
   })
 
@@ -345,11 +316,10 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
-    const error = await updateOpenCodeConfigFile({ theme: null }, { mode: 'merge' }).catch((caught: unknown) => caught)
+    const cause = await updateOpenCodeConfigFile({ theme: null }, { mode: 'merge' }).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
-    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
-    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect(cause).toMatchObject({ paths: ['theme'], sources: ['opencode.json'] })
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
   })
@@ -368,7 +338,7 @@ describe('opencode-config-file', () => {
     expect(updated.content).toEqual({
       mcp: { servers: { linear: { type: 'remote', url: 'https://linear.example.com', headers: { 'X-Keep': '1' } } } },
     })
-    const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+    const onDisk = JsonObjectSchema.parse(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')))
     expect(onDisk).toEqual(updated.content)
   })
 
@@ -393,13 +363,13 @@ describe('opencode-config-file', () => {
     const raw = '{"theme":"dark"}'
     await writeFile(sourcePath('opencode.json'), raw, 'utf8')
 
-    const error = await updateOpenCodeConfigFile(
+    const cause = await updateOpenCodeConfigFile(
       { mcp: { servers: { linear: { headers: { Authorization: OPENCODE_CONFIG_REDACTED_VALUE } } } } },
       { mode: 'merge' },
-    ).catch((caught: unknown) => caught)
+    ).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigRedactedValueError)
-    expect((error as OpenCodeConfigRedactedValueError).paths).toEqual(['mcp.servers.linear.headers.Authorization'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigRedactedValueError)
+    expect(cause).toMatchObject({ paths: ['mcp.servers.linear.headers.Authorization'] })
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
   })
 
@@ -407,13 +377,13 @@ describe('opencode-config-file', () => {
     const raw = '{"theme":"dark"}'
     await writeFile(sourcePath('opencode.json'), raw, 'utf8')
 
-    const error = await updateOpenCodeConfigFile({
+    const cause = await updateOpenCodeConfigFile({
       theme: 'light',
       instructions: ['keep', OPENCODE_CONFIG_REDACTED_VALUE],
-    }).catch((caught: unknown) => caught)
+    }).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigRedactedValueError)
-    expect((error as OpenCodeConfigRedactedValueError).paths).toEqual(['instructions.1'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigRedactedValueError)
+    expect(cause).toMatchObject({ paths: ['instructions.1'] })
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
   })
 
@@ -421,13 +391,13 @@ describe('opencode-config-file', () => {
     const raw = '{"theme":"dark"}'
     await writeFile(sourcePath('opencode.json'), raw, 'utf8')
 
-    const error = await updateOpenCodeConfigFile(
+    const cause = await updateOpenCodeConfigFile(
       `{\n  // comment\n  "instructions": ["keep", "${OPENCODE_CONFIG_REDACTED_VALUE}"],\n}\n`,
       { source: 'opencode.json' },
-    ).catch((caught: unknown) => caught)
+    ).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigRedactedValueError)
-    expect((error as OpenCodeConfigRedactedValueError).paths).toEqual(['instructions.1'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigRedactedValueError)
+    expect(cause).toMatchObject({ paths: ['instructions.1'] })
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(raw)
   })
 
@@ -450,11 +420,10 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
     const targetStats = await stat(sourcePath('opencode.jsonc'))
 
-    const error = await updateOpenCodeConfigFile({ model: 'test/b' }).catch((caught: unknown) => caught)
+    const cause = await updateOpenCodeConfigFile({ model: 'test/b' }).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
-    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
-    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect(cause).toMatchObject({ paths: ['theme'], sources: ['opencode.json'] })
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
     expect((await stat(sourcePath('opencode.jsonc'))).mtimeMs).toBe(targetStats.mtimeMs)
@@ -466,11 +435,10 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.json'), lower, 'utf8')
     await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
-    const error = await updateOpenCodeConfigFile({ model: 'test/b', plugin: ['x'] }).catch((caught: unknown) => caught)
+    const cause = await updateOpenCodeConfigFile({ model: 'test/b', plugin: ['x'] }).catch((cause: unknown) => cause)
 
-    expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
-    expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['theme'])
-    expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+    expect(cause).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+    expect(cause).toMatchObject({ paths: ['theme'], sources: ['opencode.json'] })
     await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe(lower)
   })
@@ -481,7 +449,7 @@ describe('opencode-config-file', () => {
     expect(written.path).toBe(sourcePath('opencode.json'))
     await expect(readFile(sourcePath('opencode.json'), 'utf8')).resolves.toBe('{"theme":"dark"}')
     await expect(
-      writeOpenCodeConfigFile('{"theme":"dark"}', 'nope.json' as 'opencode.json'),
+      writeOpenCodeConfigFile('{"theme":"dark"}', 'nope.json'),
     ).rejects.toThrow(/Unsupported OpenCode config source/)
   })
 
@@ -671,13 +639,13 @@ describe('opencode-config-file', () => {
     await writeFile(sourcePath('opencode.jsonc'), '{"theme":"dark"}', 'utf8')
     const snapshot = await readOpenCodeConfigSnapshot()
 
-    fsCalls.stat = 0
-    fsCalls.readFile = 0
+    statSpy.mockClear()
+    readFileSpy.mockClear()
     await updateOpenCodeConfigFile({ theme: 'light' }, { snapshot })
 
-    expect(writeFailures.readsAtWrite).toEqual([{ stat: 0, readFile: 0 }])
-    expect(fsCalls.stat).toBe(2)
-    expect(fsCalls.readFile).toBe(1)
+    expect(writeFailures.readsAtWrite).toEqual([{ stat: 1, readFile: 0 }])
+    expect(statSpy).toHaveBeenCalledTimes(3)
+    expect(readFileSpy).toHaveBeenCalledTimes(1)
   })
 
   it('replaces arrays atomically and merges nested objects in structured updates', async () => {
@@ -709,15 +677,15 @@ describe('opencode-config-file', () => {
 
     const merged = await readOpenCodeConfigFile()
     expect(merged?.content).toEqual({ constructor: { a: 1, b: 2 }, prototype: { x: 1 } })
-    expect(({} as Record<string, unknown>).x).toBeUndefined()
+    expect(Object.prototype).not.toHaveProperty('x')
   })
 
   it('writes a health-watch artifact with a shared timestamp and returns its path', async () => {
     const artifactPath = await writeHealthWatchArtifact('opencode-health', (timestamp) => JSON.stringify({ capturedAt: timestamp }))
 
-    expect(path.dirname(artifactPath)).toBe(paths.healthWatch)
+    expect(path.dirname(artifactPath)).toBe(healthWatch)
     expect(path.basename(artifactPath)).toMatch(/^opencode-health-.+\.json$/)
-    const content = JSON.parse(await readFile(artifactPath, 'utf8')) as { capturedAt: string }
+    const content = HealthArtifactSchema.parse(JSON.parse(await readFile(artifactPath, 'utf8')))
     expect(content.capturedAt).toBe(path.basename(artifactPath).replace(/^opencode-health-/, '').replace(/\.json$/, ''))
   })
 
@@ -725,14 +693,10 @@ describe('opencode-config-file', () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
     await writeFile(sourcePath('opencode.json'), '{"model":"a/b"}', 'utf8')
 
-    const archivePath = await archiveBrokenOpenCodeConfigFile()
+    const archivePath = z.string().parse(await archiveBrokenOpenCodeConfigFile())
 
-    expect(archivePath).toBeTruthy()
-    expect(path.dirname(archivePath as string)).toBe(paths.healthWatch)
-    const archived = JSON.parse(await readFile(archivePath as string, 'utf8')) as {
-      version: number
-      sources: Array<{ name: string; rawContent: string }>
-    }
+    expect(path.dirname(archivePath)).toBe(healthWatch)
+    const archived = ArchivedSnapshotSchema.parse(JSON.parse(await readFile(archivePath, 'utf8')))
     expect(archived.version).toBe(1)
     expect(archived.sources).toEqual(expect.arrayContaining([
       { name: 'opencode.jsonc', rawContent: OPENCODE_CONFIG_SEED },
@@ -745,18 +709,18 @@ describe('opencode-config-file', () => {
   })
 
   it('prunes the health-watch directory to the newest entries', async () => {
-    await mkdir(paths.healthWatch, { recursive: true })
+    await mkdir(healthWatch, { recursive: true })
     const baseTime = Date.now() - 100_000
     for (let index = 0; index < HEALTH_WATCH_MAX_ENTRIES + 5; index += 1) {
-      const filePath = path.join(paths.healthWatch, `entry-${index}.json`)
+      const filePath = path.join(healthWatch, `entry-${index}.json`)
       await writeFile(filePath, '{}', 'utf8')
       const time = new Date(baseTime + index * 1000)
       await utimes(filePath, time, time)
     }
 
-    await pruneHealthWatchDirectory(paths.healthWatch)
+    await pruneHealthWatchDirectory(healthWatch)
 
-    const remaining = await readdir(paths.healthWatch)
+    const remaining = await readdir(healthWatch)
     expect(remaining).toHaveLength(HEALTH_WATCH_MAX_ENTRIES)
     expect(remaining).toContain(`entry-${HEALTH_WATCH_MAX_ENTRIES + 4}.json`)
     expect(remaining).not.toContain('entry-0.json')
@@ -765,20 +729,20 @@ describe('opencode-config-file', () => {
 
   it('caps the health-watch directory when archiving a broken config', async () => {
     await writeOpenCodeConfigFile(OPENCODE_CONFIG_SEED)
-    await mkdir(paths.healthWatch, { recursive: true })
+    await mkdir(healthWatch, { recursive: true })
     const baseTime = Date.now() - 100_000
     for (let index = 0; index < HEALTH_WATCH_MAX_ENTRIES + 5; index += 1) {
-      const filePath = path.join(paths.healthWatch, `old-${index}.json`)
+      const filePath = path.join(healthWatch, `old-${index}.json`)
       await writeFile(filePath, '{}', 'utf8')
       const time = new Date(baseTime + index * 1000)
       await utimes(filePath, time, time)
     }
 
-    const archivePath = await archiveBrokenOpenCodeConfigFile()
+    const archivePath = z.string().parse(await archiveBrokenOpenCodeConfigFile())
 
-    const remaining = await readdir(paths.healthWatch)
+    const remaining = await readdir(healthWatch)
     expect(remaining).toHaveLength(HEALTH_WATCH_MAX_ENTRIES)
-    expect(remaining).toContain(path.basename(archivePath as string))
+    expect(remaining).toContain(path.basename(archivePath))
   })
 
   it('deletes the entire source set and reports whether any source existed', async () => {
@@ -952,7 +916,7 @@ describe('opencode-config-file', () => {
       const updated = await updateOpenCodeConfigFile({ agents: { reviewer: null } }, { mode: 'merge' })
 
       expect(updated.content).toEqual({ agents: {} })
-      const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+      const onDisk = JsonObjectSchema.parse(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')))
       expect(onDisk).toEqual({ agents: {} })
       expect(onDisk).not.toHaveProperty('agent')
     })
@@ -993,7 +957,7 @@ describe('opencode-config-file', () => {
         agent: { keeper: { description: 'Keeper' } },
         agents: { reviewer: { description: 'New reviewer' } },
       })
-      const onDisk = JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')) as Record<string, unknown>
+      const onDisk = JsonObjectSchema.parse(JSON.parse(await readFile(sourcePath('opencode.json'), 'utf8')))
       expect(onDisk).toHaveProperty('agent.keeper')
     })
 
@@ -1003,14 +967,13 @@ describe('opencode-config-file', () => {
       await writeFile(sourcePath('opencode.json'), lower, 'utf8')
       await writeFile(sourcePath('opencode.jsonc'), target, 'utf8')
 
-      const error = await updateOpenCodeConfigFile(
+      const cause = await updateOpenCodeConfigFile(
         { agents: { reviewer: { description: 'New reviewer' } } },
         { mode: 'merge' },
-      ).catch((caught: unknown) => caught)
+      ).catch((cause: unknown) => cause)
 
-      expect(error).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
-      expect((error as OpenCodeConfigShadowedRemovalError).paths).toEqual(['agent.reviewer'])
-      expect((error as OpenCodeConfigShadowedRemovalError).sources).toEqual(['opencode.json'])
+      expect(cause).toBeInstanceOf(OpenCodeConfigShadowedRemovalError)
+      expect(cause).toMatchObject({ paths: ['agent.reviewer'], sources: ['opencode.json'] })
       await expect(readFile(sourcePath('opencode.jsonc'), 'utf8')).resolves.toBe(target)
     })
   })

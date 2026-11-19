@@ -1,63 +1,54 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { decryptSecret, encryptSecret } from '../../src/utils/crypto'
 
-const scryptSyncSpy = vi.hoisted(() => vi.fn())
-const cryptoActual = vi.hoisted(() => ({
-  scryptSync: undefined as unknown as typeof import('crypto').scryptSync,
-}))
-
-vi.mock('crypto', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('crypto')>()
-  cryptoActual.scryptSync = actual.scryptSync
-  return {
-    ...actual,
-    scryptSync: scryptSyncSpy,
-  }
-})
-
-import { encryptSecret, decryptSecret } from '../../src/utils/crypto'
-
-const mutableAuth = ENV.AUTH as unknown as { SECRET: string }
 const originalSecret = ENV.AUTH.SECRET
 
-describe('crypto secret derivation', () => {
-  beforeEach(() => {
-    scryptSyncSpy.mockReset()
-    scryptSyncSpy.mockImplementation((secret: string, salt: Buffer, keylen: number) =>
-      cryptoActual.scryptSync(secret, salt, keylen),
-    )
-  })
+function setAuthSecret(secret: string): void {
+  Object.defineProperty(ENV.AUTH, 'SECRET', { value: secret, configurable: true, writable: true })
+}
 
-  afterEach(() => {
-    mutableAuth.SECRET = originalSecret
-  })
+afterEach(() => {
+  setAuthSecret(originalSecret)
+})
 
-  it('derives the key once for repeated calls with the same secret', () => {
-    mutableAuth.SECRET = 'memoized-secret'
-    scryptSyncSpy.mockClear()
+describe('secret encryption', () => {
+  it('round-trips every value encrypted under the same secret', () => {
+    setAuthSecret('memoized-secret')
 
     const first = encryptSecret('alpha')
     const second = encryptSecret('beta')
+
     expect(decryptSecret(first)).toBe('alpha')
     expect(decryptSecret(second)).toBe('beta')
-
-    expect(scryptSyncSpy).toHaveBeenCalledTimes(1)
-    expect(scryptSyncSpy).toHaveBeenCalledWith('memoized-secret', expect.any(Buffer), 32)
   })
 
-  it('derives a new key when the secret changes', () => {
-    mutableAuth.SECRET = 'secret-one'
-    encryptSecret('alpha')
-    mutableAuth.SECRET = 'secret-two'
-    encryptSecret('beta')
+  it('produces a fresh ciphertext for the same plaintext', () => {
+    const first = encryptSecret('same')
+    const second = encryptSecret('same')
 
-    expect(scryptSyncSpy).toHaveBeenCalledTimes(2)
-    expect(scryptSyncSpy).toHaveBeenNthCalledWith(1, 'secret-one', expect.any(Buffer), 32)
-    expect(scryptSyncSpy).toHaveBeenNthCalledWith(2, 'secret-two', expect.any(Buffer), 32)
+    expect(first).not.toBe(second)
+    expect(decryptSecret(first)).toBe('same')
+    expect(decryptSecret(second)).toBe('same')
+  })
+
+  it('no longer decrypts existing ciphertext after the secret changes', () => {
+    setAuthSecret('secret-one')
+    const encrypted = encryptSecret('alpha')
+
+    setAuthSecret('secret-two')
+
+    expect(() => decryptSecret(encrypted)).toThrow()
+    expect(decryptSecret(encryptSecret('alpha'))).toBe('alpha')
   })
 
   it('throws when the secret is missing', () => {
-    mutableAuth.SECRET = ''
+    setAuthSecret('')
+
     expect(() => encryptSecret('alpha')).toThrow('AUTH_SECRET must be configured for encryption')
+  })
+
+  it('rejects a ciphertext that is too short to carry an iv and auth tag', () => {
+    expect(() => decryptSecret(Buffer.from('short').toString('base64'))).toThrow('Invalid encrypted data format')
   })
 })

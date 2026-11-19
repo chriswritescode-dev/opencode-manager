@@ -3,7 +3,7 @@ import path from 'path'
 import { access, readFile, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
 import { AssistantSettingsPatchSchema } from '@opencode-manager/shared/schemas'
-import { parseJsonc } from '@opencode-manager/shared/utils'
+import { JsonObjectSchema, JsonValueSchema, parseJsonc } from '@opencode-manager/shared/utils'
 import type { OpenCodeApi, OpenCodePermissionRule } from '@opencode-manager/shared/opencode'
 import { validateOpenCodeConfig } from '@opencode-manager/shared/opencode/config-validation'
 import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildSessionsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace, convertAssistantOpenCodeConfigToV2 } from '../../src/services/assistant-mode'
@@ -12,8 +12,16 @@ import { ScheduleService } from '../../src/services/schedules'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { getRepoById } from '../../src/db/queries'
-import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { createOpenCodeApi } from '@opencode-manager/shared/opencode'
+import { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { selectRow } from '../../src/db/rows'
+import { readJson } from '../helpers/read-json'
+import { z } from 'zod'
+
+type ConfigEntries = Awaited<ReturnType<OpenCodeApi['config']['get']>>
 
 const ASSISTANT_PERMISSIONS: OpenCodePermissionRule[] = [
   { action: 'read', resource: '*', effect: 'allow' },
@@ -200,7 +208,7 @@ describe('buildSettingsSkill', () => {
     const skill = buildSettingsSkill()
     const allowedSection = skill.split('**Allowed Keys:**')[1]?.split('**DO NOT attempt to set:**')[0]
     if (allowedSection === undefined) throw new Error('Allowed Keys section is missing')
-    for (const key of Object.keys(AssistantSettingsPatchSchema.shape)) {
+    for (const key of AssistantSettingsPatchSchema.keyof().options) {
       expect(allowedSection).toContain(`\`${key}\``)
     }
   })
@@ -729,13 +737,15 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
   afterEach(async () => { await ws.cleanup() })
 
   function createConfigApi(
-    getEntries: (assistantDir: string) => unknown[],
+    getEntries: (assistantDir: string) => ConfigEntries,
   ): OpenCodeApi {
-    return {
-      config: {
-        get: async () => getEntries(ws.assistantDir),
+    return createStubOpenCodeClient({
+      api: {
+        config: {
+          get: async () => getEntries(ws.assistantDir),
+        },
       },
-    } as unknown as OpenCodeApi
+    }).api
   }
 
   const v1Config = `{
@@ -746,7 +756,7 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
 }
 `
 
-  const convertedPermissions = [
+  const convertedPermissions: OpenCodePermissionRule[] = [
     { action: 'read', resource: '*', effect: 'allow' },
     { action: 'shell', resource: '*', effect: 'ask' },
   ]
@@ -769,7 +779,7 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
     const converted = await convertAssistantOpenCodeConfigToV2(api)
 
     const raw = await readFile(opencodeJsonPath, 'utf8')
-    const config = parseJsonc<Record<string, unknown>>(raw)
+    const config = JsonObjectSchema.parse(parseJsonc(raw))
     expect(converted).toBe(true)
     expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
     expect(config.permissions).toEqual(convertedPermissions)
@@ -808,7 +818,7 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
     expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
 
     const raw = await readFile(opencodeJsonPath, 'utf8')
-    const config = parseJsonc<Record<string, unknown>>(raw)
+    const config = JsonObjectSchema.parse(parseJsonc(raw))
     expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
     expect(config.permissions).toEqual(convertedPermissions)
     expect(config.agent).toEqual({ reviewer: { mode: 'subagent', prompt: 'Reviewer' } })
@@ -892,7 +902,7 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
 
     expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(true)
 
-    const config = parseJsonc<Record<string, unknown>>(await readFile(opencodeJsonPath, 'utf8'))
+    const config = JsonObjectSchema.parse(parseJsonc(await readFile(opencodeJsonPath, 'utf8')))
     expect(config.agents).toEqual({ assistant: { mode: 'primary', system: 'Converted prompt' } })
     expect(config.permission).toEqual({ read: 'allow', shell: 'ask' })
     expect(config.agent).toBeUndefined()
@@ -927,11 +937,13 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     await writeFile(opencodeJsonPath, v1Config)
 
-    const api = {
-      config: {
-        get: async () => { throw new Error('unreachable') },
+    const api = createStubOpenCodeClient({
+      api: {
+        config: {
+          get: async () => { throw new Error('unreachable') },
+        },
       },
-    } as unknown as OpenCodeApi
+    }).api
 
     const converted = await convertAssistantOpenCodeConfigToV2(api)
 
@@ -942,11 +954,13 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
   it('does nothing for a v2 config', async () => {
     await ensureAssistantMode(mockRepo)
     let calls = 0
-    const api = {
-      config: {
-        get: async () => { calls += 1; return [] },
+    const api = createStubOpenCodeClient({
+      api: {
+        config: {
+          get: async () => { calls += 1; return [] },
+        },
       },
-    } as unknown as OpenCodeApi
+    }).api
 
     expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
     expect(calls).toBe(0)
@@ -972,15 +986,19 @@ describe('convertAssistantOpenCodeConfigToV2', () => {
     const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
     await writeFile(opencodeJsonPath, v1Config)
 
-    const api = createConfigApi((assistantDir) => [{
-      type: 'document',
-      path: path.join(assistantDir, 'opencode.json'),
-      info: {
-        default_agent: 'assistant',
-        permissions: [{ action: 'shell', resource: '*', effect: 'sometimes' }],
-        agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
-      },
-    }])
+    const stubFetch = Object.assign(
+      async () => new Response(JSON.stringify([{
+        type: 'document',
+        path: path.join(ws.assistantDir, 'opencode.json'),
+        info: {
+          default_agent: 'assistant',
+          permissions: [{ action: 'shell', resource: '*', effect: 'sometimes' }],
+          agents: { assistant: { mode: 'primary', system: 'Converted prompt' } },
+        },
+      }])),
+      { preconnect: fetch.preconnect },
+    )
+    const api = createOpenCodeApi({ baseUrl: 'http://opencode.stub', fetch: stubFetch })
 
     expect(await convertAssistantOpenCodeConfigToV2(api)).toBe(false)
     expect(await readFile(opencodeJsonPath, 'utf8')).toBe(v1Config)
@@ -1002,7 +1020,7 @@ describe('assistant-mode end-to-end', () => {
 
     const token = getOrCreateInternalToken(db)
 
-    const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }), listWorktrees: () => [] } as unknown as ScheduleWorktreeManager
+    const stubWorktreeManager = new ScheduleWorktreeManager(createGitAuthService(), db)
     const scheduleService = new ScheduleService(db, createOpenCodeClient(), stubWorktreeManager)
     const app = new Hono()
     app.route('/api/internal', createInternalTestApp(db, { scheduleService }))
@@ -1014,7 +1032,7 @@ describe('assistant-mode end-to-end', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(authed.status).toBe(200)
-    const body = await authed.json() as { jobs: unknown[] }
+    const body = await readJson(authed, z.object({ jobs: z.array(JsonValueSchema) }))
     expect(Array.isArray(body.jobs)).toBe(true)
   })
 })
@@ -1108,8 +1126,8 @@ describe('installAssistantWorkspace', () => {
     const assistantRepo = getRepoById(db, 0)
     expect(assistantRepo?.localPath).toBe('assistant')
 
-    const migratedJob = db.prepare('SELECT repo_id FROM schedule_jobs WHERE name = ?').get('Assistant job') as { repo_id: number }
-    expect(migratedJob.repo_id).toBe(0)
+    const migratedJob = selectRow(db, z.object({ repo_id: z.number() }), 'SELECT repo_id FROM schedule_jobs WHERE name = ?', 'Assistant job')
+    expect(migratedJob?.repo_id).toBe(0)
   })
 
   it('is idempotent — second call does not recreate files and content is unchanged', async () => {

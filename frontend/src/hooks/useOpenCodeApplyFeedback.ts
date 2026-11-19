@@ -10,11 +10,6 @@ interface OpenCodeApplyFeedbackOptions {
   restartRequired?: boolean
 }
 
-/**
- * Reports the outcome of an OpenCode configuration write. An applied change is
- * announced with its own message, while a failed in-place reload points the user
- * at the restart banner; both paths refresh the caches backed by the running server.
- */
 export function useOpenCodeApplyFeedback() {
   const queryClient = useQueryClient()
 

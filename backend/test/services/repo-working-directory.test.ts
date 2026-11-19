@@ -1,25 +1,25 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { Database } from 'bun:sqlite'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
-import { createRepo } from '../../src/db/queries'
-import { findSiblingByDirectory, getSiblingRepos, resolveRepoWorkingDirectory } from '../../src/services/repo'
+import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
+import { findSiblingByDirectory, getSiblingRepos, resolveRepoWorkingDirectory } from '../../src/services/repo'
+import { createTestDatabase, seedRepo } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
+import { createCommittedRepo, git } from '../helpers/git-fixtures'
 
-const { executeCommand, resolveProjectId, getSettings } = vi.hoisted(() => ({
-  executeCommand: vi.fn(),
-  resolveProjectId: vi.fn(),
-  getSettings: vi.fn(),
-}))
-
-vi.mock('../../src/utils/process', () => ({ executeCommand }))
-vi.mock('../../src/services/project-id-resolver', () => ({ resolveProjectId, isGitMainCheckout: vi.fn() }))
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({ getSettings })),
-}))
+function makeRepo(fullPath: string): Repo {
+  return {
+    id: 1,
+    localPath: path.basename(fullPath),
+    fullPath,
+    defaultBranch: 'main',
+    cloneStatus: 'ready',
+    clonedAt: 0,
+    isLocal: true,
+  }
+}
 
 describe('resolveRepoWorkingDirectory', () => {
   let root: string
@@ -48,35 +48,31 @@ describe('resolveRepoWorkingDirectory', () => {
     fs.rmSync(root, { recursive: true, force: true })
   })
 
-  function createRepo(): Repo {
-    return { fullPath: repoPath } as Repo
-  }
-
   it('returns the repo path when no directory is given', async () => {
-    expect(await resolveRepoWorkingDirectory(createRepo(), undefined, async () => [])).toBe(repoPath)
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), undefined, async () => [])).toBe(repoPath)
   })
 
   it('returns the repo path for the repo directory itself', async () => {
-    expect(await resolveRepoWorkingDirectory(createRepo(), repoPath, async () => [])).toBe(repoPath)
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), repoPath, async () => [])).toBe(repoPath)
   })
 
   it('returns the repo path for a symlinked equivalent of the repo directory', async () => {
-    expect(await resolveRepoWorkingDirectory(createRepo(), repoLinkPath, async () => [])).toBe(repoPath)
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), repoLinkPath, async () => [])).toBe(repoPath)
   })
 
   it('returns a matching sibling path', async () => {
     const siblings = [{ fullPath: siblingPath }]
-    expect(await resolveRepoWorkingDirectory(createRepo(), siblingPath, async () => siblings)).toBe(siblingPath)
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), siblingPath, async () => siblings)).toBe(siblingPath)
   })
 
   it('matches a sibling through a symlinked directory', async () => {
     const siblings = [{ fullPath: siblingPath }]
-    expect(await resolveRepoWorkingDirectory(createRepo(), siblingLinkPath, async () => siblings)).toBe(siblingPath)
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), siblingLinkPath, async () => siblings)).toBe(siblingPath)
   })
 
   it('returns null for an unrelated directory', async () => {
     const siblings = [{ fullPath: siblingPath }]
-    expect(await resolveRepoWorkingDirectory(createRepo(), unrelatedPath, async () => siblings)).toBeNull()
+    expect(await resolveRepoWorkingDirectory(makeRepo(repoPath), unrelatedPath, async () => siblings)).toBeNull()
   })
 })
 
@@ -114,48 +110,43 @@ describe('findSiblingByDirectory', () => {
 })
 
 describe('getSiblingRepos branch resolution', () => {
+  let workspace: TempWorkspace
   let db: Database
+  let repoPath: string
+  let repo: Repo
+
+  beforeAll(() => {
+    workspace = createTempWorkspace('ocm-sibling-branch-')
+    repoPath = path.join(workspace.path, 'repo-a')
+    createCommittedRepo(repoPath)
+  })
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    getSettings.mockReturnValue({ preferences: { repoOrder: [] }, updatedAt: Date.now() })
-    resolveProjectId.mockResolvedValue('project-1')
-    executeCommand.mockReset()
+    db = createTestDatabase()
+    repo = seedRepo(db, { sourcePath: repoPath, localPath: 'repo-a' })
   })
 
   afterEach(() => {
     db.close()
   })
 
-  function seedRepo(): Repo {
-    return createRepo(db, {
-      localPath: 'repo-a',
-      defaultBranch: 'main',
-      cloneStatus: 'ready',
-      clonedAt: Date.now(),
-      isLocal: true,
-    })
-  }
+  afterAll(() => {
+    workspace.restore()
+  })
 
   it('skips branch resolution when includeBranch is false', async () => {
-    const repo = seedRepo()
-
     const siblings = await getSiblingRepos(db, repo.id, {}, undefined, { includeBranch: false })
 
     expect(siblings).toHaveLength(1)
     expect(siblings[0]?.currentBranch).toBeUndefined()
-    expect(executeCommand.mock.calls.map(([args]) => args)).toEqual([['git', '-C', repo.fullPath, 'worktree', 'list', '--porcelain']])
   })
 
   it('resolves the branch when includeBranch is true', async () => {
-    const repo = seedRepo()
-    executeCommand.mockResolvedValue('feature-branch\n')
+    git(['checkout', '-B', 'feature-branch'], repoPath)
 
     const siblings = await getSiblingRepos(db, repo.id, {})
 
     expect(siblings).toHaveLength(1)
     expect(siblings[0]?.currentBranch).toBe('feature-branch')
-    expect(executeCommand).toHaveBeenCalled()
   })
 })

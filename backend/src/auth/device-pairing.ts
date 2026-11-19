@@ -53,7 +53,6 @@ export interface DevicePairingOptions {
   onDeviceRevoked?: (sessionId: string) => void
 }
 
-/** Adds pairing code, paired device, and revoke endpoints to Better Auth. */
 export function devicePairing(options: DevicePairingOptions = {}) {
   const { onDeviceRevoked } = options
   return {

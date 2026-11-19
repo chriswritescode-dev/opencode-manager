@@ -1,7 +1,10 @@
+import { z } from 'zod'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GitBranch, Layers, Plus } from 'lucide-react'
 import type { RepoSibling } from '@/api/repos'
 import type { WorktreeTabValue } from '@/hooks/useWorktreeTab'
+
+const worktreeTabValueSchema = z.enum(['repo', 'workspaces'])
 
 interface WorktreeTabsProps {
   workspaces: RepoSibling[]
@@ -25,7 +28,10 @@ export function WorktreeTabs({
 
   return (
     <div className="flex-shrink-0">
-      <Tabs value={value} onValueChange={(next) => onValueChange(next as WorktreeTabValue)} className="min-w-0">
+      <Tabs value={value} onValueChange={(next) => {
+        const parsed = worktreeTabValueSchema.safeParse(next)
+        if (parsed.success) onValueChange(parsed.data)
+      }} className="min-w-0">
         <TabsList className="flex h-auto w-full items-end justify-start gap-1 rounded-none border-b border-border bg-transparent p-0 px-4 pt-2">
           <TabsTrigger value="repo" className={tabClassName}>
             <GitBranch className="h-3 w-3 shrink-0" />

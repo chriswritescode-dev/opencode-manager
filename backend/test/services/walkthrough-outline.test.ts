@@ -24,6 +24,10 @@ function change(file: string, patch: string, status: FileDiffInfo['status'] = 'm
   return { file, patch, additions: 1, deletions: 1, status }
 }
 
+function sizedChange(file: string, patch: string, additions: number, deletions: number): FileDiffInfo {
+  return { file, patch, additions, deletions, status: 'modified' }
+}
+
 function hunkPatch(line: number): string {
   return `@@ -${line},2 +${line},2 @@\n-const a${line} = 1;\n+const a${line} = 2;`
 }
@@ -513,9 +517,7 @@ describe('formatWalkthroughFileChanges', () => {
 
   it('returns a counts-only line for an oversized mechanical file', () => {
     const oversized = Array.from({ length: 40 }, (_, index) => bigHunk(index)).join('\n')
-    const changes = [
-      { file: 'pnpm-lock.yaml', patch: oversized, additions: 1200, deletions: 800, status: 'modified' },
-    ] as FileDiffInfo[]
+    const changes = [sizedChange('pnpm-lock.yaml', oversized, 1200, 800)]
     const text = formatWalkthroughFileChanges(changes, 'pnpm-lock.yaml')!
 
     expect(text).toBe('pnpm-lock.yaml (modified, +1200/-800)')

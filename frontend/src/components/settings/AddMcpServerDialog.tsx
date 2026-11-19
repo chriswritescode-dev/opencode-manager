@@ -27,9 +27,11 @@ interface KeyValueEntry {
 
 function toRecord(entries: KeyValueEntry[]): Record<string, string> | undefined {
   const record = Object.fromEntries(
-    entries
-      .filter((entry) => entry.key.trim() && entry.value.trim())
-      .map((entry) => [entry.key.trim(), entry.value.trim()]),
+    entries.flatMap((entry): [string, string][] => {
+      const key = entry.key.trim()
+      const value = entry.value.trim()
+      return key && value ? [[key, value]] : []
+    }),
   )
   return Object.keys(record).length > 0 ? record : undefined
 }
@@ -118,10 +120,6 @@ export function AddMcpServerDialog({ open, onOpenChange, onSubmit, showConnectTo
 
   const buildMcpServerConfig = (): McpServerConfig => {
     const timeoutConfig = buildTimeout()
-    const shared = {
-      disabled: !enabled,
-      ...(timeoutConfig ? { timeout: timeoutConfig } : {}),
-    }
 
     if (serverType === 'local') {
       const commandArray = command.split(' ').filter((arg) => arg.trim())
@@ -129,13 +127,12 @@ export function AddMcpServerDialog({ open, onOpenChange, onSubmit, showConnectTo
         throw new Error('Command is required for local MCP servers')
       }
 
-      const environmentVariables = toRecord(environment)
-
       return {
         type: 'local',
         command: commandArray,
-        ...(environmentVariables ? { environment: environmentVariables } : {}),
-        ...shared,
+        environment: toRecord(environment),
+        disabled: !enabled,
+        timeout: timeoutConfig,
       }
     }
 
@@ -143,21 +140,20 @@ export function AddMcpServerDialog({ open, onOpenChange, onSubmit, showConnectTo
       throw new Error('URL is required for remote MCP servers')
     }
 
-    const requestHeaders = toRecord(headers)
-
     return {
       type: 'remote',
       url: url.trim(),
-      ...(requestHeaders ? { headers: requestHeaders } : {}),
+      headers: toRecord(headers),
       oauth: oauthEnabled
         ? {
-            ...(oauthClientId.trim() ? { client_id: oauthClientId.trim() } : {}),
-            ...(oauthClientSecret.trim() ? { client_secret: oauthClientSecret.trim() } : {}),
-            ...(oauthScope.trim() ? { scope: oauthScope.trim() } : {}),
+            client_id: oauthClientId.trim() || undefined,
+            client_secret: oauthClientSecret.trim() || undefined,
+            scope: oauthScope.trim() || undefined,
             redirect_uri: mcpOAuthRedirectUri(window.location.origin),
           }
         : false,
-      ...shared,
+      disabled: !enabled,
+      timeout: timeoutConfig,
     }
   }
 

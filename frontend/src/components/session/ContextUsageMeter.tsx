@@ -7,10 +7,6 @@ interface ContextUsageMeterProps {
   className?: string
 }
 
-/**
- * Thin context-window fill bar. Its accessible label lives on the model pill, so the bar itself is hidden
- * from assistive technology.
- */
 export function ContextUsageMeter({ percentage, className }: ContextUsageMeterProps) {
   return (
     <Progress

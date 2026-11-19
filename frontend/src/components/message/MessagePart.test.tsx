@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { screen, fireEvent, within } from '@testing-library/react'
+import type { JsonObject } from '@opencode-manager/shared/utils'
+import type { UserPreferences } from '@/api/types/settings'
 import { MessagePart } from './MessagePart'
 import { getFileApiUrl } from '@/api/files'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
 import { promptSequence } from '@/test/fixtures/session-projection'
 import type {
@@ -13,45 +14,26 @@ import type {
   SessionMessageAssistantTool,
 } from '@opencode-manager/shared/opencode'
 
-const mocks = vi.hoisted(() => ({
-  useSettings: vi.fn(),
-  useMobile: vi.fn(),
-}))
+let preferencesFixture: Partial<UserPreferences> = {}
 
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: mocks.useSettings,
-}))
-
-vi.mock('@/hooks/useMobile', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useMobile')>()),
-  useMobile: mocks.useMobile,
-}))
-
-interface MockSettingsReturn {
-  preferences: {
-    simpleChatMode: boolean
-    showReasoning: boolean
-    expandToolCalls: boolean
-    expandDiffs: boolean
-  } | undefined
+const setupSettings = (preferences: Partial<UserPreferences>) => {
+  preferencesFixture = preferences
 }
 
-const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
-  mocks.useSettings.mockReturnValue({
-    preferences,
-    isLoading: false,
-    updateSettings: vi.fn(),
-    isUpdating: false,
+const renderPart = (ui: React.ReactElement, options: { serverId?: string } = {}) => {
+  const preferences = makeUserPreferences(preferencesFixture)
+  const queryClient = createTestQueryClient()
+  queryClient.setQueryData(['settings', 'default'], makeSettingsResponse({ preferences }))
+  return renderWithProviders(ui, {
+    auth: false,
+    theme: false,
+    toaster: false,
+    queryClient,
+    fetchRoutes: [
+      { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse({ preferences }) }) },
+    ],
+    ...options,
   })
-}
-
-const renderWithProviders = (ui: React.ReactElement) => {
-  const queryClient = new QueryClient()
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
-    </QueryClientProvider>,
-  )
 }
 
 const textPart = (text: string): SessionMessageAssistantText => ({ type: 'text', text })
@@ -71,9 +53,9 @@ const toolPart = (
 })
 
 const completedShell = (
-  input: Record<string, unknown>,
+  input: JsonObject,
   content: string,
-  metadata: Record<string, unknown> = {},
+  metadata: JsonObject = {},
 ): SessionMessageAssistantTool =>
   toolPart('shell', {
     status: 'completed',
@@ -84,8 +66,6 @@ const completedShell = (
 
 describe('MessagePart', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useMobile.mockReturnValue(false)
     setupSettings({
       simpleChatMode: false,
       showReasoning: false,
@@ -95,14 +75,14 @@ describe('MessagePart', () => {
   })
 
   it('renders a text part', () => {
-    renderWithProviders(<MessagePart part={textPart('Hello, this is a text message')} />)
+    renderPart(<MessagePart part={textPart('Hello, this is a text message')} />)
 
     expect(screen.getByText('Hello, this is a text message')).toBeInTheDocument()
   })
 
   it('opens local markdown links in a text part through onFileClick and external links in a new tab', () => {
     const onFileClick = vi.fn()
-    renderWithProviders(
+    renderPart(
       <MessagePart
         part={textPart('[recap](recaps/daily-overview.html)\n\n[site](https://example.com)')}
         onFileClick={onFileClick}
@@ -118,7 +98,7 @@ describe('MessagePart', () => {
   })
 
   it('strips unsafe raw HTML from a text part and keeps safe HTML', () => {
-    const { container } = renderWithProviders(
+    const { container } = renderPart(
       <MessagePart
         part={textPart(
           'Reply\n\n<iframe srcdoc="&lt;script&gt;parent.document.documentElement.dataset.chatProbe = 1&lt;/script&gt;"></iframe>\n\n<details><summary>Notes</summary>Body</details>',
@@ -133,14 +113,14 @@ describe('MessagePart', () => {
   })
 
   it('renders null for an empty text part', () => {
-    const { container } = renderWithProviders(<MessagePart part={textPart('   ')} />)
+    const { container } = renderPart(<MessagePart part={textPart('   ')} />)
 
     expect(container.firstChild).toBeNull()
   })
 
   describe('markdown images', () => {
     it('loads a relative image through the raw file API resolved against the directory', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart part={textPart('![shot](docs/shot.png)')} directory="/workspace/repos/app" />,
       )
 
@@ -151,7 +131,7 @@ describe('MessagePart', () => {
     })
 
     it('loads an absolute image through the raw file API without a directory', () => {
-      renderWithProviders(<MessagePart part={textPart('![a](/workspace/x/a.png)')} />)
+      renderPart(<MessagePart part={textPart('![a](/workspace/x/a.png)')} />)
 
       expect(screen.getByAltText('a')).toHaveAttribute(
         'src',
@@ -160,7 +140,7 @@ describe('MessagePart', () => {
     })
 
     it('keeps data image sources from markdown and raw HTML', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={textPart('![d](data:image/png;base64,aGVsbG8=)\n\n<img src="data:image/png;base64,aGVsbG8=" alt="raw">')}
         />,
@@ -171,13 +151,13 @@ describe('MessagePart', () => {
     })
 
     it('keeps an external image source', () => {
-      renderWithProviders(<MessagePart part={textPart('![h](https://example.com/a.png)')} />)
+      renderPart(<MessagePart part={textPart('![h](https://example.com/a.png)')} />)
 
       expect(screen.getByAltText('h')).toHaveAttribute('src', 'https://example.com/a.png')
     })
 
     it('does not render a non-image data source', () => {
-      const { container } = renderWithProviders(
+      const { container } = renderPart(
         <MessagePart part={textPart('![x](data:text/html,hello)')} />,
       )
 
@@ -185,7 +165,7 @@ describe('MessagePart', () => {
     })
 
     it('renders a linked image without a nested expand button', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart part={textPart('[![logo](https://example.com/a.png)](https://example.com)')} />,
       )
 
@@ -195,7 +175,7 @@ describe('MessagePart', () => {
     })
 
     it('renders an expand button for an unlinked image', () => {
-      renderWithProviders(<MessagePart part={textPart('![logo](https://example.com/a.png)')} />)
+      renderPart(<MessagePart part={textPart('![logo](https://example.com/a.png)')} />)
 
       expect(screen.getByRole('button', { name: 'Expand image: logo' })).toBeInTheDocument()
     })
@@ -210,7 +190,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      const { container } = renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+      const { container } = renderPart(<MessagePart part={reasoningPart('This is the reasoning text')} />)
 
       expect(container.firstChild).toBeNull()
     })
@@ -223,7 +203,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+      renderPart(<MessagePart part={reasoningPart('This is the reasoning text')} />)
 
       expect(screen.getByText('Reasoning')).toBeInTheDocument()
       expect(screen.getByText('This is the reasoning text')).toBeInTheDocument()
@@ -237,7 +217,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      const { container } = renderWithProviders(<MessagePart part={reasoningPart('This is the reasoning text')} />)
+      const { container } = renderPart(<MessagePart part={reasoningPart('This is the reasoning text')} />)
 
       expect(container.firstChild).toBeNull()
     })
@@ -245,7 +225,7 @@ describe('MessagePart', () => {
 
   describe('tool parts', () => {
     it('renders a completed shell tool with its output', () => {
-      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'clean tree')} />)
+      renderPart(<MessagePart part={completedShell({ command: 'git status' }, 'clean tree')} />)
 
       const preview = screen.getByRole('button', { name: 'Show shell details' })
       expect(screen.getByText('git status')).toBeInTheDocument()
@@ -257,7 +237,7 @@ describe('MessagePart', () => {
     })
 
     it('renders a running shell tool with its command', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('shell', { status: 'running', input: { command: 'bun test' }, metadata: {} })}
         />,
@@ -267,7 +247,7 @@ describe('MessagePart', () => {
     })
 
     it('renders a streaming tool with a preparing state', () => {
-      renderWithProviders(<MessagePart part={toolPart('shell', { status: 'streaming', input: '' })} />)
+      renderPart(<MessagePart part={toolPart('shell', { status: 'streaming', input: '' })} />)
 
       fireEvent.click(screen.getByRole('button', { name: 'Show shell details' }))
 
@@ -275,7 +255,7 @@ describe('MessagePart', () => {
     })
 
     it('renders an error tool with the error message', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('shell', {
             status: 'error',
@@ -299,7 +279,7 @@ describe('MessagePart', () => {
 
       expect(projected).toBeDefined()
 
-      renderWithProviders(<MessagePart part={projected!} />)
+      renderPart(<MessagePart part={projected!} />)
 
       const preview = screen.getByRole('button', { name: 'Show shell details' })
       expect(screen.getByText('bun test')).toBeInTheDocument()
@@ -317,7 +297,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      const { container } = renderWithProviders(
+      const { container } = renderPart(
         <MessagePart part={completedShell({ command: 'git status' }, 'clean')} />,
       )
 
@@ -333,7 +313,7 @@ describe('MessagePart', () => {
       })
 
       const onChildSessionClick = vi.fn()
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('subagent', {
             status: 'completed',
@@ -360,7 +340,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('ocm', {
             status: 'completed',
@@ -385,7 +365,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('ocm', {
             status: 'completed',
@@ -409,7 +389,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('ocm', {
             status: 'completed',
@@ -435,14 +415,14 @@ describe('MessagePart', () => {
       "'/usr/local/bin/msb' exec ocm-workspace --no-tty -q -u '1001:1001' -w '/workspace/repos/ai-test' --timeout 600s -- sh -c 'git status'"
 
     it('shows the sandbox badge for a completed shell call the sandbox plugin marked', () => {
-      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'ok', { sandbox: true })} />)
+      renderPart(<MessagePart part={completedShell({ command: 'git status' }, 'ok', { sandbox: true })} />)
 
       expect(screen.getByText('sandbox')).toBeInTheDocument()
       expect(screen.getByText('git status')).toBeInTheDocument()
     })
 
     it('shows the sandbox badge and unwrapped command for a legacy recorded sandbox call', () => {
-      renderWithProviders(<MessagePart part={completedShell({ command: wrapped }, 'ok')} />)
+      renderPart(<MessagePart part={completedShell({ command: wrapped }, 'ok')} />)
 
       expect(screen.getByText('sandbox')).toBeInTheDocument()
       expect(screen.getByText('git status')).toBeInTheDocument()
@@ -450,7 +430,7 @@ describe('MessagePart', () => {
     })
 
     it('omits the sandbox badge for a host shell call', () => {
-      renderWithProviders(<MessagePart part={completedShell({ command: 'git status' }, 'ok')} />)
+      renderPart(<MessagePart part={completedShell({ command: 'git status' }, 'ok')} />)
 
       expect(screen.queryByText('sandbox')).toBeNull()
       expect(screen.getByText('git status')).toBeInTheDocument()
@@ -464,7 +444,7 @@ describe('MessagePart', () => {
 
     it('renders small output in full without omission marker', () => {
       const output = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n')
-      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
+      renderPart(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -483,7 +463,7 @@ describe('MessagePart', () => {
       const startMarker = 'marker-start-FIRST'
       const endContent = `line-${lines.length - 1}`
 
-      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
+      renderPart(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -507,7 +487,7 @@ describe('MessagePart', () => {
       }
       const output = lines.join('\n')
 
-      renderWithProviders(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
+      renderPart(<MessagePart part={completedShell({ command: 'echo big' }, output)} />)
 
       expandTool()
 
@@ -522,23 +502,17 @@ describe('MessagePart', () => {
   describe('file tools', () => {
     it('renders a linked-server file name as plain text', () => {
       const onFileClick = vi.fn()
-      const queryClient = new QueryClient()
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <OpenCodeServerProvider serverId="srv_kitchen">
-              <MessagePart
-                part={toolPart('read', {
-                  status: 'completed',
-                  input: { path: '/srv/app/src/a.ts' },
-                  content: [{ type: 'text', text: 'file contents' }],
-                  metadata: {},
-                })}
-                onFileClick={onFileClick}
-              />
-            </OpenCodeServerProvider>
-          </MemoryRouter>
-        </QueryClientProvider>,
+      renderPart(
+        <MessagePart
+          part={toolPart('read', {
+            status: 'completed',
+            input: { path: '/srv/app/src/a.ts' },
+            content: [{ type: 'text', text: 'file contents' }],
+            metadata: {},
+          })}
+          onFileClick={onFileClick}
+        />,
+        { serverId: 'srv_kitchen' },
       )
 
       const fileName = screen.getByText('/srv/app/src/a.ts')
@@ -551,7 +525,7 @@ describe('MessagePart', () => {
     })
 
     it('renders an edit tool diff', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('edit', {
             status: 'completed',
@@ -591,7 +565,7 @@ describe('MessagePart', () => {
 
       const changedLines = Array.from({ length: 20 }, (_, index) => `+line ${index + 1}`).join('\n')
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('edit', {
             status: 'completed',
@@ -634,7 +608,7 @@ describe('MessagePart', () => {
     })
 
     it('renders a write tool with its file path', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('write', {
             status: 'completed',
@@ -656,7 +630,7 @@ describe('MessagePart', () => {
         expandDiffs: true,
       })
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('write', {
             status: 'completed',
@@ -678,7 +652,7 @@ describe('MessagePart', () => {
         expandDiffs: false,
       })
 
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('write', {
             status: 'completed',
@@ -695,7 +669,7 @@ describe('MessagePart', () => {
 
     it('makes legacy filePath read, write, and filediff edit calls clickable', () => {
       const onFileClick = vi.fn()
-      const legacy = (name: string, metadata: Record<string, unknown>) =>
+      const legacy = (name: string, metadata: JsonObject) =>
         toolPart(name, {
           status: 'completed',
           input: { filePath: `/test/${name}.html` },
@@ -703,7 +677,7 @@ describe('MessagePart', () => {
           metadata,
         })
 
-      renderWithProviders(
+      renderPart(
         <>
           <MessagePart part={legacy('read', {})} onFileClick={onFileClick} />
           <MessagePart part={legacy('write', {})} onFileClick={onFileClick} />
@@ -724,7 +698,7 @@ describe('MessagePart', () => {
 
     it('falls back to filePath when path is empty', () => {
       const onFileClick = vi.fn()
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('read', {
             status: 'completed',
@@ -750,7 +724,7 @@ describe('MessagePart', () => {
       })
 
       const onFileClick = vi.fn()
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('patch', {
             status: 'completed',
@@ -784,7 +758,7 @@ describe('MessagePart', () => {
     })
 
     it('syntax highlights added rows with the themed diff tints', () => {
-      const { container } = renderWithProviders(
+      const { container } = renderPart(
         <MessagePart
           part={toolPart('edit', {
             status: 'completed',
@@ -811,7 +785,7 @@ describe('MessagePart', () => {
     })
 
     it('falls back to the generic tool output when a patch has no diff metadata', () => {
-      renderWithProviders(
+      renderPart(
         <MessagePart
           part={toolPart('patch', {
             status: 'completed',

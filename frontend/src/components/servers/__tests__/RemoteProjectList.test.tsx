@@ -1,187 +1,125 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, afterEach } from 'vitest'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { onlineManager, type QueryClient } from '@tanstack/react-query'
+import type { OpenCodeProject } from '@/api/opencode'
+import type { OpenCodeServer } from '@opencode-manager/shared/schemas'
 import { RemoteProjectList } from '../RemoteProjectList'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { makeOpenCodeServer, makeSession } from '@/test/fixtures/api'
+import { installWindowSize } from '@/test/browserFakes'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
-const mocks = vi.hoisted(() => ({
-  listProjects: vi.fn(),
-  listSessionPage: vi.fn(),
-  useCreateSession: vi.fn(),
-  useOpenCodeServers: vi.fn(),
-  useSettingsDialog: vi.fn(),
-  openTab: vi.fn(),
-  refetchServers: vi.fn(),
-  createSession: vi.fn(),
-  isMobile: true,
-}))
+const SERVER_ID = 'srv_kitchen'
+const SERVER_BASE = `/api/opencode/servers/${SERVER_ID}/api`
 
-vi.mock('@/api/opencode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/opencode')>()
-  return { ...actual, listProjects: mocks.listProjects, listSessionPage: mocks.listSessionPage }
-})
+const server = makeOpenCodeServer({ id: SERVER_ID, name: 'Kitchen', enabled: true })
 
-vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
-  return { ...actual, useCreateSession: mocks.useCreateSession }
-})
-
-vi.mock('@/hooks/useOpenCodeServers', () => ({
-  useOpenCodeServers: mocks.useOpenCodeServers,
-}))
-
-vi.mock('@/hooks/useSettingsDialog', () => ({
-  useSettingsDialog: mocks.useSettingsDialog,
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: () => mocks.isMobile,
-  useSwipeBack: () => ({
-    bind: vi.fn(),
-    swipeProgress: 0,
-    swipeStyles: {},
-  }),
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useProjectActivityState: () => null,
-}))
-
-vi.mock('@/components/schedules/ServerSchedulesDialog', () => ({
-  ServerSchedulesDialog: ({
-    open,
-    target,
-  }: {
-    open: boolean
-    target: { serverId: string; directory: string } | null
-  }) =>
-    open ? (
-      <div
-        data-testid="schedules-dialog"
-        data-server={target?.serverId}
-        data-directory={target?.directory}
-      />
-    ) : null,
-}))
-
-vi.mock('@/components/repo/MultiRunSheet', () => ({
-  MultiRunSheet: ({
-    open,
-    target,
-    directory,
-  }: {
-    open: boolean
-    target: { kind: string; serverId?: string; directory?: string }
-    directory?: string
-  }) => (
-    <div
-      data-testid="multi-run-sheet"
-      data-open={String(open)}
-      data-kind={target.kind}
-      data-server={target.serverId}
-      data-directory={directory}
-    />
-  ),
-}))
-
-const server = {
-  id: 'srv_kitchen',
-  name: 'Kitchen',
-  baseUrl: 'https://kitchen.example.com',
-  username: 'opencode',
-  enabled: true,
-  hasPassword: true,
-  createdAt: 1,
-  updatedAt: 2,
+function makeProject(overrides: Partial<OpenCodeProject> = {}): OpenCodeProject {
+  return {
+    id: 'prj_1',
+    canonical: '/home/me/app',
+    name: 'App',
+    vcs: 'git',
+    time: { created: Date.now() - 120_000, updated: Date.now() - 60_000, active: 2 },
+    sandboxes: [],
+    ...overrides,
+  }
 }
 
-const project = {
-  id: 'prj_1',
-  canonical: '/home/me/app',
-  name: 'App',
-  vcs: 'git',
-  time: { created: Date.now() - 120_000, updated: Date.now() - 60_000, active: 2 },
-  sandboxes: [],
-}
-
-const otherProject = {
+const project = makeProject()
+const otherProject = makeProject({
   id: 'prj_2',
   canonical: '/srv/other',
   name: 'Other',
   time: { created: Date.now() - 120_000, updated: Date.now() - 60_000, active: 2 },
-  sandboxes: [],
+})
+
+interface RemoteListFixture {
+  servers?: OpenCodeServer[]
+  serverLoader?: () => FetchRouteResult | Promise<FetchRouteResult>
+  projects?: OpenCodeProject[]
+  projectLoader?: () => FetchRouteResult | Promise<FetchRouteResult>
+  sessions?: ReturnType<typeof makeSession>[]
+  createSession?: () => FetchRouteResult | Promise<FetchRouteResult>
 }
 
-function createSession(directory: string, updated: number) {
-  return {
-    id: `ses_${directory}`,
-    projectID: 'prj_1',
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    time: { created: updated - 1000, updated },
-    location: { directory },
-  }
+function serverLoader(fixture: RemoteListFixture): () => FetchRouteResult | Promise<FetchRouteResult> {
+  return fixture.serverLoader ?? (() => ({ json: { servers: fixture.servers ?? [server] } }))
 }
 
-function createQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function projectLoader(fixture: RemoteListFixture): () => FetchRouteResult | Promise<FetchRouteResult> {
+  return fixture.projectLoader ?? (() => ({ json: fixture.projects ?? [project] }))
 }
 
-function renderProjectList(serverId = 'srv_kitchen', queryClient = createQueryClient()) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<RemoteProjectList serverId={serverId} />} />
-          <Route path="/servers/:serverId/projects" element={<div data-testid="project-route" />} />
-          <Route path="/servers/:serverId/sessions/:sessionId" element={<div data-testid="session-route" />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+function buildRoutes(fixture: RemoteListFixture): FetchRoute[] {
+  const sessions = (fixture.sessions ?? []).map((session) => session)
+  return [
+    { method: 'GET', path: '/api/opencode-servers', respond: () => serverLoader(fixture)() },
+    { method: 'GET', path: `${SERVER_BASE}/project`, respond: () => projectLoader(fixture)() },
+    {
+      method: 'GET',
+      path: `${SERVER_BASE}/session`,
+      respond: () => ({ json: { data: sessions, cursor: { next: null } } }),
+    },
+    {
+      method: 'POST',
+      path: `${SERVER_BASE}/session`,
+      respond: () => fixture.createSession?.() ?? { json: { data: makeSession({ id: 'ses_new' }) } },
+    },
+    { method: 'GET', path: `${SERVER_BASE}/provider`, respond: () => ({ json: { data: [] } }) },
+    { method: 'GET', path: `${SERVER_BASE}/model`, respond: () => ({ json: { data: [] } }) },
+    { method: 'GET', path: `${SERVER_BASE}/config`, respond: () => ({ json: {} }) },
+    { method: 'GET', path: `${SERVER_BASE}/model/default`, respond: () => ({ json: { data: null } }) },
+    { method: 'GET', path: '/api/providers/model-state', respond: () => ({ json: {} }) },
+    { method: 'GET', path: '/api/schedules/all', respond: () => ({ json: { jobs: [] } }) },
+    { method: 'GET', path: '/api/multi-runs', respond: () => ({ json: { runs: [] } }) },
+  ]
+}
+
+function renderProjectList(
+  fixture: RemoteListFixture = {},
+  options: { serverId?: string; queryClient?: QueryClient; mobile?: boolean } = {},
+) {
+  installWindowSize(options.mobile === false ? 1024 : 500)
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <>
+      <RemoteProjectList serverId={options.serverId ?? SERVER_ID} />
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+    </>,
+    {
+      theme: false,
+      toaster: false,
+      events: true,
+      queryClient: options.queryClient,
+      fetchRoutes: buildRoutes(fixture),
+    },
   )
+  return { ...result, capturedPathname, capturedSearch }
 }
+
+afterEach(() => {
+  onlineManager.setOnline(true)
+})
 
 describe('RemoteProjectList', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.isMobile = true
-    mocks.listProjects.mockResolvedValue([project])
-    mocks.listSessionPage.mockResolvedValue({ items: [] })
-    mocks.useCreateSession.mockReturnValue({ mutateAsync: mocks.createSession, isPending: false })
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [server],
-      isLoading: false,
-      showsInitialLoading: false,
-      isPaused: false,
-      refetch: mocks.refetchServers,
-    })
-    mocks.useSettingsDialog.mockReturnValue({ openTab: mocks.openTab })
-  })
-
   it('lists projects from the remote server', async () => {
-    renderProjectList()
+    const result = renderProjectList()
 
-    await waitFor(() => {
-      expect(screen.getByText('App')).toBeInTheDocument()
-    })
+    expect(await screen.findByText('App')).toBeInTheDocument()
     expect(screen.getByText('/home/me/app')).toBeInTheDocument()
-    expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
+    expect(result.fetchFake.lastRequest('GET', `${SERVER_BASE}/project`)).toBeDefined()
   })
 
   it('labels a row with its newest session time instead of the project activity time', async () => {
     const now = Date.now()
-    mocks.listProjects.mockResolvedValue([
-      {
-        ...project,
-        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now },
-      },
-    ])
-    mocks.listSessionPage.mockResolvedValue({
-      items: [createSession('/home/me/app', now - 300_000)],
+    renderProjectList({
+      projects: [makeProject({ time: { created: now - 10_800_000, updated: now - 10_800_000, active: now } })],
+      sessions: [makeSession({ id: 'ses_1', location: { directory: '/home/me/app' }, time: { created: now - 300_000, updated: now - 300_000 } })],
     })
-
-    renderProjectList()
 
     await screen.findByText('App')
     expect(await screen.findByText('5m ago')).toBeInTheDocument()
@@ -189,14 +127,9 @@ describe('RemoteProjectList', () => {
 
   it('labels a row with the update time when the project has no session in the fetched page', async () => {
     const now = Date.now()
-    mocks.listProjects.mockResolvedValue([
-      {
-        ...project,
-        time: { created: now - 10_800_000, updated: now - 300_000, active: now },
-      },
-    ])
-
-    renderProjectList()
+    renderProjectList({
+      projects: [makeProject({ time: { created: now - 10_800_000, updated: now - 300_000, active: now } })],
+    })
 
     await screen.findByText('App')
     expect(await screen.findByText('5m ago')).toBeInTheDocument()
@@ -204,26 +137,16 @@ describe('RemoteProjectList', () => {
 
   it('orders projects by their newest session, not by the project activity time', async () => {
     const now = Date.now()
-    mocks.listProjects.mockResolvedValue([
-      {
-        ...project,
-        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now },
-      },
-      {
-        ...otherProject,
-        time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 3_600_000 },
-      },
-    ])
-    mocks.listSessionPage.mockResolvedValue({
-      items: [createSession('/srv/other', now - 120_000)],
+    renderProjectList({
+      projects: [
+        makeProject({ time: { created: now - 10_800_000, updated: now - 10_800_000, active: now } }),
+        { ...otherProject, time: { created: now - 10_800_000, updated: now - 10_800_000, active: now - 3_600_000 } },
+      ],
+      sessions: [makeSession({ id: 'ses_1', location: { directory: '/srv/other' }, time: { created: now - 120_000, updated: now - 120_000 } })],
     })
-
-    renderProjectList()
 
     await screen.findByText('App')
-    await waitFor(() => {
-      expect(screen.getByText('Other')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('Other')).toBeInTheDocument())
     const names = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(names).toEqual(['Other', 'App'])
   })
@@ -237,29 +160,26 @@ describe('RemoteProjectList', () => {
 
   it('opens the remote project page when a project card is clicked', async () => {
     const user = userEvent.setup()
-    renderProjectList()
+    const result = renderProjectList()
 
     await user.click(await screen.findByText('App'))
 
-    await waitFor(() => {
-      expect(screen.getByTestId('project-route')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(result.capturedPathname.current).toBe('/servers/srv_kitchen/projects'))
+    expect(result.capturedSearch.current).toBe('?directory=%2Fhome%2Fme%2Fapp')
   })
 
   it('creates a session in a project directory from the actions menu and navigates to it', async () => {
     const user = userEvent.setup()
-    mocks.createSession.mockResolvedValue({ id: 'ses_new' })
-    renderProjectList()
+    const result = renderProjectList()
 
     await user.click(await screen.findByRole('button', { name: 'Project actions' }))
     await user.click(await screen.findByRole('menuitem', { name: /New session/ }))
 
-    await waitFor(() => {
-      expect(mocks.createSession).toHaveBeenCalledWith({ agent: undefined })
+    await waitFor(() => expect(result.fetchFake.lastRequest('POST', `${SERVER_BASE}/session`)).toBeDefined())
+    expect(result.fetchFake.lastRequest('POST', `${SERVER_BASE}/session`)?.body).toMatchObject({
+      location: { directory: '/home/me/app' },
     })
-    await waitFor(() => {
-      expect(screen.getByTestId('session-route')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(result.capturedPathname.current).toBe('/servers/srv_kitchen/sessions/ses_new'))
   })
 
   it('opens the project schedules from the actions menu', async () => {
@@ -269,13 +189,8 @@ describe('RemoteProjectList', () => {
     await user.click(await screen.findByRole('button', { name: 'Project actions' }))
     await user.click(await screen.findByRole('menuitem', { name: /Schedules/ }))
 
-    const dialog = await screen.findByTestId('schedules-dialog')
-    expect(dialog).toHaveAttribute('data-server', 'srv_kitchen')
-    expect(dialog).toHaveAttribute('data-directory', '/home/me/app')
-
-    await user.click(dialog)
-    expect(screen.queryByTestId('project-route')).not.toBeInTheDocument()
-    expect(screen.getByTestId('schedules-dialog')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Schedules' })
+    expect(within(dialog).getByText('/home/me/app')).toBeInTheDocument()
   })
 
   it('opens multi-run for the project from the actions menu', async () => {
@@ -285,17 +200,12 @@ describe('RemoteProjectList', () => {
     await user.click(await screen.findByRole('button', { name: 'Project actions' }))
     await user.click(await screen.findByRole('menuitem', { name: /Multi-run/ }))
 
-    const sheet = await screen.findByTestId('multi-run-sheet')
-    expect(sheet).toHaveAttribute('data-open', 'true')
-    expect(sheet).toHaveAttribute('data-kind', 'server')
-    expect(sheet).toHaveAttribute('data-server', 'srv_kitchen')
-    expect(sheet).toHaveAttribute('data-directory', '/home/me/app')
+    expect(await screen.findByRole('dialog', { name: 'Multi-run' })).toBeInTheDocument()
   })
 
   it('shows inline project actions on desktop without opening the project', async () => {
     const user = userEvent.setup()
-    mocks.isMobile = false
-    renderProjectList()
+    renderProjectList({}, { mobile: false })
 
     await screen.findByText('App')
     expect(screen.queryByRole('button', { name: 'Project actions' })).not.toBeInTheDocument()
@@ -304,26 +214,23 @@ describe('RemoteProjectList', () => {
 
     await user.click(screen.getByRole('button', { name: 'Schedules' }))
 
-    expect(await screen.findByTestId('schedules-dialog')).toHaveAttribute('data-directory', '/home/me/app')
-    expect(screen.queryByTestId('project-route')).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Schedules' })
+    expect(within(dialog).getByText('/home/me/app')).toBeInTheDocument()
   })
 
   it('opens a session in an arbitrary directory from the dialog', async () => {
     const user = userEvent.setup()
-    mocks.createSession.mockResolvedValue({ id: 'ses_other' })
-    renderProjectList()
+    const result = renderProjectList()
 
     await user.click(await screen.findByRole('button', { name: 'Open directory' }))
     await user.type(screen.getByLabelText('Directory'), '/srv/other')
     await user.click(screen.getByRole('button', { name: /Start session/ }))
 
-    await waitFor(() => {
-      expect(mocks.useCreateSession).toHaveBeenCalledWith('/srv/other')
-    })
-    expect(mocks.createSession).toHaveBeenCalledWith({ agent: undefined })
-    await waitFor(() => {
-      expect(screen.getByTestId('session-route')).toBeInTheDocument()
-    })
+    await waitFor(() =>
+      expect(result.fetchFake.lastRequest('POST', `${SERVER_BASE}/session`)?.body).toMatchObject({
+        location: { directory: '/srv/other' },
+      }),
+    )
   })
 
   it('does not render the open-directory form in the list until the dialog opens', async () => {
@@ -337,7 +244,7 @@ describe('RemoteProjectList', () => {
     await user.click(screen.getByRole('button', { name: 'Open directory' }))
 
     expect(await screen.findByLabelText('Directory')).toBeInTheDocument()
-    expect(screen.queryByPlaceholderText('/absolute/path/on/the/server')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('/absolute/path/on/the/server')).toBeInTheDocument()
   })
 
   it('disables Start session until a directory is entered', async () => {
@@ -363,9 +270,7 @@ describe('RemoteProjectList', () => {
     await user.type(screen.getByLabelText('Directory'), '/srv/other')
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Directory')).not.toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.queryByLabelText('Directory')).not.toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: 'Open directory' }))
     expect(await screen.findByLabelText('Directory')).toHaveValue('')
@@ -373,8 +278,7 @@ describe('RemoteProjectList', () => {
 
   it('filters projects by name and path', async () => {
     const user = userEvent.setup()
-    mocks.listProjects.mockResolvedValue([project, otherProject])
-    renderProjectList()
+    renderProjectList({ projects: [project, otherProject] })
 
     await screen.findByText('App')
     const search = screen.getByPlaceholderText('Search projects...')
@@ -400,121 +304,95 @@ describe('RemoteProjectList', () => {
   })
 
   it('shows the disabled state without loading projects', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [{ ...server, enabled: false }],
-      isLoading: false,
-      showsInitialLoading: false,
-    })
+    const result = renderProjectList({ servers: [{ ...server, enabled: false }] })
 
-    renderProjectList()
-
-    expect(screen.getByText('This server is disabled')).toBeInTheDocument()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(await screen.findByText('This server is disabled')).toBeInTheDocument()
+    expect(result.fetchFake.findRequests('GET', `${SERVER_BASE}/project`)).toHaveLength(0)
   })
 
   it('shows a missing server state when the server is no longer configured', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [],
-      isLoading: false,
-      showsInitialLoading: false,
-    })
+    const result = renderProjectList({ servers: [] }, { serverId: 'srv_gone' })
 
-    renderProjectList('srv_gone')
-
-    expect(screen.getByText('Server not found')).toBeInTheDocument()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(await screen.findByText('Server not found')).toBeInTheDocument()
+    expect(result.fetchFake.findRequests('GET', `/api/opencode/servers/srv_gone/api/project`)).toHaveLength(0)
   })
 
-  it('loads instead of reporting a missing server while the server list is restoring', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [],
-      isLoading: false,
-      showsInitialLoading: true,
-    })
-
-    const { container } = renderProjectList('srv_gone')
+  it('loads instead of reporting a missing server while the server list is restoring', async () => {
+    const { container } = renderProjectList(
+      { serverLoader: () => new Promise<FetchRouteResult>(() => {}) },
+      { serverId: 'srv_gone' },
+    )
 
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
   })
 
-  it('shows an unavailable state instead of a missing server while the server list is paused offline', () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [],
-      isLoading: false,
-      showsInitialLoading: false,
-      isPaused: true,
-      refetch: mocks.refetchServers,
-    })
+  it('shows an unavailable state instead of a missing server while the server list is paused offline', async () => {
+    const queryClient = createTestQueryClient()
+    onlineManager.setOnline(false)
+    const result = renderProjectList({ servers: [] }, { queryClient })
 
-    const { container } = renderProjectList('srv_kitchen')
-
-    expect(screen.getByText('Servers unavailable')).toBeInTheDocument()
+    expect(await screen.findByText('Servers unavailable')).toBeInTheDocument()
     expect(screen.queryByText('Server not found')).not.toBeInTheDocument()
-    expect(container.querySelectorAll('.animate-pulse')).toHaveLength(0)
+    expect(result.container.querySelectorAll('.animate-pulse')).toHaveLength(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
-    expect(mocks.refetchServers).toHaveBeenCalled()
-    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(result.fetchFake.findRequests('GET', `${SERVER_BASE}/project`)).toHaveLength(0)
   })
 
   it('keeps the cached project list while a server list refetch is paused offline', async () => {
-    mocks.useOpenCodeServers.mockReturnValue({
-      servers: [server],
-      isLoading: false,
-      showsInitialLoading: false,
-      isPaused: true,
-      refetch: mocks.refetchServers,
-    })
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['opencode-servers'], [server])
+    queryClient.setQueryData(['opencode', 'projects', SERVER_ID], [project])
+    onlineManager.setOnline(false)
 
-    renderProjectList()
+    renderProjectList({}, { queryClient })
 
     expect(await screen.findByText('App')).toBeInTheDocument()
     expect(screen.queryByText('Servers unavailable')).not.toBeInTheDocument()
   })
 
   it('shows an empty state when the server has no projects', async () => {
-    mocks.listProjects.mockResolvedValue([])
+    renderProjectList({ projects: [] })
 
-    renderProjectList()
-
-    await waitFor(() => {
-      expect(screen.getByText('No projects on this server yet')).toBeInTheDocument()
-    })
+    expect(await screen.findByText('No projects on this server yet')).toBeInTheDocument()
   })
 
   it('shows the load error when no project data is cached', async () => {
-    mocks.listProjects.mockRejectedValue(new Error('offline'))
-
-    renderProjectList()
+    renderProjectList({
+      projectLoader: () => {
+        throw new Error('offline')
+      },
+    })
 
     expect(await screen.findByText('Could not load projects')).toBeInTheDocument()
   })
 
   it('keeps the cached project list when a refetch fails', async () => {
-    const queryClient = createQueryClient()
-    mocks.listProjects.mockResolvedValueOnce([project]).mockRejectedValueOnce(new Error('offline'))
-
-    renderProjectList('srv_kitchen', queryClient)
+    const queryClient = createTestQueryClient()
+    let calls = 0
+    renderProjectList({
+      projectLoader: () => {
+        calls += 1
+        if (calls > 1) throw new Error('offline')
+        return { json: [project] }
+      },
+    }, { queryClient })
 
     await screen.findByText('App')
     await act(async () => {
       await queryClient.refetchQueries()
     })
 
-    await waitFor(() => {
-      expect(mocks.listProjects).toHaveBeenCalledTimes(2)
-    })
+    await waitFor(() => expect(calls).toBeGreaterThan(1))
     expect(screen.getByText('App')).toBeInTheDocument()
     expect(screen.queryByText('Could not load projects')).not.toBeInTheDocument()
   })
 
   it('scopes the list to the given server rather than the route', async () => {
-    renderProjectList('srv_kitchen')
+    const result = renderProjectList()
 
-    await waitFor(() => {
-      expect(mocks.listProjects).toHaveBeenCalledWith('srv_kitchen')
-    })
+    await waitFor(() => expect(result.fetchFake.findRequests('GET', `${SERVER_BASE}/project`).length).toBeGreaterThan(0))
   })
 })

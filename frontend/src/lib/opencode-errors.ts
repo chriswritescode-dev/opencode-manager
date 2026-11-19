@@ -1,4 +1,5 @@
 import { FetchError } from '@opencode-manager/shared'
+import { z } from 'zod'
 
 export interface ParsedError {
   title: string
@@ -7,14 +8,30 @@ export interface ParsedError {
   statusCode?: number
 }
 
-export function isGatewayTimeout(error: unknown): boolean {
-  return error instanceof FetchError && error.statusCode === 524
+const ValidationIssueSchema = z.object({ path: z.string(), message: z.string() })
+
+const ErrorResponseSchema = z.looseObject({
+  response: z
+    .looseObject({
+      data: z
+        .looseObject({
+          details: z.string().optional(),
+          error: z.string().optional(),
+          validationIssues: z.array(ValidationIssueSchema).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+})
+
+export function isGatewayTimeout(cause: unknown): boolean {
+  return cause instanceof FetchError && cause.statusCode === 524
 }
 
-export function parseNetworkError(error: unknown): ParsedError {
-  if (error instanceof Error) {
-    if (error instanceof FetchError) {
-      if (error.statusCode === 502) {
+export function parseNetworkError(cause: unknown): ParsedError {
+  if (cause instanceof Error) {
+    if (cause instanceof FetchError) {
+      if (cause.statusCode === 502) {
         return {
           title: 'Server Unavailable',
           message: 'The OpenCode server is not responding. It may need to be restarted.',
@@ -22,7 +39,7 @@ export function parseNetworkError(error: unknown): ParsedError {
         }
       }
 
-      if (error.statusCode === 524) {
+      if (cause.statusCode === 524) {
         return {
           title: 'Request Timeout',
           message: 'The request took too long to complete. Please try again.',
@@ -31,7 +48,7 @@ export function parseNetworkError(error: unknown): ParsedError {
       }
     }
 
-    const message = error.message.toLowerCase()
+    const message = cause.message.toLowerCase()
 
     if (message.includes('timeout') || message.includes('etimedout')) {
       return {
@@ -66,7 +83,7 @@ export function parseNetworkError(error: unknown): ParsedError {
 
     return {
       title: 'Error',
-      message: error.message,
+      message: cause.message,
       isRetryable: true,
     }
   }
@@ -78,17 +95,12 @@ export function parseNetworkError(error: unknown): ParsedError {
   }
 }
 
-/**
- * Extracts a human-readable message from a Manager REST API error, handling
- * both {@link FetchError} and axios-style `{ response: { data } }` shapes,
- * including OpenCode config validation issues.
- */
-export function getOpenCodeApiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof FetchError) {
-    let message = error.detail || error.message || fallback
+export function getOpenCodeApiErrorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof FetchError) {
+    let message = cause.detail || cause.message || fallback
 
-    if (error.validationIssues && error.validationIssues.length > 0) {
-      const issues = error.validationIssues
+    if (cause.validationIssues && cause.validationIssues.length > 0) {
+      const issues = cause.validationIssues
         .map((issue) => `${issue.path}: ${issue.message}`)
         .join('; ')
       message = `Validation failed: ${issues}`
@@ -97,9 +109,9 @@ export function getOpenCodeApiErrorMessage(error: unknown, fallback: string): st
     return message
   }
 
-  if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { details?: string; error?: string; validationIssues?: Array<{ path: string; message: string }> } } }).response
-    const data = response?.data
+  const parsed = ErrorResponseSchema.safeParse(cause)
+  if (parsed.success) {
+    const data = parsed.data.response?.data
 
     let message = data?.details || data?.error || fallback
 

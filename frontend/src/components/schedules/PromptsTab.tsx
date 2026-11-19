@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { z } from 'zod'
 import type { CreatePromptTemplateRequest } from '@opencode-manager/shared/types'
 import type { PromptDialog } from '@/hooks/useScheduleUrlState'
 import { Button } from '@/components/ui/button'
@@ -47,8 +48,8 @@ export function PromptsTab({ promptDialog, templateId, onNew, onEdit, onDelete, 
 
     const reader = new FileReader()
     reader.onload = (e) => {
-      const content = e.target?.result as string
-      setImportValues(parseMarkdownTemplate(content, file.name))
+      const content = z.string().safeParse(e.target?.result)
+      setImportValues(parseMarkdownTemplate(content.success ? content.data : '', file.name))
       onImport()
     }
     reader.readAsText(file)

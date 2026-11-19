@@ -12,12 +12,12 @@ export type RemoteContext = {
   repoId?: number
 }
 
-export function buildRemoteAttachEnv(managerUrl: string, repoName: string, repoId: number): Record<string, string> {
+export function buildRemoteAttachEnv(managerUrl: string, repoName: string, repoId: number) {
   return {
     [REMOTE_MANAGER_URL_ENV]: managerUrl,
     [REMOTE_REPO_NAME_ENV]: repoName,
     [REMOTE_REPO_ID_ENV]: String(repoId),
-  }
+  } satisfies Record<string, string>
 }
 
 export function readRemoteContext(env: NodeJS.ProcessEnv): RemoteContext | undefined {
@@ -41,7 +41,6 @@ export function readRemoteContext(env: NodeJS.ProcessEnv): RemoteContext | undef
   return { managerUrl, managerHost, repoName, repoId }
 }
 
-/** Returns the saved manager name when it belongs to the attached manager, else the manager host. */
 export function remoteDisplayName(remote: RemoteContext, state: OcmState | null): string {
   if (state?.managerName && trimUrlTrailingSlashes(state.managerUrl) === trimUrlTrailingSlashes(remote.managerUrl)) return state.managerName
   return remote.managerHost

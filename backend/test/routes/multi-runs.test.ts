@@ -1,8 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
-import type { MultiRun } from '@opencode-manager/shared/schemas'
-import { createMultiRunRoutes } from '../../src/routes/multi-runs'
-import { MultiRunError, type MultiRunService } from '../../src/services/multi-runs'
+import { z } from 'zod'
+import {
+  MultiRunSchema,
+  type FuseMultiRunRequest,
+  type LaunchMultiRunRequest,
+  type MultiRun,
+} from '@opencode-manager/shared/schemas'
+import { createMultiRunRoutes, type MultiRunRoutesService } from '../../src/routes/multi-runs'
+import { MultiRunError } from '../../src/services/multi-runs'
+import { readJson } from '../helpers/read-json'
+
+const RunResponseSchema = z.object({ run: MultiRunSchema })
+const RunsResponseSchema = z.object({ runs: z.array(MultiRunSchema) })
+const InvalidRequestSchema = z.object({
+  error: z.string(),
+  details: z.array(z.object({ message: z.string() })),
+})
+const ErrorResponseSchema = z.object({ error: z.string(), code: z.string().optional() })
+const FusionUnavailableErrorSchema = z.object({
+  error: z.string(),
+  code: z.string(),
+  details: z.object({
+    unavailableSources: z.array(z.object({
+      entryId: z.number(),
+      model: z.string(),
+      reason: z.string(),
+      message: z.string(),
+    })),
+  }),
+})
 
 function createRun(overrides: Partial<MultiRun> = {}): MultiRun {
   return {
@@ -21,7 +48,19 @@ function createRun(overrides: Partial<MultiRun> = {}): MultiRun {
   }
 }
 
-function launchBody(overrides: Record<string, unknown> = {}): string {
+function createMultiRunRoutesService(
+  overrides: Partial<MultiRunRoutesService> = {},
+): MultiRunRoutesService {
+  return {
+    discard: vi.fn<MultiRunRoutesService['discard']>(),
+    fuse: vi.fn<MultiRunRoutesService['fuse']>(),
+    launch: vi.fn<MultiRunRoutesService['launch']>(),
+    list: vi.fn<MultiRunRoutesService['list']>(),
+    ...overrides,
+  }
+}
+
+function launchBody(overrides: Partial<LaunchMultiRunRequest> = {}): string {
   return JSON.stringify({
     repoId: 1,
     name: 'Sweep',
@@ -32,7 +71,7 @@ function launchBody(overrides: Record<string, unknown> = {}): string {
   })
 }
 
-function fuseBody(overrides: Record<string, unknown> = {}): string {
+function fuseBody(overrides: Partial<FuseMultiRunRequest> = {}): string {
   return JSON.stringify({
     requestId: '11111111-1111-4111-8111-111111111111',
     entryIds: [1, 2],
@@ -42,59 +81,58 @@ function fuseBody(overrides: Record<string, unknown> = {}): string {
 }
 
 describe('multi-run routes', () => {
-  let service: {
-    list: ReturnType<typeof vi.fn>
-    launch: ReturnType<typeof vi.fn>
-    discard: ReturnType<typeof vi.fn>
-    fuse: ReturnType<typeof vi.fn>
-  }
+  let service: MultiRunRoutesService
+  let list: ReturnType<typeof vi.fn<MultiRunRoutesService['list']>>
+  let launch: ReturnType<typeof vi.fn<MultiRunRoutesService['launch']>>
+  let discard: ReturnType<typeof vi.fn<MultiRunRoutesService['discard']>>
+  let fuse: ReturnType<typeof vi.fn<MultiRunRoutesService['fuse']>>
   let app: Hono
 
   beforeEach(() => {
-    service = { list: vi.fn(), launch: vi.fn(), discard: vi.fn(), fuse: vi.fn() }
+    list = vi.fn<MultiRunRoutesService['list']>()
+    launch = vi.fn<MultiRunRoutesService['launch']>()
+    discard = vi.fn<MultiRunRoutesService['discard']>()
+    fuse = vi.fn<MultiRunRoutesService['fuse']>()
+    service = createMultiRunRoutesService({ list, launch, discard, fuse })
     app = new Hono()
-    app.route('/multi-runs', createMultiRunRoutes(service as unknown as MultiRunService))
+    app.route('/multi-runs', createMultiRunRoutes(service))
   })
 
   it('GET returns the repository runs', async () => {
-    service.list.mockReturnValue([createRun()])
+    list.mockReturnValue([createRun()])
 
     const res = await app.request('/multi-runs?repoId=1')
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ runs: [createRun()] })
-    expect(service.list).toHaveBeenCalledWith({ kind: 'repo', repoId: 1 })
+    expect(await readJson(res, RunsResponseSchema)).toEqual({ runs: [createRun()] })
+    expect(list).toHaveBeenCalledWith({ kind: 'repo', repoId: 1 })
   })
 
   it('GET returns the runs of a server directory', async () => {
-    service.list.mockReturnValue([])
+    list.mockReturnValue([])
 
     const res = await app.request('/multi-runs?serverId=srv_kitchen&directory=%2Fsrv%2Fapp')
 
     expect(res.status).toBe(200)
-    expect(service.list).toHaveBeenCalledWith({
+    expect(list).toHaveBeenCalledWith({
       kind: 'server',
       serverId: 'srv_kitchen',
       directory: '/srv/app',
     })
   })
 
-  it('GET rejects a server target without a directory with 400', async () => {
-    const res = await app.request('/multi-runs?serverId=srv_kitchen')
+  it.each([
+    ['a server target without a directory', '/multi-runs?serverId=srv_kitchen'],
+    ['a missing repoId', '/multi-runs'],
+  ])('GET rejects %s with 400', async (_label, url) => {
+    const res = await app.request(url)
 
     expect(res.status).toBe(400)
-    expect(service.list).not.toHaveBeenCalled()
-  })
-
-  it('GET rejects a missing repoId with 400', async () => {
-    const res = await app.request('/multi-runs')
-
-    expect(res.status).toBe(400)
-    expect(service.list).not.toHaveBeenCalled()
+    expect(list).not.toHaveBeenCalled()
   })
 
   it('POST launches a run and returns 201', async () => {
-    service.launch.mockResolvedValue(createRun())
+    launch.mockResolvedValue(createRun())
 
     const res = await app.request('/multi-runs', {
       method: 'POST',
@@ -103,8 +141,8 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(201)
-    await expect(res.json()).resolves.toEqual({ run: createRun() })
-    expect(service.launch).toHaveBeenCalledWith({
+    expect(await readJson(res, RunResponseSchema)).toEqual({ run: createRun() })
+    expect(launch).toHaveBeenCalledWith({
       repoId: 1,
       name: 'Sweep',
       prompt: 'go',
@@ -114,7 +152,7 @@ describe('multi-run routes', () => {
   })
 
   it('POST launches a run for a server directory', async () => {
-    service.launch.mockResolvedValue(createRun({ repoId: null, serverId: 'srv_kitchen', directory: '/srv/app' }))
+    launch.mockResolvedValue(createRun({ repoId: null, serverId: 'srv_kitchen', directory: '/srv/app' }))
 
     const res = await app.request('/multi-runs', {
       method: 'POST',
@@ -130,7 +168,7 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(201)
-    expect(service.launch).toHaveBeenCalledWith({
+    expect(launch).toHaveBeenCalledWith({
       serverId: 'srv_kitchen',
       directory: '/srv/app',
       name: 'Sweep',
@@ -140,46 +178,23 @@ describe('multi-run routes', () => {
     })
   })
 
-  it('POST rejects a launch with both a repository and a server target', async () => {
+  it.each([
+    ['both a repository and a server target', launchBody({ serverId: 'srv_kitchen', directory: '/srv/app' })],
+    [
+      'a server target without a directory',
+      JSON.stringify({ serverId: 'srv_kitchen', name: 'Sweep', prompt: 'go', models: ['openai/a'], isolate: true }),
+    ],
+    ['more than five models', launchBody({ models: ['openai/a', 'openai/b', 'openai/c', 'openai/d', 'openai/e', 'openai/f'] })],
+  ])('POST rejects a launch with %s', async (_label, body) => {
     const res = await app.request('/multi-runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: launchBody({ serverId: 'srv_kitchen', directory: '/srv/app' }),
+      body,
     })
 
     expect(res.status).toBe(400)
-    expect(service.launch).not.toHaveBeenCalled()
-  })
-
-  it('POST rejects a server target without a directory', async () => {
-    const res = await app.request('/multi-runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serverId: 'srv_kitchen',
-        name: 'Sweep',
-        prompt: 'go',
-        models: ['openai/a'],
-        isolate: true,
-      }),
-    })
-
-    expect(res.status).toBe(400)
-    expect(service.launch).not.toHaveBeenCalled()
-  })
-
-  it('POST rejects more than five models with 400', async () => {
-    const res = await app.request('/multi-runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: launchBody({
-        models: ['openai/a', 'openai/b', 'openai/c', 'openai/d', 'openai/e', 'openai/f'],
-      }),
-    })
-
-    expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toEqual({ error: expect.any(String), details: expect.any(Array) })
-    expect(service.launch).not.toHaveBeenCalled()
+    expect((await readJson(res, InvalidRequestSchema)).details.length).toBeGreaterThan(0)
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('POST rejects duplicate models with 400', async () => {
@@ -190,8 +205,9 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toEqual({ error: 'Models must be unique', details: expect.any(Array) })
-    expect(service.launch).not.toHaveBeenCalled()
+    const body = await readJson(res, InvalidRequestSchema)
+    expect(body.error).toContain('Models must be unique')
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('POST rejects malformed JSON with 400', async () => {
@@ -202,12 +218,12 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(400)
-    await expect(res.json()).resolves.toEqual({ error: 'Invalid JSON' })
-    expect(service.launch).not.toHaveBeenCalled()
+    expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Invalid JSON' })
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it('POST maps a service error to its status', async () => {
-    service.launch.mockRejectedValue(new MultiRunError('Repository not found or not ready', 404))
+    launch.mockRejectedValue(new MultiRunError('Repository not found or not ready', 404))
 
     const res = await app.request('/multi-runs', {
       method: 'POST',
@@ -216,20 +232,21 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(404)
+    expect(await readJson(res, ErrorResponseSchema)).toMatchObject({ error: 'Repository not found or not ready' })
   })
 
   it('POST discard calls the service with numeric ids', async () => {
-    service.discard.mockResolvedValue(createRun())
+    discard.mockResolvedValue(createRun())
 
     const res = await app.request('/multi-runs/3/entries/7/discard', { method: 'POST' })
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ run: createRun() })
-    expect(service.discard).toHaveBeenCalledWith(3, 7)
+    expect(await readJson(res, RunResponseSchema)).toEqual({ run: createRun() })
+    expect(discard).toHaveBeenCalledWith(3, 7)
   })
 
   it('POST discard maps a missing entry to 404', async () => {
-    service.discard.mockRejectedValue(new MultiRunError('Multi-run entry not found', 404))
+    discard.mockRejectedValue(new MultiRunError('Multi-run entry not found', 404))
 
     const res = await app.request('/multi-runs/3/entries/7/discard', { method: 'POST' })
 
@@ -237,7 +254,7 @@ describe('multi-run routes', () => {
   })
 
   it('POST fusions fuses a run and returns 201 when created', async () => {
-    service.fuse.mockResolvedValue({ run: createRun(), created: true })
+    fuse.mockResolvedValue({ run: createRun(), created: true })
 
     const res = await app.request('/multi-runs/3/fusions', {
       method: 'POST',
@@ -246,8 +263,8 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(201)
-    await expect(res.json()).resolves.toEqual({ run: createRun() })
-    expect(service.fuse).toHaveBeenCalledWith(3, {
+    expect(await readJson(res, RunResponseSchema)).toEqual({ run: createRun() })
+    expect(fuse).toHaveBeenCalledWith(3, {
       requestId: '11111111-1111-4111-8111-111111111111',
       entryIds: [1, 2],
       model: 'openai/a',
@@ -255,7 +272,7 @@ describe('multi-run routes', () => {
   })
 
   it('POST fusions returns 200 for an idempotent replay', async () => {
-    service.fuse.mockResolvedValue({ run: createRun(), created: false })
+    fuse.mockResolvedValue({ run: createRun(), created: false })
 
     const res = await app.request('/multi-runs/3/fusions', {
       method: 'POST',
@@ -264,11 +281,11 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ run: createRun() })
+    expect(await readJson(res, RunResponseSchema)).toEqual({ run: createRun() })
   })
 
   it('POST fusions serialises an unavailable-sources error with code and details', async () => {
-    service.fuse.mockRejectedValue(
+    fuse.mockRejectedValue(
       new MultiRunError('Some selected results are not ready to fuse', 409, {
         code: 'FUSION_SOURCES_UNAVAILABLE',
         details: {
@@ -286,7 +303,7 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(409)
-    await expect(res.json()).resolves.toEqual({
+    expect(await readJson(res, FusionUnavailableErrorSchema)).toEqual({
       error: 'Some selected results are not ready to fuse',
       code: 'FUSION_SOURCES_UNAVAILABLE',
       details: {
@@ -298,7 +315,7 @@ describe('multi-run routes', () => {
   })
 
   it('POST fusions maps a missing run to 404', async () => {
-    service.fuse.mockRejectedValue(new MultiRunError('Multi-run not found', 404))
+    fuse.mockRejectedValue(new MultiRunError('Multi-run not found', 404))
 
     const res = await app.request('/multi-runs/3/fusions', {
       method: 'POST',
@@ -317,6 +334,6 @@ describe('multi-run routes', () => {
     })
 
     expect(res.status).toBe(400)
-    expect(service.fuse).not.toHaveBeenCalled()
+    expect(fuse).not.toHaveBeenCalled()
   })
 })

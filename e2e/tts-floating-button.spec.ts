@@ -1,4 +1,5 @@
 import { request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test'
+import { z } from 'zod'
 import { test, expect } from './fixtures'
 import { createMockRepo, startMockProvider, type MockProvider, type MockRepo } from './mockProvider'
 import { BASE_URL, STORAGE_STATE } from './env'
@@ -79,9 +80,16 @@ async function seedReplies(sessionId: string): Promise<void> {
         async () => {
           const messagesResponse = await api.get(`/api/opencode/api/session/${sessionId}/message?order=desc`)
           if (!messagesResponse.ok()) return false
-          const body = (await messagesResponse.json()) as {
-            data: Array<{ type?: string; time?: { completed?: number } }>
-          }
+          const body = z
+            .object({
+              data: z.array(
+                z.looseObject({
+                  type: z.string().optional(),
+                  time: z.object({ completed: z.number().optional() }).optional(),
+                }),
+              ),
+            })
+            .parse(await messagesResponse.json())
           return body.data.some(
             (message) =>
               message.type === 'assistant' &&
@@ -120,7 +128,7 @@ test.afterAll(async () => {
 
 async function recordSynthesis(page: Page, synthTexts: string[]): Promise<void> {
   await page.route('**/api/tts/synthesize', async (route) => {
-    const body = route.request().postDataJSON() as { text: string }
+    const body = z.object({ text: z.string() }).parse(route.request().postDataJSON())
     synthTexts.push(body.text)
     await route.fulfill({ status: 200, contentType: 'audio/wav', body: SILENT_WAV })
   })

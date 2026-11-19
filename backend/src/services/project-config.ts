@@ -15,7 +15,7 @@ import {
   type RunProjectActionResponse,
   type WorktreeSetupResult,
 } from '@opencode-manager/shared/schemas'
-import { isRunningActionTerminal } from '@opencode-manager/shared/utils'
+import { isRunningActionTerminal, type JsonObject } from '@opencode-manager/shared/utils'
 import { getRepoByDirectory, getRepoSetting, setRepoSetting } from '../db/queries'
 import { executeCommand } from '../utils/process'
 import { getErrorMessage } from '../utils/error-utils'
@@ -23,7 +23,10 @@ import { logger } from '../utils/logger'
 import { canonicalPathSync, writeFileAtomicSync } from '../utils/fs-safe'
 import type { GitService } from './git/GitService'
 import type { GitAuthService } from './git-auth'
+import { getErrorCode } from './error-code'
 import type { TerminalService } from './terminal'
+
+export type ProjectTerminalLauncher = Pick<TerminalService, 'list' | 'create'>
 
 const PROJECT_ACTIONS_KEY = 'projectActions'
 const WORKTREE_SETUP_KEY = 'worktreeSetupCommands'
@@ -46,6 +49,11 @@ export interface RepoFileState {
   error?: string
 }
 
+interface ProjectConfigValidationDetails {
+  formErrors: string[]
+  fieldErrors: Array<string[] | undefined> | Record<string, string[] | undefined>
+}
+
 interface MoveCommit {
   repoFile: RepoProjectFile | null
   personalActions?: ProjectAction[]
@@ -63,7 +71,7 @@ export class ProjectConfigError extends Error {
     message: string,
     public status: number,
     public code?: string,
-    public details?: unknown,
+    public details?: ProjectConfigValidationDetails | JsonObject,
   ) {
     super(message)
     this.name = 'ProjectConfigError'
@@ -146,18 +154,20 @@ export class ProjectConfigService {
       ),
     )
 
+    const repoFileStatus: ProjectConfigResponse['repoFile'] = {
+      path: '.ocm/project.json',
+      exists: repoFile.exists,
+      trusted,
+      hash: repoFile.hash,
+      executable: repoFile.file ? this.buildRepoFileExecutable(repoFile.file) : null,
+      warnings,
+    }
+    if (repoFile.error) repoFileStatus.error = repoFile.error
+
     return {
       actions: resolvedActions,
       worktreeSetup,
-      repoFile: {
-        path: '.ocm/project.json',
-        exists: repoFile.exists,
-        trusted,
-        hash: repoFile.hash,
-        executable: repoFile.file ? this.buildRepoFileExecutable(repoFile.file) : null,
-        ...(repoFile.error ? { error: repoFile.error } : {}),
-        warnings,
-      },
+      repoFile: repoFileStatus,
     }
   }
 
@@ -184,7 +194,7 @@ export class ProjectConfigService {
     repo: Repo,
     directory: string,
     actionId: string,
-    terminalService: TerminalService,
+    terminalService: ProjectTerminalLauncher,
   ): Promise<RunProjectActionResponse> {
     const config = await this.getConfig(repo, directory)
     const action = config.actions.find((item) => item.id === actionId)
@@ -212,12 +222,13 @@ export class ProjectConfigService {
           args: ['-c', action.command],
         }))
 
-      return {
+      const response: RunProjectActionResponse = {
         terminal,
         alreadyRunning: running !== undefined,
-        ...(action.resolvedUrl ? { resolvedUrl: action.resolvedUrl } : {}),
         autoOpenUrl: action.autoOpenUrl,
       }
+      if (action.resolvedUrl) response.resolvedUrl = action.resolvedUrl
+      return response
     })
   }
 
@@ -245,7 +256,7 @@ export class ProjectConfigService {
   async runWorktreeSetup(
     projectRepo: Repo,
     worktreeDirectory: string,
-    terminalService: TerminalService,
+    terminalService: ProjectTerminalLauncher,
   ): Promise<WorktreeSetupResult> {
     const commands = [...this.getPersonalSetup(projectRepo)]
     const repoFile = this.readRepoFile(worktreeDirectory)
@@ -277,7 +288,7 @@ export class ProjectConfigService {
   async runWorktreeSetupForRepo(
     repo: Repo,
     worktreeDirectory: string,
-    terminalService: TerminalService,
+    terminalService: ProjectTerminalLauncher,
   ): Promise<WorktreeSetupResult> {
     try {
       const projectRepo = await this.resolveProjectRepo(repo)
@@ -553,7 +564,7 @@ export class ProjectConfigService {
     }
   }
 
-  private setRepoTrust(projectRepo: Repo, hash: string | null): void {
+  setRepoTrust(projectRepo: Repo, hash: string | null): void {
     setRepoSetting(this.database, projectRepo.id, REPO_CONFIG_TRUST_KEY, hash)
   }
 
@@ -561,7 +572,7 @@ export class ProjectConfigService {
     return path.join(directory, REPO_FILE_RELATIVE_PATH)
   }
 
-  private writeRepoFile(filePath: string, file: RepoProjectFile): void {
+  writeRepoFile(filePath: string, file: RepoProjectFile): void {
     writeFileAtomicSync(filePath, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o644 })
   }
 
@@ -569,7 +580,7 @@ export class ProjectConfigService {
     try {
       return fs.lstatSync(target).isSymbolicLink()
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (getErrorCode(error) === 'ENOENT') {
         return false
       }
       throw error
@@ -586,7 +597,7 @@ export class ProjectConfigService {
     try {
       return { exists: true, content: fs.readFileSync(filePath) }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (getErrorCode(error) === 'ENOENT') {
         return { exists: false, content: null }
       }
       throw error
@@ -609,7 +620,7 @@ export class ProjectConfigService {
         fs.rmdirSync(dir)
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if (getErrorCode(error) !== 'ENOENT') {
         throw error
       }
     }

@@ -349,10 +349,6 @@ interface RemoteProjectNavListProps {
   onSelectSession: (path: string) => void
 }
 
-/**
- * The linked server's projects in the sidebar, styled like the local repo groups and expanded to
- * the current project or session. Searching filters project names and that server's sessions.
- */
 export function RemoteProjectNavList({
   serverId,
   isVisible,

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
-import { optionId } from '@/components/session/usePickerKeyboardNav'
+import { optionId } from '@/components/session/picker-cursor'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { cn, formatShortRelativeTime, getRepoDisplayName } from '@/lib/utils'
 
@@ -57,7 +57,7 @@ interface SessionPickerRowItemProps {
   onOpen: (row: SessionPickerRow) => void
   onHover: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
 }
 
@@ -139,7 +139,7 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
         </span>
       </div>
       <div className="flex shrink-0 items-center pr-1">
-        {row.serverId || !showActions ? null : <DropdownMenu>
+        {showActions ? <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -155,13 +155,15 @@ const SessionPickerRowItem = memo(function SessionPickerRowItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="z-[300]" onClick={(event) => event.stopPropagation()}>
-            <DropdownMenuItem onClick={() => onTogglePin(row)}>
-              {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
-              {isPinned ? 'Unpin' : 'Pin'}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRequestDelete(row.session)}>Delete</DropdownMenuItem>
+            {row.serverId ? null : (
+              <DropdownMenuItem onClick={() => onTogglePin(row)}>
+                {isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
+                {isPinned ? 'Unpin' : 'Pin'}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => onRequestDelete(row)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>}
+        </DropdownMenu> : null}
       </div>
     </div>
   )
@@ -185,7 +187,7 @@ interface SessionPickerListProps {
   onOpenRow: (row: SessionPickerRow) => void
   onHoverRow: (index: number) => void
   onTogglePin: (row: SessionPickerRow) => void
-  onRequestDelete: (session: Session) => void
+  onRequestDelete: (row: SessionPickerRow) => void
   registerRef: (key: string, node: HTMLDivElement | null) => void
   listRef?: React.RefObject<HTMLDivElement | null>
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void

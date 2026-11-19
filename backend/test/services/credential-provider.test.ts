@@ -9,22 +9,11 @@ import { SANDBOX_MAX_FORWARDED_GIT_CONFIGS } from '../../src/services/sandbox/sh
 import type { GitCredential } from '@opencode-manager/shared'
 
 function createPatCredential(name: string, host: string, token: string, username?: string, id?: string): GitCredential {
-  return {
-    ...(id ? { id } : {}),
-    name,
-    host,
-    token,
-    ...(username ? { username } : {}),
-  } as GitCredential
+  return { id, name, host, type: 'pat', token, username }
 }
 
 function createSshCredential(name: string, host: string, sshPrivateKeyEncrypted?: string): GitCredential {
-  return {
-    name,
-    host,
-    type: 'ssh',
-    ...(sshPrivateKeyEncrypted ? { sshPrivateKeyEncrypted } : {}),
-  } as GitCredential
+  return { name, host, type: 'ssh', sshPrivateKeyEncrypted }
 }
 
 describe('CredentialProvider', () => {

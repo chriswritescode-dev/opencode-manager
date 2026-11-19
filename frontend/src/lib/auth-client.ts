@@ -3,7 +3,7 @@ import { passkeyClient } from '@better-auth/passkey/client'
 import { API_BASE_URL } from '@/config'
 
 export const getAuthBaseUrl = (): string => {
-  if (typeof window !== 'undefined') {
+  if ('window' in globalThis) {
     return `${window.location.origin}/api/auth`
   }
   return `${API_BASE_URL}/api/auth`

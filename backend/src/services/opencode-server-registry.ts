@@ -79,7 +79,6 @@ export class OpenCodeServerPairingError extends OpenCodeServerError {
   }
 }
 
-/** Raised when a server address change would reuse stored credentials on a different origin. */
 export class OpenCodeServerCredentialsRequiredError extends OpenCodeServerError {
   constructor() {
     super('Changing the server address requires re-entering the password or pairing again', 400)
@@ -94,6 +93,8 @@ function reusesStoredPasswordOnNewOrigin(server: OpenCodeServer, request: Update
   if (request.password !== undefined) return false
   return !haveSameUrlOrigin(server.baseUrl, request.baseUrl)
 }
+
+const serverVersionBodySchema = z.object({ version: z.string().optional() })
 
 export class OpenCodeServerRegistry {
   private readonly clients = new Map<string, OpenCodeClient>()
@@ -194,9 +195,9 @@ export class OpenCodeServerRegistry {
 
   async test(input: TestServerSource): Promise<OpenCodeServerTestResult> {
     const target = this.resolveTestTarget(input)
-    const headers: Record<string, string> = { Accept: 'application/json' }
+    const headers = new Headers({ Accept: 'application/json' })
     if (target.password !== null) {
-      headers.Authorization = buildOpenCodeBasicAuth(target.password, target.username)
+      headers.set('Authorization', buildOpenCodeBasicAuth(target.password, target.username))
     }
 
     let response: Response
@@ -279,8 +280,10 @@ export class OpenCodeServerRegistry {
 
   private async readServerVersion(response: Response): Promise<string | null> {
     try {
-      const body = (await response.json()) as { version?: unknown }
-      return typeof body.version === 'string' && body.version.length > 0 ? body.version : null
+      const body = serverVersionBodySchema.safeParse(await response.json())
+      if (!body.success) return null
+      const version = body.data.version
+      return version !== undefined && version.length > 0 ? version : null
     } catch {
       return null
     }

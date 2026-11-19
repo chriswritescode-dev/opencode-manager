@@ -92,7 +92,12 @@ export function parseDiffLines(diff: string): DiffLine[] {
   return result;
 }
 
-export function countDiffLineChanges(text: string): { added: number; removed: number } {
+export interface DiffLineChangeCount {
+  added: number
+  removed: number
+}
+
+export function countDiffLineChanges(text: string): DiffLineChangeCount {
   let added = 0;
   let removed = 0;
   for (const line of parseDiffLines(text)) {
@@ -181,17 +186,17 @@ function stripDiffPathPrefix(path: string, prefix: string): string {
   return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
-const GIT_C_ESCAPES: Record<string, number> = {
-  a: 0x07,
-  b: 0x08,
-  f: 0x0c,
-  n: 0x0a,
-  r: 0x0d,
-  t: 0x09,
-  v: 0x0b,
-  "\\": 0x5c,
-  '"': 0x22,
-};
+const GIT_C_ESCAPES = new Map<string, number>([
+  ["a", 0x07],
+  ["b", 0x08],
+  ["f", 0x0c],
+  ["n", 0x0a],
+  ["r", 0x0d],
+  ["t", 0x09],
+  ["v", 0x0b],
+  ["\\", 0x5c],
+  ['"', 0x22],
+])
 
 function parseDiffPathToken(raw: string, prefix: string): string {
   const token = raw.startsWith('"') ? decodeGitQuotedPath(raw) : raw.split("\t")[0]!;
@@ -219,7 +224,7 @@ function decodeGitQuotedPath(raw: string): string {
       if (next === undefined) {
         break;
       }
-      const escaped = GIT_C_ESCAPES[next];
+      const escaped = GIT_C_ESCAPES.get(next);
       bytes.push(...(escaped === undefined ? encoder.encode(next) : [escaped]));
       index += 2;
       continue;

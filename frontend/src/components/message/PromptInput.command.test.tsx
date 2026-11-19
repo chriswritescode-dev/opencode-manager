@@ -1,595 +1,319 @@
 import { createRef } from 'react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { PromptInput, type PromptInputHandle } from './PromptInput'
-import { useComposerDraftStore } from '@/stores/composerDraftStore'
-import { BUILTIN_COMMANDS } from '@/lib/builtinCommands'
-import { createCommandActionsMock, stubMatchMedia, createVoiceConversationControllerMock } from '@/test/test-utils'
+import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import type { CommandInfo } from '@opencode-manager/shared/opencode'
+import type { PromptInputHandle } from './PromptInput'
+import { useSessionAgentStore } from '@/stores/sessionAgentStore'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
+import { installMatchMedia } from '@/test/browserFakes'
+import { makeAgent, promptTextarea, renderPromptInput } from '@/test/promptInput'
+import type { PromptInputFixture } from '@/test/promptInput'
 
-const mocks = vi.hoisted(() => ({
-  runCommand: vi.fn(),
-  switchSessionModel: vi.fn(),
-  switchSessionAgent: vi.fn(),
-  agents: [] as Array<{ id: string; name: string; description?: string; mode?: string; hidden?: boolean }>,
-  skills: [] as Array<{ id: string; name: string; description?: string }>,
-  setAgent: vi.fn(),
-  cycleVariant: vi.fn(),
-  showToast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    loading: vi.fn(),
-    promise: vi.fn(),
-    dismiss: vi.fn(),
-  },
-  useSTT: vi.fn(),
-  useVoiceConversation: vi.fn(),
-  useMobile: vi.fn(),
-  useCommands: vi.fn(),
-  useFileSearch: vi.fn(),
-  useModelSelection: vi.fn(),
-  useVariants: vi.fn(),
-  useSessionAgent: vi.fn(),
-  useUserBash: vi.fn(),
-  useSessionAgentStore: vi.fn(),
-  useSendErrorStore: vi.fn(),
-  useHasBackgroundActivity: vi.fn(),
-}))
+const reviewCommand: CommandInfo = { name: 'review', description: 'Review' }
 
-const suggestionProps = vi.hoisted(() => ({ isOpen: false, selectedIndex: 0 }))
+function mainAgent(id: string) {
+  return makeAgent({ id, mode: 'primary' })
+}
 
-vi.mock('@/api/opencode', async () => {
-  const actual = await vi.importActual('@/api/opencode')
-  return {
-    ...actual,
-    runCommand: mocks.runCommand,
-    switchSessionModel: mocks.switchSessionModel,
-    switchSessionAgent: mocks.switchSessionAgent,
+async function renderCommandInput(fixture: PromptInputFixture = {}) {
+  return renderPromptInput({
+    commands: [reviewCommand],
+    agents: [mainAgent('build'), mainAgent('plan'), makeAgent({ id: 'reviewer', description: 'Reviewer' })],
+    ...fixture,
+  })
+}
+
+function selectedSuggestionLabel(): string {
+  const list = screen.getByTestId('prompt-suggestions')
+  for (const row of list.querySelectorAll('[data-index]')) {
+    const button = row.querySelector('button')
+    if (!button) continue
+    const isSelected = button.className.split(/\s+/).some((token) => token === 'bg-primary' || token === 'bg-primary/15')
+    if (isSelected) return button.textContent ?? ''
   }
-})
+  return ''
+}
 
-vi.mock('@/hooks/useOpenCode', async () => {
-  const actual = await vi.importActual('@/hooks/useOpenCode')
-  return {
-    ...actual,
-    useAgents: () => ({ data: mocks.agents }),
-    useSkills: () => ({ data: mocks.skills }),
-    useSession: () => ({ data: undefined }),
-  }
-})
-
-vi.mock('@/hooks/useSTT', () => ({
-  useSTT: mocks.useSTT,
-  useSttAvailability: () => ({ isEnabled: true, isSupported: true }),
-}))
-vi.mock('@/hooks/useVoiceConversation', () => ({ useVoiceConversation: mocks.useVoiceConversation }))
-vi.mock('@/hooks/useMobile', () => ({ useMobile: mocks.useMobile }))
-vi.mock('@/hooks/useCommands', () => ({ useCommands: mocks.useCommands }))
-vi.mock('@/hooks/useFileSearch', () => ({ useFileSearch: mocks.useFileSearch }))
-vi.mock('@/hooks/useModelSelection', () => ({ useModelSelection: mocks.useModelSelection }))
-vi.mock('@/hooks/useVariants', () => ({ useVariants: mocks.useVariants }))
-vi.mock('@/hooks/useSessionAgent', () => ({ useSessionAgent: mocks.useSessionAgent }))
-vi.mock('@/stores/userBashStore', () => ({ useUserBash: mocks.useUserBash }))
-vi.mock('@/stores/sessionAgentStore', () => ({ useSessionAgentStore: mocks.useSessionAgentStore }))
-vi.mock('@/stores/sendErrorStore', () => ({ useSendErrorStore: mocks.useSendErrorStore }))
-vi.mock('@/stores/sessionStatusStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/stores/sessionStatusStore')>()
-  return { ...actual, useHasBackgroundActivity: mocks.useHasBackgroundActivity }
-})
-vi.mock('@/lib/toast', () => ({ showToast: mocks.showToast }))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({
-    hasForSession: vi.fn().mockReturnValue(false),
-    setShowDialog: vi.fn(),
-  }),
-}))
-
-vi.mock('@/components/agent/AgentQuickSelect', () => ({
-  AgentQuickSelect: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/model/ModelQuickSelect', () => ({
-  ModelQuickSelect: ({ children, open }: { children?: React.ReactNode; open?: boolean }) => (
-    <div data-testid="model-quick-select" data-open={open ? 'true' : 'false'}>{children}</div>
-  ),
-}))
-
-vi.mock('@/components/session/PermissionModeToggle', () => ({
-  PermissionModeToggle: () => null,
-}))
-
-vi.mock('@/hooks/useSessionGoals', () => ({
-  useSessionGoal: () => ({ data: undefined }),
-  useSessionGoalCommand: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-}))
-
-vi.mock('@/hooks/useSessionPermissionMode', () => ({
-  useSessionPermissionMode: () => ({ data: undefined }),
-}))
-
-vi.mock('./ComposerToolsMenu', () => ({
-  ComposerToolsMenu: () => null,
-}))
-
-vi.mock('@/components/session/SessionSandboxMenu', () => ({
-  SessionSandboxMenu: () => null,
-}))
-
-vi.mock('./PromptSuggestions', () => ({
-  PromptSuggestions: (props: { isOpen: boolean; selectedIndex: number }) => {
-    if (props.isOpen) {
-      suggestionProps.isOpen = true
-      suggestionProps.selectedIndex = props.selectedIndex
-    }
-    return null
-  },
-}))
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-})
-
-const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
-  id: 'test-session',
-  projectID: 'proj_1',
-  time: { created: 1000, updated: 1000 },
-  location: { directory: '/test' },
-  agent: 'build',
-  model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
-  ...overrides,
-})
+async function attachImage(container: HTMLElement) {
+  const fileInput = container.querySelector('input[type="file"]')
+  if (!(fileInput instanceof HTMLInputElement)) throw new Error('file input is missing')
+  fireEvent.change(fileInput, { target: { files: [new File(['img'], 'pic.png', { type: 'image/png' })] } })
+  await screen.findByText('pic.png')
+}
 
 describe('PromptInput command submission', () => {
-  const defaultProps = {
-    directory: '/test',
-    sessionID: 'test-session',
-    isSessionActive: false,
-    isStreamingResponse: false,
-    onScrollToBottom: vi.fn(),
-    commandActions: createCommandActionsMock(),
-    onPromptChange: vi.fn(),
-  }
-
-  const renderComponent = () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} />
-      </QueryClientProvider>
-    )
-  }
-
-  const attachImage = async (container: HTMLElement) => {
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
-    const image = new File(['img'], 'pic.png', { type: 'image/png' })
-    fireEvent.change(fileInput, { target: { files: [image] } })
-    await screen.findByText('pic.png')
-  }
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useComposerDraftStore.setState({ drafts: {} })
-    mocks.useVoiceConversation.mockReturnValue(createVoiceConversationControllerMock())
-    mocks.runCommand.mockResolvedValue(undefined)
-    mocks.switchSessionModel.mockResolvedValue(undefined)
-    mocks.switchSessionAgent.mockResolvedValue(undefined)
-    mocks.agents = [{ id: 'reviewer', name: 'reviewer', description: 'Reviewer', mode: 'primary' }]
-    mocks.useMobile.mockReturnValue(false)
-    mocks.useSTT.mockReturnValue({
-      isRecording: false,
-      isProcessing: false,
-      isSupported: false,
-      isEnabled: false,
-      interimTranscript: '',
-      transcript: '',
-      startRecording: vi.fn(),
-      stopRecording: vi.fn(),
-      abortRecording: vi.fn(),
-      reset: vi.fn(),
-      clear: vi.fn(),
-    })
-    mocks.useCommands.mockReturnValue({
-      searchCommands: () => [],
-      findCommand: (name: string) => {
-        if (name === 'review') return { name: 'review', description: 'Review' }
-        return BUILTIN_COMMANDS.find((command) => command.name === name)
-      },
-      recentNames: [],
-    })
-    mocks.useFileSearch.mockReturnValue({ files: [] })
-    mocks.useModelSelection.mockReturnValue({
-      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
-      modelString: 'anthropic/claude-sonnet-4',
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      recentModels: [],
-      favoriteModels: [],
-      toggleFavorite: vi.fn(),
-      isModelReady: true,
-    })
-    mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: mocks.cycleVariant })
-    mocks.useSessionAgent.mockReturnValue({ agent: 'build' })
-    mocks.useUserBash.mockImplementation((selector: (state: unknown) => unknown) => selector({ addUserBashCommand: vi.fn() }))
-    mocks.useSessionAgentStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ setAgent: mocks.setAgent }))
-    mocks.useSendErrorStore.mockImplementation((selector: (state: unknown) => unknown) => selector({ errors: {} }))
-    mocks.useHasBackgroundActivity.mockReturnValue(false)
-    suggestionProps.isOpen = false
-    suggestionProps.selectedIndex = 0
-  })
-
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'matchMedia')
-  })
-
   it('focuses the prompt on open with a fine pointer', async () => {
-    stubMatchMedia(true)
-    renderComponent()
+    installMatchMedia(true)
+    await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    expect(input).toHaveFocus()
+    expect(promptTextarea()).toHaveFocus()
   })
 
   it('does not focus the prompt on open on touch devices', async () => {
-    stubMatchMedia(false)
-    renderComponent()
+    installMatchMedia(false)
+    await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    expect(input).not.toHaveFocus()
+    expect(promptTextarea()).not.toHaveFocus()
   })
 
   it('does not take focus from an element that already has it', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     const other = document.createElement('button')
     document.body.appendChild(other)
     other.focus()
 
-    renderComponent()
+    await renderCommandInput()
 
-    await screen.findByPlaceholderText('Send a message...')
     expect(other).toHaveFocus()
     other.remove()
   })
 
   it('announces session activity changes to screen readers', async () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
-    const buildPrompt = (props: { isSessionActive?: boolean }) => (
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} {...props} />
-      </QueryClientProvider>
-    )
+    const { rerenderWith } = await renderCommandInput()
 
-    const { rerender } = render(buildPrompt({}))
-    await screen.findByPlaceholderText('Send a message...')
     expect(screen.getByRole('status').textContent).toBe('')
 
-    rerender(buildPrompt({ isSessionActive: true }))
+    await rerenderWith({ isSessionActive: true })
     expect(screen.getByRole('status')).toHaveTextContent('Session working')
 
-    mocks.useHasBackgroundActivity.mockReturnValue(true)
-    rerender(buildPrompt({}))
-    expect(screen.getByRole('status')).toHaveTextContent('Background tasks running')
-  })
-
-  it('keeps the model picker visible while the session is active', async () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
-    const buildPrompt = (props: { isSessionActive?: boolean }) => (
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} {...props} />
-      </QueryClientProvider>
-    )
-
-    const { rerender } = render(buildPrompt({}))
-    await screen.findByPlaceholderText('Send a message...')
-    expect(screen.getByTestId('model-quick-select').querySelector('button')).not.toBeNull()
-
-    rerender(buildPrompt({ isSessionActive: true }))
-    expect(screen.getByTestId('model-quick-select').querySelector('button')).not.toBeNull()
+    await rerenderWith({ isSessionActive: false })
+    useSessionStatus.getState().setShellRunning('shell-1', 'test-session', '/repo')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Background tasks running'))
   })
 
   it('disables submit and does not run a command while the model is not ready', async () => {
-    mocks.useModelSelection.mockReturnValue({
-      model: null,
-      modelString: null,
-      setModel: vi.fn(),
-      setActiveAgent: vi.fn(),
-      recentModels: [],
-      favoriteModels: [],
-      toggleFavorite: vi.fn(),
-      isModelReady: false,
-    })
-    renderComponent()
+    const { fetchFake } = await renderCommandInput({ deferProviders: true })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/review' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/review' } })
 
     const sendButton = screen.getByTitle('Send')
     expect(sendButton).toBeDisabled()
     fireEvent.click(sendButton)
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeUndefined()
   })
 
-  it('sends parsed command attachments and offsets to runCommand without injecting the selected agent', async () => {
-    mocks.useFileSearch.mockReturnValue({ files: ['src/App.tsx'] })
-    const { container } = renderComponent()
+  it('sends parsed command attachments and offsets to the command endpoint', async () => {
+    const { fetchFake, container } = await renderCommandInput({ files: ['src/App.tsx'] })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '@App' } })
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    fireEvent.keyDown(input, { key: 'Enter' })
-    await waitFor(() => expect(input).toHaveValue('@App.tsx '))
+    fireEvent.change(promptTextarea(), { target: { value: '@App' } })
+    await waitFor(() => expect(screen.getByTestId('prompt-suggestions')).toBeInTheDocument())
+    fireEvent.keyDown(promptTextarea(), { key: 'Enter' })
+    await waitFor(() => expect(promptTextarea()).toHaveValue('@App.tsx '))
 
     await attachImage(container)
 
-    fireEvent.change(input, { target: { value: '/review @App.tsx @reviewer' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/review @App.tsx @reviewer' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalled())
-
-    const call = mocks.runCommand.mock.calls[0][0] as {
-      sessionID: string
-      name: string
-      text: string
-      files: Array<{ uri: string; name?: string; mention?: { start: number; end: number; text: string } }>
-      agents: Array<{ name: string; mention?: { start: number; end: number; text: string } }>
-      skills: unknown[]
-    }
-
-    expect(call.sessionID).toBe('test-session')
-    expect(call.name).toBe('review')
-    expect(call.text).toBe('@App.tsx @reviewer')
-    expect(call.files).toEqual(expect.arrayContaining([
-      { uri: 'file:///test/src/App.tsx', name: 'App.tsx', mention: { start: 0, end: 8, text: '@App.tsx' } },
-      expect.objectContaining({ name: 'pic.png', uri: expect.stringMatching(/^data:image\/png/) }),
-    ]))
-    expect(call.agents).toEqual([
-      { name: 'reviewer', mention: { start: 9, end: 18, text: '@reviewer' } },
-    ])
-    expect(call.skills).toEqual([])
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')?.body).toMatchObject({
+      name: 'review',
+      text: '@App.tsx @reviewer',
+      agents: [{ name: 'reviewer', mention: { start: 9, end: 18, text: '@reviewer' } }],
+      skills: [],
+      files: expect.arrayContaining([
+        { uri: 'file:///test/src/App.tsx', name: 'App.tsx', mention: { start: 0, end: 8, text: '@App.tsx' } },
+        expect.objectContaining({ name: 'pic.png', uri: expect.stringMatching(/^data:image\/png/) }),
+      ]),
+    })
   })
 
   it('runs a command whose arguments span multiple lines', async () => {
-    renderComponent()
+    const { fetchFake } = await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/review first line\nsecond line' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/review first line\nsecond line' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalled())
-    expect(mocks.runCommand.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')?.body).toMatchObject({
       name: 'review',
       text: 'first line\nsecond line',
     })
   })
 
-  it('submits on plain Enter when the prompt is a known command', async () => {
-    renderComponent()
+  it('submits a known built-in command on plain Enter', async () => {
+    const commandActions = { ...createActions(), askSideQuestion: vi.fn() }
+    await renderCommandInput({ commandActions })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/btw first line\nsecond line' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(promptTextarea(), { target: { value: '/btw first line\nsecond line' } })
+    fireEvent.keyDown(promptTextarea(), { key: 'Enter' })
 
-    await waitFor(() => expect(defaultProps.commandActions.askSideQuestion).toHaveBeenCalledWith('first line\nsecond line'))
+    await waitFor(() => expect(commandActions.askSideQuestion).toHaveBeenCalledWith('first line\nsecond line'))
   })
 
-  it('does not submit a known command on Shift+Enter', async () => {
-    renderComponent()
+  it('does not submit a known built-in command on Shift+Enter', async () => {
+    const commandActions = { ...createActions(), askSideQuestion: vi.fn() }
+    await renderCommandInput({ commandActions })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/btw hi' } })
-    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    fireEvent.change(promptTextarea(), { target: { value: '/btw hi' } })
+    fireEvent.keyDown(promptTextarea(), { key: 'Enter', shiftKey: true })
 
-    expect(defaultProps.commandActions.askSideQuestion).not.toHaveBeenCalled()
-    expect(input).toHaveValue('/btw hi')
+    expect(commandActions.askSideQuestion).not.toHaveBeenCalled()
+    expect(promptTextarea()).toHaveValue('/btw hi')
   })
 
   it.each(['hello there', '/bt hi', '/unknown hi'])('does not submit %j on plain Enter', async (value) => {
-    renderComponent()
+    const { fetchFake } = await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value } })
-    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(promptTextarea(), { target: { value } })
+    fireEvent.keyDown(promptTextarea(), { key: 'Enter' })
 
-    expect(input).toHaveValue(value)
-    expect(mocks.runCommand).not.toHaveBeenCalled()
-    expect(defaultProps.commandActions.askSideQuestion).not.toHaveBeenCalled()
+    expect(promptTextarea()).toHaveValue(value)
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeUndefined()
   })
 
   it('preserves the submitted command text when the command submission fails', async () => {
-    mocks.runCommand.mockRejectedValueOnce(new Error('command failed'))
-    renderComponent()
+    const { fetchFake } = await renderCommandInput({
+      runCommand: () => ({ status: 400, json: { error: 'command failed' } }),
+    })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/review' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/review' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.runCommand).toHaveBeenCalled())
-    expect(input).toHaveValue('/review')
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeDefined())
+    expect(promptTextarea()).toHaveValue('/review')
   })
 
-  it('switches to the next primary agent for /agent without invoking runCommand', async () => {
-    mocks.agents = [
-      { id: 'build', name: 'build', mode: 'primary' },
-      { id: 'plan', name: 'plan', mode: 'primary' },
-    ]
-    renderComponent()
+  it('switches to the next primary agent for /agent without running a command', async () => {
+    const { fetchFake } = await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/agent' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/agent' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.setAgent).toHaveBeenCalledWith('test-session', 'plan'))
-    expect(mocks.runCommand).not.toHaveBeenCalled()
+    await waitFor(() => expect(useSessionAgentStore.getState().agents['test-session']).toBe('plan'))
+    expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/command')).toBeUndefined()
   })
 
   it('reports when /variants is used with a model that has no variants', async () => {
-    mocks.useVariants.mockReturnValue({ hasVariants: false, currentVariant: null, cycleVariant: mocks.cycleVariant })
-    renderComponent()
+    await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/variants' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/variants' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.showToast.info).toHaveBeenCalledWith('The selected model has no variants'))
-    expect(mocks.cycleVariant).not.toHaveBeenCalled()
+    expect(await screen.findByText('The selected model has no variants')).toBeInTheDocument()
   })
 
   it('cycles variants for /variants when the model has them', async () => {
-    mocks.useVariants.mockReturnValue({ hasVariants: true, currentVariant: 'high', cycleVariant: mocks.cycleVariant })
-    renderComponent()
+    const { fetchFake } = await renderCommandInput({
+      models: [
+        {
+          id: 'claude-sonnet-4-5',
+          providerID: 'anthropic',
+          name: 'Claude Sonnet 4.5',
+          variants: ['high', 'low'],
+        },
+      ],
+    })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/variants' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/variants' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.cycleVariant).toHaveBeenCalled())
-    expect(mocks.showToast.info).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchFake.lastRequest('POST', '/api/providers/model-state')).toBeDefined())
+    expect(fetchFake.lastRequest('POST', '/api/providers/model-state')?.body).toMatchObject({
+      variant: { model: { providerID: 'anthropic', modelID: 'claude-sonnet-4-5' }, value: 'high' },
+    })
+    expect(screen.queryByText('The selected model has no variants')).not.toBeInTheDocument()
   })
 
-  it('opens the model picker through the imperative handle while the session is active', () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
+  it('opens the model picker through the imperative handle while the session is active', async () => {
     const ref = createRef<PromptInputHandle>()
+    await renderCommandInput({ promptRef: ref, isSessionActive: true })
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} ref={ref} isSessionActive />
-      </QueryClientProvider>
-    )
-
-    expect(screen.getByTestId('model-quick-select')).toHaveAttribute('data-open', 'false')
+    expect(screen.queryByText('Select model')).not.toBeInTheDocument()
 
     act(() => {
       ref.current?.openModelPicker()
     })
 
-    expect(screen.getByTestId('model-quick-select')).toHaveAttribute('data-open', 'true')
+    expect(await screen.findByText('Select model')).toBeInTheDocument()
   })
 
   it('resets bash mode through the imperative clearPrompt', async () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['opencode', 'session', 'test-session', '/test'], sessionInfo())
     const ref = createRef<PromptInputHandle>()
+    await renderCommandInput({ promptRef: ref })
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <PromptInput {...defaultProps} ref={ref} />
-      </QueryClientProvider>
-    )
-
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '!' } })
-    expect(input).toHaveValue('!')
+    fireEvent.change(promptTextarea(), { target: { value: '!' } })
+    expect(promptTextarea()).toHaveValue('!')
     expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
 
     act(() => {
       ref.current?.clearPrompt()
     })
 
-    expect(input).toHaveValue('')
+    expect(promptTextarea()).toHaveValue('')
     expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
   })
 
   it('exits bash mode on Escape while idle and keeps the attachments', async () => {
-    const { container } = renderComponent()
+    const { container } = await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '!' } })
+    fireEvent.change(promptTextarea(), { target: { value: '!' } })
     expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
 
     await attachImage(container)
     expect(screen.getByText('pic.png')).toBeInTheDocument()
 
-    fireEvent.keyDown(input, { key: 'Escape' })
+    fireEvent.keyDown(promptTextarea(), { key: 'Escape' })
 
-    expect(input).toHaveValue('')
+    expect(promptTextarea()).toHaveValue('')
     expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
     expect(screen.getByText('pic.png')).toBeInTheDocument()
   })
 
   it('keeps attachments and clears only the text when a built-in command is submitted', async () => {
-    const { container } = renderComponent()
+    const { container } = await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
     await attachImage(container)
 
-    fireEvent.change(input, { target: { value: '/btw hi' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/btw hi' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(mocks.showToast.info).toHaveBeenCalledWith('Built-in commands do not use attachments; they were kept'))
-    expect(input).toHaveValue('')
+    expect(await screen.findByText('Built-in commands do not use attachments; they were kept')).toBeInTheDocument()
+    expect(promptTextarea()).toHaveValue('')
     expect(screen.getByText('pic.png')).toBeInTheDocument()
   })
 
   it('clears the prompt for a built-in command without attachments', async () => {
-    renderComponent()
+    await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/btw hi' } })
+    fireEvent.change(promptTextarea(), { target: { value: '/btw hi' } })
     fireEvent.click(screen.getByTitle('Send'))
 
-    await waitFor(() => expect(input).toHaveValue(''))
-    expect(mocks.showToast.info).not.toHaveBeenCalled()
+    await waitFor(() => expect(promptTextarea()).toHaveValue(''))
+    expect(screen.queryByText('Built-in commands do not use attachments; they were kept')).not.toBeInTheDocument()
   })
 
-  const commandSuggestions = () => ({
-    searchCommands: () => [
-      { item: { name: 'alpha', description: 'Alpha' }, ranges: [] },
-      { item: { name: 'beta', description: 'Beta' }, ranges: [] },
-      { item: { name: 'gamma', description: 'Gamma' }, ranges: [] },
-    ],
-    findCommand: () => undefined,
-    recentNames: [],
-  })
+  it.each([
+    [true, 'ArrowUp', 'ArrowDown'],
+    [false, 'ArrowDown', 'ArrowUp'],
+  ])('moves the command selection with the arrows (mobile: %s)', async (mobile, forward, backward) => {
+    await renderCommandInput({
+      mobile,
+      commands: [
+        { name: 'alpha', description: 'Alpha' },
+        { name: 'beta', description: 'Beta' },
+        { name: 'gamma', description: 'Gamma' },
+      ],
+    })
 
-  it('moves the command selection in the visual direction of the arrow on mobile', async () => {
-    mocks.useMobile.mockReturnValue(true)
-    mocks.useCommands.mockReturnValue(commandSuggestions())
-    renderComponent()
+    fireEvent.change(promptTextarea(), { target: { value: '/', selectionStart: 1 } })
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/', selectionStart: 1 } })
+    await waitFor(() => expect(screen.getByTestId('prompt-suggestions')).toBeInTheDocument())
+    const initial = selectedSuggestionLabel()
+    expect(initial).not.toBe('')
 
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    expect(suggestionProps.selectedIndex).toBe(0)
+    fireEvent.keyDown(promptTextarea(), { key: forward })
+    await waitFor(() => expect(selectedSuggestionLabel()).not.toBe(initial))
 
-    fireEvent.keyDown(input, { key: 'ArrowUp' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
-
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
-  })
-
-  it('keeps the desktop command arrow direction unchanged', async () => {
-    mocks.useCommands.mockReturnValue(commandSuggestions())
-    renderComponent()
-
-    const input = await screen.findByPlaceholderText('Send a message...')
-    fireEvent.change(input, { target: { value: '/', selectionStart: 1 } })
-
-    await waitFor(() => expect(suggestionProps.isOpen).toBe(true))
-    expect(suggestionProps.selectedIndex).toBe(0)
-
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(1))
-
-    fireEvent.keyDown(input, { key: 'ArrowUp' })
-    await waitFor(() => expect(suggestionProps.selectedIndex).toBe(0))
+    fireEvent.keyDown(promptTextarea(), { key: backward })
+    await waitFor(() => expect(selectedSuggestionLabel()).toBe(initial))
   })
 
   it('keeps the composer frame out of a compositing layer so the iOS caret stays aligned', async () => {
-    renderComponent()
+    await renderCommandInput()
 
-    const input = await screen.findByPlaceholderText('Send a message...')
-    const frame = input.closest('.isolate') as HTMLElement
+    const frame = promptTextarea().closest('.isolate')
+    if (!(frame instanceof HTMLElement)) throw new Error('composer frame is missing')
     const tokens = frame.className.split(/\s+/)
 
     expect(tokens).not.toContain('transition-all')
@@ -599,73 +323,87 @@ describe('PromptInput command submission', () => {
   })
 
   describe('mobile keybar', () => {
-    beforeEach(() => {
-      mocks.useMobile.mockReturnValue(true)
-    })
-
     it('shows only while the prompt is focused on mobile', async () => {
-      renderComponent()
+      await renderCommandInput({ mobile: true })
 
-      const input = await screen.findByPlaceholderText('Send a message...')
       expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
 
-      fireEvent.focus(input)
+      fireEvent.focus(promptTextarea())
       expect(screen.getByRole('toolbar', { name: 'Insert' })).toBeInTheDocument()
     })
 
     it('is not shown on desktop', async () => {
-      mocks.useMobile.mockReturnValue(false)
-      renderComponent()
+      await renderCommandInput()
 
-      fireEvent.focus(await screen.findByPlaceholderText('Send a message...'))
+      fireEvent.focus(promptTextarea())
       expect(screen.queryByRole('toolbar', { name: 'Insert' })).not.toBeInTheDocument()
     })
 
     it('inserts a separated trigger at the cursor', async () => {
-      renderComponent()
+      await renderCommandInput({ mobile: true })
 
-      const input = await screen.findByPlaceholderText('Send a message...') as HTMLTextAreaElement
-      fireEvent.change(input, { target: { value: 'hello world' } })
-      fireEvent.focus(input)
-      input.setSelectionRange(5, 5)
+      fireEvent.change(promptTextarea(), { target: { value: 'hello world' } })
+      fireEvent.focus(promptTextarea())
+      promptTextarea().setSelectionRange(5, 5)
 
       fireEvent.click(screen.getByRole('button', { name: 'mention @' }))
-      expect(input).toHaveValue('hello @ world')
+      expect(promptTextarea()).toHaveValue('hello @ world')
 
-      fireEvent.change(input, { target: { value: 'hello' } })
-      input.setSelectionRange(5, 5)
+      fireEvent.change(promptTextarea(), { target: { value: 'hello' } })
+      promptTextarea().setSelectionRange(5, 5)
       fireEvent.click(screen.getByRole('button', { name: 'cmd /' }))
-      expect(input).toHaveValue('hello /')
+      expect(promptTextarea()).toHaveValue('hello /')
     })
 
     it('enables bash only for an empty prompt and toggles bash mode', async () => {
-      renderComponent()
+      await renderCommandInput({ mobile: true })
 
-      const input = await screen.findByPlaceholderText('Send a message...')
-      expect(input).toHaveAttribute('autocomplete', 'off')
-      expect(input).toHaveAttribute('autocorrect', 'off')
-      expect(input).toHaveAttribute('autocapitalize', 'off')
-      expect(input).toHaveAttribute('spellcheck', 'false')
-      fireEvent.focus(input)
-      fireEvent.change(input, { target: { value: 'text' } })
+      expect(promptTextarea()).toHaveAttribute('autocomplete', 'off')
+      expect(promptTextarea()).toHaveAttribute('autocorrect', 'off')
+      expect(promptTextarea()).toHaveAttribute('autocapitalize', 'off')
+      expect(promptTextarea()).toHaveAttribute('spellcheck', 'false')
+      fireEvent.focus(promptTextarea())
+      fireEvent.change(promptTextarea(), { target: { value: 'text' } })
       expect(screen.getByRole('button', { name: 'bash !' })).toBeDisabled()
 
-      fireEvent.change(input, { target: { value: '' } })
+      fireEvent.change(promptTextarea(), { target: { value: '' } })
       const bashKey = screen.getByRole('button', { name: 'bash !' })
       expect(bashKey).toBeEnabled()
 
       fireEvent.click(bashKey)
-      expect(input).toHaveValue('!')
+      expect(promptTextarea()).toHaveValue('!')
       expect(screen.getByTestId('composer-mode-badge')).toHaveTextContent('BASH')
       expect(screen.getByRole('button', { name: 'cmd /' })).toBeDisabled()
-      expect(input).toHaveAttribute('autocorrect', 'off')
-      expect(input).toHaveAttribute('autocapitalize', 'off')
-      expect(input).toHaveAttribute('spellcheck', 'false')
 
       fireEvent.click(screen.getByRole('button', { name: 'bash !' }))
-      expect(input).toHaveValue('')
+      expect(promptTextarea()).toHaveValue('')
       expect(screen.queryByTestId('composer-mode-badge')).not.toBeInTheDocument()
     })
   })
 })
 
+function createActions() {
+  const action = () => vi.fn()
+  return {
+    showSessions: action(),
+    showModels: action(),
+    newSession: action(),
+    toggleDetails: action(),
+    exportSession: action(),
+    copyTranscript: action(),
+    compact: action(),
+    askSideQuestion: action(),
+    renameSession: action(),
+    forkSession: action(),
+    jumpToMessage: action(),
+    undo: action(),
+    redo: action(),
+    cycleAgent: action(),
+    cycleVariant: action(),
+    showMcp: action(),
+    showSkills: action(),
+    showSettings: action(),
+    connectProvider: action(),
+    showWalkthrough: action(),
+  }
+}

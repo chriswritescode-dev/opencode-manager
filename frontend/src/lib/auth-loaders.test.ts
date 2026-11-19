@@ -1,24 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { LoaderFunctionArgs } from 'react-router-dom'
-import { getLoginRedirectTarget, loginLoader, loginRedirectPath, protectedLoader, resolveRedirectTarget } from './auth-loaders'
+import {
+  getLoginRedirectTarget,
+  loginLoader,
+  loginRedirectPath,
+  protectedLoader,
+  resolveRedirectTarget,
+  type AuthConfig,
+} from './auth-loaders'
 import { STORED_AUTH_USER_KEY } from './authSession'
+import { createFetchFake, type FetchRoute } from '@/test/fetchFake'
+import { makeAuthConfig, makeAuthSession } from '@/test/fixtures/api'
 
 const STORED_USER_KEY_VALUE = { id: 'user-1', email: 'user@example.com', name: 'Ada' }
 
-const mocks = vi.hoisted(() => ({
-  getSession: vi.fn(),
-}))
-
-vi.mock('./auth-client', () => ({ getSession: mocks.getSession }))
+const SESSION_ROUTE = '/api/auth/get-session'
+const CONFIG_ROUTE = '/api/auth-info/config'
 
 function loaderArgs(url: string): LoaderFunctionArgs {
-  return { request: new Request(url), params: {}, context: {} } as LoaderFunctionArgs
+  return { request: new Request(url), params: {} }
 }
 
-function redirectLocation(result: Awaited<ReturnType<typeof protectedLoader>>): string | null {
+function redirectLocation(result: Response | { config: AuthConfig } | null): string | null {
   if (!(result instanceof Response)) return null
-  return new URL(result.headers.get('Location') ?? '', 'http://localhost').pathname
-    + new URL(result.headers.get('Location') ?? '', 'http://localhost').search
+  const location = new URL(result.headers.get('Location') ?? '', 'http://localhost')
+  return `${location.pathname}${location.search}`
+}
+
+function sessionRoute(respond: FetchRoute['respond']): FetchRoute {
+  return { method: 'GET', path: SESSION_ROUTE, respond }
+}
+
+function configRoute(config = makeAuthConfig()): FetchRoute {
+  return { method: 'GET', path: CONFIG_ROUTE, respond: () => ({ json: config }) }
+}
+
+function installRoutes(routes: FetchRoute[]): void {
+  createFetchFake(routes).install()
 }
 
 describe('auth redirect targets', () => {
@@ -54,12 +72,11 @@ describe('auth redirect targets', () => {
 
 describe('protectedLoader', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     localStorage.clear()
   })
 
   it('redirects an anonymous visitor to login carrying the requested location', async () => {
-    mocks.getSession.mockResolvedValue({ data: null, error: null })
+    installRoutes([sessionRoute(() => ({ json: null }))])
 
     const result = await protectedLoader(loaderArgs('http://localhost/repos/2?tab=workspaces#session'))
 
@@ -67,29 +84,30 @@ describe('protectedLoader', () => {
   })
 
   it('lets an authenticated visitor through', async () => {
-    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    installRoutes([sessionRoute(() => ({ json: makeAuthSession() }))])
 
     await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
   })
 
   it('remembers the validated user for an offline cold start', async () => {
-    mocks.getSession.mockResolvedValue({
-      data: { user: { id: 'user-1', email: 'user@example.com', name: 'Ada' } },
-      error: null,
-    })
+    installRoutes([sessionRoute(() => ({ json: makeAuthSession() }))])
 
     await protectedLoader(loaderArgs('http://localhost/repos/2'))
 
     expect(JSON.parse(localStorage.getItem(STORED_AUTH_USER_KEY) ?? '')).toEqual({
-      id: 'user-1',
-      email: 'user@example.com',
-      name: 'Ada',
+      id: 'test-user',
+      email: 'test@example.com',
+      name: 'Test User',
     })
   })
 
   it('lets a stored user through when the session read fails transiently', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
-    mocks.getSession.mockRejectedValue(new TypeError('Failed to fetch'))
+    installRoutes([
+      sessionRoute(() => {
+        throw new TypeError('Failed to fetch')
+      }),
+    ])
 
     await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
     expect(localStorage.getItem(STORED_AUTH_USER_KEY)).not.toBeNull()
@@ -97,16 +115,17 @@ describe('protectedLoader', () => {
 
   it('lets a stored user through on a 5xx response', async () => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
-    mocks.getSession.mockResolvedValue({
-      data: null,
-      error: { status: 503, statusText: 'Service Unavailable' },
-    })
+    installRoutes([sessionRoute(() => ({ status: 503, json: { error: 'unavailable' } }))])
 
     await expect(protectedLoader(loaderArgs('http://localhost/repos/2'))).resolves.toBeNull()
   })
 
   it('redirects when a transient failure has no stored user', async () => {
-    mocks.getSession.mockRejectedValue(new TypeError('Failed to fetch'))
+    installRoutes([
+      sessionRoute(() => {
+        throw new TypeError('Failed to fetch')
+      }),
+    ])
 
     const result = await protectedLoader(loaderArgs('http://localhost/repos/2'))
 
@@ -114,11 +133,11 @@ describe('protectedLoader', () => {
   })
 
   it.each([
-    ['a 401 response', { status: 401, statusText: 'Unauthorized' }],
-    ['a successful response without a user', null],
-  ])('forgets the stored user and redirects on %s', async (_label, error) => {
+    ['a 401 response', () => ({ status: 401, json: { error: 'unauthorized' } })],
+    ['a successful response without a user', () => ({ json: null })],
+  ])('forgets the stored user and redirects on %s', async (_label, respond) => {
     localStorage.setItem(STORED_AUTH_USER_KEY, JSON.stringify(STORED_USER_KEY_VALUE))
-    mocks.getSession.mockResolvedValue({ data: null, error })
+    installRoutes([sessionRoute(respond)])
 
     const result = await protectedLoader(loaderArgs('http://localhost/repos/2'))
 
@@ -129,15 +148,11 @@ describe('protectedLoader', () => {
 
 describe('loginLoader', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ enabledProviders: ['credentials'], registrationEnabled: true, isFirstUser: false, adminConfigured: true }),
-    }))
+    localStorage.clear()
   })
 
   it('returns an authenticated visitor to the redirect target', async () => {
-    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    installRoutes([configRoute(), sessionRoute(() => ({ json: makeAuthSession() }))])
 
     const result = await loginLoader(loaderArgs('http://localhost/login?redirect=%2Frepos%2F2%3Ftab%3Dworkspaces'))
 
@@ -145,7 +160,7 @@ describe('loginLoader', () => {
   })
 
   it('returns an authenticated visitor without a target to the app root', async () => {
-    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    installRoutes([configRoute(), sessionRoute(() => ({ json: makeAuthSession() }))])
 
     const result = await loginLoader(loaderArgs('http://localhost/login'))
 
@@ -153,7 +168,7 @@ describe('loginLoader', () => {
   })
 
   it('ignores an unsafe redirect target', async () => {
-    mocks.getSession.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    installRoutes([configRoute(), sessionRoute(() => ({ json: makeAuthSession() }))])
 
     const result = await loginLoader(loaderArgs('http://localhost/login?redirect=%2F%2Fevil.example.com'))
 

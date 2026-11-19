@@ -4,21 +4,25 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
+import type { Database } from 'bun:sqlite'
 import { getOpenCodeConfigHome } from '@opencode-manager/shared/config/env'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
 import { createRepo } from '../../src/db/queries'
 import { SettingsService } from '../../src/services/settings'
 import { createRepoRoutes } from '../../src/routes/repos'
 import { createWorktreeSafely } from '../../src/services/repo'
 import { syncManagerGitIdentityConfig } from '../../src/services/git-identity'
+import { createGitService } from '../../src/services/git/GitService'
+import { ProjectConfigService } from '../../src/services/project-config'
+import { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { ScheduleService } from '../../src/services/schedules'
+import { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { SecretsService } from '../../src/services/secrets'
+import { TerminalService } from '../../src/services/terminal'
+import { CredentialProvider } from '../../src/services/credential-provider'
 import { createGitAuthService, cloneOrigin, createOrigin, git, uniqueName } from '../helpers/git-fixtures'
 import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
-import type { TerminalService } from '../../src/services/terminal'
-import type { ProjectConfigService } from '../../src/services/project-config'
-import type { SecretsService } from '../../src/services/secrets'
-import type { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createTestDatabase } from '../helpers/test-database'
 
 const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'repos-git-identity-'))
 const homeDir = path.join(workspaceRoot, 'home')
@@ -47,13 +51,38 @@ describe('repo git identity routes', () => {
   let app: Hono
 
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
     rmSync(reposPath, { recursive: true, force: true })
     mkdirSync(reposPath, { recursive: true })
-    const scheduleService = { prepareRepoDelete: () => {} } as unknown as Parameters<typeof createRepoRoutes>[2]
+    const gitAuthService = createGitAuthService()
+    const openCodeClient = createStubOpenCodeClient()
+    const gitService = createGitService(gitAuthService)
+    const projectConfigService = new ProjectConfigService(db, gitService, gitAuthService)
+    const terminalService = new TerminalService(
+      { client: openCodeClient, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+      new CredentialProvider(db),
+      createStubRepoEnvService(),
+    )
+    const scheduleService = new ScheduleService(db, openCodeClient, new ScheduleWorktreeManager(gitAuthService, db))
+    const repoWorkspaces = new RepoWorkspaceService(
+      db,
+      openCodeClient,
+      gitAuthService,
+      projectConfigService,
+      terminalService,
+      scheduleService,
+    )
     app = new Hono()
-    app.route('/repos', createRepoRoutes(db, createGitAuthService(), scheduleService, createStubOpenCodeClient(), {} as unknown as TerminalService, {} as unknown as ProjectConfigService, {} as unknown as RepoWorkspaceService, {} as unknown as SecretsService))
+    app.route('/repos', createRepoRoutes(
+      db,
+      gitAuthService,
+      scheduleService,
+      openCodeClient,
+      terminalService,
+      projectConfigService,
+      repoWorkspaces,
+      new SecretsService(db),
+    ))
   })
 
   afterEach(() => {
@@ -64,7 +93,7 @@ describe('repo git identity routes', () => {
     rmSync(workspaceRoot, { recursive: true, force: true })
   })
 
-  function setupClone(prefix: string): { repoId: number; repoPath: string; origin: string } {
+  function setupClone(prefix: string) {
     const origin = path.join(workspaceRoot, uniqueName(`${prefix}-origin.git`))
     const work = path.join(workspaceRoot, uniqueName(`${prefix}-work`))
     createOrigin(origin, work)

@@ -1,23 +1,28 @@
 import { existsSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { z } from 'zod'
 import { readJsonFile, writeJsonFileAtomic } from './json-store.js'
 
-export interface OcmState {
-  managerUrl: string
-  managerName?: string
-  lastRepoId?: number
-  lastRepoName?: string
-  lastRepoDir?: string
-  lastRepoBranch?: string | null
-  updatedAt?: number
-}
+const OcmStateSchema = z.object({
+  managerUrl: z.string(),
+  managerName: z.string().optional(),
+  lastRepoId: z.number().optional(),
+  lastRepoName: z.string().optional(),
+  lastRepoDir: z.string().optional(),
+  lastRepoBranch: z.string().nullish(),
+  updatedAt: z.number().optional(),
+})
 
-export interface InstallNotice {
-  link: string
-  binDir: string
-  pathMissing: boolean
-}
+const InstallNoticeSchema = z.object({
+  link: z.string(),
+  binDir: z.string(),
+  pathMissing: z.boolean(),
+})
+
+export type OcmState = z.infer<typeof OcmStateSchema>
+
+export type InstallNotice = z.infer<typeof InstallNoticeSchema>
 
 const STATE_DIR = join(homedir(), '.config', 'opencode-manager')
 const STATE_FILE = join(STATE_DIR, 'state.json')
@@ -32,7 +37,7 @@ export function getStatePath(): string {
 }
 
 export function readState(): OcmState | null {
-  const parsed = readJsonFile<OcmState>(STATE_FILE)
+  const parsed = readJsonFile(STATE_FILE, OcmStateSchema)
   return parsed?.managerUrl ? parsed : null
 }
 
@@ -57,7 +62,7 @@ export function writeInstallNotice(notice: InstallNotice): void {
 export function readInstallNotice(): InstallNotice | null {
   let parsed: InstallNotice | null
   try {
-    parsed = readJsonFile<InstallNotice>(INSTALL_NOTICE_FILE)
+    parsed = readJsonFile(INSTALL_NOTICE_FILE, InstallNoticeSchema)
   } catch {
     return null
   }

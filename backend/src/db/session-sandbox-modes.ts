@@ -1,5 +1,7 @@
 import type { Database } from 'bun:sqlite'
-import type { SessionSandboxResources, SessionSandboxSource } from '@opencode-manager/shared/schemas'
+import { SessionSandboxSourceSchema, type SessionSandboxResources, type SessionSandboxSource } from '@opencode-manager/shared/schemas'
+import { z } from 'zod'
+import { selectRow } from './rows'
 
 export interface SessionSandboxModeRow {
   sandboxed: boolean
@@ -8,13 +10,13 @@ export interface SessionSandboxModeRow {
   resources: SessionSandboxResources | null
 }
 
-interface SessionSandboxModeRawRow {
-  sandboxed: number
-  source: SessionSandboxSource
-  toggled_at: number
-  cpus: number | null
-  memory_mib: number | null
-}
+const SessionSandboxModeRawRowSchema = z.object({
+  sandboxed: z.number(),
+  source: SessionSandboxSourceSchema,
+  toggled_at: z.number(),
+  cpus: z.number().nullable(),
+  memory_mib: z.number().nullable(),
+})
 
 export function ensureSessionSandboxModesTable(db: Database): void {
   db.run(`
@@ -31,9 +33,12 @@ export function ensureSessionSandboxModesTable(db: Database): void {
 }
 
 export function getSessionSandboxMode(db: Database, sessionId: string): SessionSandboxModeRow | null {
-  const row = db
-    .prepare('SELECT sandboxed, source, toggled_at, cpus, memory_mib FROM session_sandbox_modes WHERE session_id = ?')
-    .get(sessionId) as SessionSandboxModeRawRow | undefined
+  const row = selectRow(
+    db,
+    SessionSandboxModeRawRowSchema,
+    'SELECT sandboxed, source, toggled_at, cpus, memory_mib FROM session_sandbox_modes WHERE session_id = ?',
+    sessionId,
+  )
   if (!row) return null
   return {
     sandboxed: row.sandboxed === 1,

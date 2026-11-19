@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Context, ToastOptions } from '@opencode/plugin/tui/context'
+import type { ToastOptions } from '@opencode/plugin/tui/context'
 import {
   FuseMultiRunRequestSchema,
   FusionRecoveredDetailsSchema,
@@ -23,8 +23,10 @@ import {
 } from '@opencode-manager/shared/opencode'
 import { ManagerApi, ManagerApiError, isManagerRouteMissing } from './manager-api.js'
 import { resolveManagerApi } from './manager-auth.js'
+import type { ManagerAuthDeps } from './manager-auth.js'
 import { describeCause } from './token-store.js'
 import { slashArgument } from './tui-dialogs.js'
+import type { OcmTuiContext } from './tui-context.js'
 import type { RemoteContext } from './remote-context.js'
 
 export const MULTI_RUN_COMMAND = 'ocm-multirun'
@@ -56,7 +58,6 @@ export type FusionFormInput = {
   instructions: string
 }
 
-/** Multi-run operations the dialogs call. Launch and fuse open the started sessions themselves and resolve to an error message, or null. */
 export type MultiRunActions = {
   loadModels(): Promise<ActionResult<ModelOption[]>>
   list(): Promise<ActionResult<MultiRun[]>>
@@ -80,9 +81,10 @@ export type MultiRunCommandDeps = {
   remote: RemoteContext | undefined
   showLaunchDialog: (props: MultiRunLaunchDialogProps) => void
   showRunsDialog: (props: MultiRunsDialogProps) => void
+  auth?: ManagerAuthDeps
 }
 
-export async function listModelOptions(context: Context): Promise<ModelOption[]> {
+export async function listModelOptions(context: OcmTuiContext): Promise<ModelOption[]> {
   await Promise.all([context.data.location.model.sync(), context.data.location.provider.sync()])
   const providerNames = new Map(
     (context.data.location.provider.list() ?? [])
@@ -104,7 +106,6 @@ export async function listModelOptions(context: Context): Promise<ModelOption[]>
     })
 }
 
-/** Case-insensitive match of every whitespace-separated term against the model name or ref. */
 export function filterModelOptions(options: readonly ModelOption[], query: string): ModelOption[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return [...options]
@@ -114,7 +115,7 @@ export function filterModelOptions(options: readonly ModelOption[], query: strin
   })
 }
 
-export function openManagerSessions(context: Context, sessionIDs: string[]): void {
+export function openManagerSessions(context: OcmTuiContext, sessionIDs: string[]): void {
   const first = sessionIDs[0]
   if (!first) return
 
@@ -142,12 +143,10 @@ export function runSummary(run: MultiRun): string {
   return `${run.entries.length} models · ${started} started · ${run.fusions.length} fusions`
 }
 
-/** Started entries backed by a session: the sessions to open and the valid fusion sources. */
 export function startedEntries(run: MultiRun): (MultiRunEntry & { sessionId: string })[] {
   return run.entries.filter(isFusionSourceEntry)
 }
 
-/** Toggles an entry in the fusion selection, keeping run order and ignoring non-sources and selections past the model limit. */
 export function toggleFusionSource(run: MultiRun, selected: readonly number[], entryId: number): number[] {
   const sourceIds = startedEntries(run).map((entry) => entry.id)
   if (selected.includes(entryId)) return sourceIds.filter((id) => id !== entryId && selected.includes(id))
@@ -163,14 +162,15 @@ export function parseLaunchForm(form: LaunchFormInput, repoId: number): ActionRe
   if (form.models.length > MULTI_RUN_MAX_MODELS) return { ok: false, error: `Choose at most ${MULTI_RUN_MAX_MODELS} models.` }
 
   const baseRef = form.baseRef.trim()
-  const parsed = LaunchMultiRunRequestSchema.safeParse({
+  const payload: LaunchMultiRunRequest = {
     repoId,
     name,
     prompt,
     models: form.models,
     isolate: form.isolate,
-    ...(form.isolate && baseRef ? { baseRef } : {}),
-  })
+  }
+  if (form.isolate && baseRef) payload.baseRef = baseRef
+  const parsed = LaunchMultiRunRequestSchema.safeParse(payload)
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid multi-run.' }
   return { ok: true, value: parsed.data }
 }
@@ -183,33 +183,38 @@ export function parseFusionForm(form: FusionFormInput, requestId: string): Actio
 
   const instructions = form.instructions.trim()
   const baseRef = form.baseRef.trim()
-  const parsed = FuseMultiRunRequestSchema.safeParse({
+  const payload: FuseMultiRunRequest = {
     requestId,
     entryIds: form.entryIds,
     model: form.model,
-    ...(instructions ? { instructions } : {}),
-    ...(baseRef ? { baseRef } : {}),
-  })
+  }
+  if (instructions) payload.instructions = instructions
+  if (baseRef) payload.baseRef = baseRef
+  const parsed = FuseMultiRunRequestSchema.safeParse(payload)
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid fusion.' }
   return { ok: true, value: parsed.data }
 }
 
-/** Maps a Manager error to a message, plus the session of an earlier fusion attempt the Manager recovered instead. */
-export function describeMultiRunError(error: unknown): { message: string; recoveredSessionId?: string } {
-  if (isManagerRouteMissing(error)) return { message: MULTI_RUN_ROUTE_MISSING }
-  if (!(error instanceof ManagerApiError)) return { message: describeCause(error) }
+export interface MultiRunErrorDescription {
+  message: string
+  recoveredSessionId?: string
+}
 
-  const unavailable = FusionUnavailableDetailsSchema.safeParse(error.details)
+export function describeMultiRunError(cause: unknown): MultiRunErrorDescription {
+  if (isManagerRouteMissing(cause)) return { message: MULTI_RUN_ROUTE_MISSING }
+  if (!(cause instanceof ManagerApiError)) return { message: describeCause(cause) }
+
+  const unavailable = FusionUnavailableDetailsSchema.safeParse(cause.details)
   if (unavailable.success && unavailable.data.unavailableSources.length > 0) {
     return { message: unavailable.data.unavailableSources.map((source) => `${source.model}: ${source.message}`).join('\n') }
   }
 
   const recovered =
-    error.code === null || error.code === 'FUSION_ATTEMPT_RECOVERED' ? FusionRecoveredDetailsSchema.safeParse(error.details) : undefined
+    cause.code === null || cause.code === 'FUSION_ATTEMPT_RECOVERED' ? FusionRecoveredDetailsSchema.safeParse(cause.details) : undefined
   const recoveredSessionId = recovered?.success ? recovered.data.fusions[0]?.sessionId : undefined
   if (recoveredSessionId) return { message: 'An earlier fusion attempt is already running.', recoveredSessionId }
 
-  return { message: error.message }
+  return { message: cause.message }
 }
 
 export function multiRunLaunchToast(run: MultiRun): ToastOptions {
@@ -221,7 +226,7 @@ export function multiRunLaunchToast(run: MultiRun): ToastOptions {
   return { variant, message: lines.join('\n') }
 }
 
-export async function runMultiRunCommand(context: Context, deps: MultiRunCommandDeps, input?: string): Promise<void> {
+export async function runMultiRunCommand(context: OcmTuiContext, deps: MultiRunCommandDeps, input?: string): Promise<void> {
   try {
     const repoId = deps.remote?.repoId
     if (!deps.remote || !repoId) {
@@ -229,7 +234,7 @@ export async function runMultiRunCommand(context: Context, deps: MultiRunCommand
       return
     }
 
-    const resolved = await resolveManagerApi(deps.remote.managerUrl)
+    const resolved = await resolveManagerApi(deps.remote.managerUrl, deps.auth)
     if (!resolved.ok) {
       context.ui.toast.show({ variant: 'error', message: resolved.message })
       return
@@ -260,7 +265,7 @@ function fusionRequestKey(runId: number, form: FusionFormInput): string {
 
 const pendingFusions = new Map<string, string>()
 
-function createMultiRunActions(context: Context, api: ManagerApi, repoId: number): MultiRunActions {
+function createMultiRunActions(context: OcmTuiContext, api: ManagerApi, repoId: number): MultiRunActions {
   const attempt = async <Value>(operation: () => Promise<Value>): Promise<ActionResult<Value>> => {
     try {
       return { ok: true, value: await operation() }

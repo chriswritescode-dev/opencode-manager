@@ -1,83 +1,53 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter } from 'react-router-dom'
-import { createUseSettingsMock } from '@/test/test-utils'
 import { RepoList } from './RepoList'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { makeRepo } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 import type { Repo } from '@/api/types'
 
-const mocks = vi.hoisted(() => ({
-  listRepos: vi.fn(),
-  useRepoActivityState: vi.fn(),
-  fetchReposGitStatus: vi.fn(),
-}))
-
-vi.mock('@/api/repos', () => ({
-  listRepos: mocks.listRepos,
-  deleteRepo: vi.fn(),
-  updateRepoOrder: vi.fn(),
-}))
-
-vi.mock('@/api/git', () => ({
-  fetchReposGitStatus: mocks.fetchReposGitStatus,
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useRepoActivityState: mocks.useRepoActivityState,
-}))
-
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: () => createUseSettingsMock(),
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useMobile: () => false,
-  useSwipeBack: () => ({
-    bind: vi.fn(),
-    swipeProgress: 0,
-    swipeStyles: {},
-  }),
-}))
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  }
-})
+const eventProviderRoutes: FetchRoute[] = [
+  { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/permission/request', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/form', respond: () => ({ json: { data: [] } }) },
+]
 
 function createRepo(overrides: Partial<Repo> = {}): Repo {
-  return {
+  return makeRepo({
     id: 1,
     name: 'demo-app',
     localPath: 'demo-app',
     fullPath: '/workspace/repos/demo-app',
     defaultBranch: 'main',
     branch: 'main',
+    currentBranch: 'main',
     cloneStatus: 'ready',
-    clonedAt: Date.now(),
+    clonedAt: 1,
     isWorktree: false,
     isLocal: true,
     ...overrides,
-  }
+  })
 }
 
-function renderRepoList(
-  onAddRepo: () => void = vi.fn(),
-  options: { queryClient?: QueryClient } = {},
-) {
-  const queryClient = options.queryClient
-    ?? new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <RepoList onAddRepo={onAddRepo} />
-      </BrowserRouter>
-    </QueryClientProvider>,
-  )
+function renderRepoList(options: {
+  onAddRepo?: () => void
+  repos?: FetchRoute
+  extraRoutes?: FetchRoute[]
+  queryClient?: ReturnType<typeof createTestQueryClient>
+} = {}) {
+  const onAddRepo = options.onAddRepo ?? vi.fn()
+  const view = renderWithProviders(<RepoList onAddRepo={onAddRepo} />, {
+    events: true,
+    queryClient: options.queryClient,
+    fetchRoutes: [
+      options.repos ?? { method: 'GET', path: '/api/repos', respond: () => ({ json: [] }) },
+      { method: 'POST', path: '/api/repos/git-status-batch', respond: () => ({ json: {} }) },
+      ...eventProviderRoutes,
+      ...(options.extraRoutes ?? []),
+    ],
+  })
+  return { ...view, onAddRepo }
 }
 
 async function openRepoDeleteDialog(user: ReturnType<typeof userEvent.setup>) {
@@ -86,18 +56,9 @@ async function openRepoDeleteDialog(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('RepoList', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useRepoActivityState.mockReturnValue(null)
-    mocks.fetchReposGitStatus.mockResolvedValue(new Map())
-  })
-
   it('calls onAddRepo once from the empty state', async () => {
-    mocks.listRepos.mockResolvedValue([])
-    const onAddRepo = vi.fn()
     const user = userEvent.setup()
-
-    renderRepoList(onAddRepo)
+    const { onAddRepo } = renderRepoList()
 
     await user.click(await screen.findByRole('button', { name: 'Add repository' }))
 
@@ -105,10 +66,10 @@ describe('RepoList', () => {
   })
 
   it('shows a search-aware empty message when nothing matches the query', async () => {
-    mocks.listRepos.mockResolvedValue([createRepo()])
     const user = userEvent.setup()
-
-    renderRepoList()
+    renderRepoList({
+      repos: { method: 'GET', path: '/api/repos', respond: () => ({ json: [createRepo()] }) },
+    })
 
     await screen.findByText('demo-app')
     await user.type(screen.getByPlaceholderText('Search repositories...'), 'zzzz-nomatch')
@@ -118,27 +79,29 @@ describe('RepoList', () => {
   })
 
   it('keeps the filter empty message when no search query is active', async () => {
-    mocks.listRepos.mockResolvedValue([createRepo({ cloneStatus: 'cloning' })])
-
-    renderRepoList()
+    renderRepoList({
+      repos: { method: 'GET', path: '/api/repos', respond: () => ({ json: [createRepo({ cloneStatus: 'cloning' })] }) },
+    })
 
     expect(await screen.findByText('No recently accessed repositories')).toBeInTheDocument()
   })
 
   it('shows the error state when the first load fails', async () => {
-    mocks.listRepos.mockRejectedValue(new Error('offline'))
-
-    renderRepoList()
+    renderRepoList({
+      repos: { method: 'GET', path: '/api/repos', respond: () => { throw new Error('offline') } },
+    })
 
     expect(await screen.findByText(/Failed to load repositories/)).toBeInTheDocument()
+    expect(screen.getByText(/offline/)).toBeInTheDocument()
   })
 
   it('keeps cached repositories when the refetch fails', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const queryClient = createTestQueryClient()
     queryClient.setQueryData(['repos'], [createRepo()])
-    mocks.listRepos.mockRejectedValue(new Error('offline'))
-
-    renderRepoList(vi.fn(), { queryClient })
+    renderRepoList({
+      queryClient,
+      repos: { method: 'GET', path: '/api/repos', respond: () => { throw new Error('offline') } },
+    })
 
     expect(await screen.findByText('demo-app')).toBeInTheDocument()
     await waitFor(() => expect(queryClient.getQueryState(['repos'])?.status).toBe('error'))
@@ -146,10 +109,10 @@ describe('RepoList', () => {
   })
 
   it('labels the confirm button "Unlink" for a local repository', async () => {
-    mocks.listRepos.mockResolvedValue([createRepo()])
     const user = userEvent.setup()
-
-    renderRepoList()
+    renderRepoList({
+      repos: { method: 'GET', path: '/api/repos', respond: () => ({ json: [createRepo()] }) },
+    })
     const dialog = await openRepoDeleteDialog(user)
 
     expect(within(dialog).getByText('Unlink Repository')).toBeInTheDocument()
@@ -158,12 +121,24 @@ describe('RepoList', () => {
   })
 
   it('labels the confirm button "Delete" for a cloned repository', async () => {
-    mocks.listRepos.mockResolvedValue([
-      createRepo({ id: 2, name: 'cloned', localPath: 'cloned', repoUrl: 'https://github.com/test/cloned', isLocal: false }),
-    ])
     const user = userEvent.setup()
-
-    renderRepoList()
+    renderRepoList({
+      repos: {
+        method: 'GET',
+        path: '/api/repos',
+        respond: () => ({
+          json: [
+            createRepo({
+              id: 2,
+              name: 'cloned',
+              localPath: 'cloned',
+              repoUrl: 'https://github.com/test/cloned',
+              isLocal: false,
+            }),
+          ],
+        }),
+      },
+    })
     const dialog = await openRepoDeleteDialog(user)
 
     expect(within(dialog).getByText('Delete Repository')).toBeInTheDocument()

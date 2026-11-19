@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { getIconToggleButtonClassName } from '@/components/ui/icon-toggle-button'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { usePermissionModeToggle } from '@/hooks/usePermissionModeToggle'
 import { useSandboxToggle } from '@/hooks/useSandboxToggle'
 import { shouldShowSandboxResources } from '@/lib/sandboxResources'
@@ -28,12 +28,6 @@ interface ComposerToolsMenuProps {
   onAttachFile: () => void
 }
 
-/**
- * Renders the mobile composer tools trigger: a dropdown for permission mode,
- * sandboxing, goal mode, and file attachment.
- *
- * @param props Session context, goal state, and the attach handler.
- */
 export function ComposerToolsMenu({
   sessionID,
   directory,

@@ -26,11 +26,11 @@ interface PreviewWorkspaceProps {
 
 type ViewportPreset = 'mobile' | 'tablet' | 'full'
 
-const VIEWPORT_WIDTHS: Record<ViewportPreset, number | null> = {
+const VIEWPORT_WIDTHS = {
   mobile: 390,
   tablet: 820,
   full: null,
-}
+} satisfies Record<ViewportPreset, number | null>
 
 const VIEWPORT_PRESETS: Array<{ preset: ViewportPreset; label: string; icon: typeof Monitor }> = [
   { preset: 'mobile', label: 'Mobile viewport', icon: Smartphone },
@@ -140,11 +140,11 @@ export function PreviewWorkspace({ isOpen, directory, compact }: PreviewWorkspac
         if (requestIdRef.current !== requestId) return
         setSession({ targetPort: port, path, renderKey: requestId, data })
       })
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (requestIdRef.current !== requestId) return
         sessionPortRef.current = null
         activePathRef.current = null
-        setSessionError(getOpenCodeApiErrorMessage(error, 'Failed to start preview'))
+        setSessionError(getOpenCodeApiErrorMessage(cause, 'Failed to start preview'))
       })
   }, [])
 
@@ -187,8 +187,8 @@ export function PreviewWorkspace({ isOpen, directory, compact }: PreviewWorkspac
       .then((data) => {
         window.open(buildPreviewStartUrl(data, requestedPath), '_blank', 'noopener,noreferrer')
       })
-      .catch((error: unknown) => {
-        setSessionError(getOpenCodeApiErrorMessage(error, 'Failed to open preview'))
+      .catch((cause: unknown) => {
+        setSessionError(getOpenCodeApiErrorMessage(cause, 'Failed to open preview'))
       })
   }, [requestedPort, requestedPath])
 

@@ -6,16 +6,10 @@ function buildSection(options: { sectionTop: number; sectionBottom: number; scro
   scroller.style.overflowY = 'auto'
   Object.defineProperty(scroller, 'scrollHeight', { value: 1000, configurable: true })
   Object.defineProperty(scroller, 'clientHeight', { value: options.scrollerBottom - options.scrollerTop, configurable: true })
-  scroller.getBoundingClientRect = () => ({
-    top: options.scrollerTop,
-    bottom: options.scrollerBottom,
-  }) as DOMRect
+  scroller.getBoundingClientRect = () => new DOMRect(0, options.scrollerTop, 0, options.scrollerBottom - options.scrollerTop)
 
   const section = document.createElement('div')
-  section.getBoundingClientRect = () => ({
-    top: options.sectionTop,
-    bottom: options.sectionBottom,
-  }) as DOMRect
+  section.getBoundingClientRect = () => new DOMRect(0, options.sectionTop, 0, options.sectionBottom - options.sectionTop)
 
   const header = document.createElement('button')
   const scrollIntoView = vi.fn()

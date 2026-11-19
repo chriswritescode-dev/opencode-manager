@@ -1,5 +1,6 @@
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
+import { z } from 'zod'
 import {
   MirrorCheckoutsResponseSchema,
   MirrorWorktreeCreateResponseSchema,
@@ -10,67 +11,146 @@ import {
   type MirrorWorktreeCreateResponse,
   type MultiRun,
 } from '@opencode-manager/shared/schemas'
+import { JsonValueSchema, parseJsonText, type JsonValue } from '@opencode-manager/shared/utils'
 
 export interface MirrorBeginOpts {
   force?: boolean
   create?: { name: string; originUrl: string | null; branch: string | null }
 }
 
-export interface MirrorBeginResult {
-  uploadId: string
-  repoId: number
-  chunkSize: number
-  created: boolean
+const MirrorBeginResultSchema = z.object({
+  uploadId: z.string(),
+  repoId: z.number(),
+  chunkSize: z.number(),
+  created: z.boolean(),
+})
+
+export type MirrorBeginResult = z.infer<typeof MirrorBeginResultSchema>
+
+const MirrorCommitResultSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  created: z.boolean(),
+})
+
+export type MirrorCommitResult = z.infer<typeof MirrorCommitResultSchema>
+
+const MirrorPatchResultSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  created: z.literal(false),
+  applied: z.literal(true),
+})
+
+export type MirrorPatchResult = z.infer<typeof MirrorPatchResultSchema>
+
+const MirrorPatchSnapshotSchema = z.object({
+  repoId: z.number(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  patch: z.string(),
+})
+
+export type MirrorPatchSnapshot = z.infer<typeof MirrorPatchSnapshotSchema>
+
+const MirrorHeadSchema = z.object({
+  repoId: z.number(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  dirty: z.boolean(),
+})
+
+export type MirrorHead = z.infer<typeof MirrorHeadSchema>
+
+const MirrorBundleResultSchema = z.object({
+  repoId: z.number(),
+  fullPath: z.string(),
+  branch: z.string().nullable(),
+  head: z.string().nullable(),
+  created: z.literal(false),
+})
+
+export type MirrorBundleResult = z.infer<typeof MirrorBundleResultSchema>
+
+const MirrorContainsResultSchema = z.object({
+  repoId: z.number(),
+  contained: z.boolean(),
+})
+
+export type MirrorContainsResult = z.infer<typeof MirrorContainsResultSchema>
+
+const MultiRunsResponseSchema = z.object({ runs: z.array(MultiRunSchema) })
+
+const MultiRunResponseSchema = z.object({ run: MultiRunSchema })
+
+const ManagerErrorBodySchema = z.object({
+  error: z.string().optional(),
+  message: z.string().optional(),
+  code: z.string().optional(),
+  details: JsonValueSchema.optional(),
+})
+
+interface MirrorBeginPayload {
+  force: boolean
+  create?: true
+  name?: string
+  originUrl?: string
+  branch?: string
 }
 
-export interface MirrorCommitResult {
-  repoId: number
-  fullPath: string
-  branch: string | null
-  head: string | null
-  created: boolean
-}
-
-export interface MirrorPatchResult {
-  repoId: number
-  fullPath: string
-  branch: string | null
-  head: string | null
-  created: false
-  applied: true
-}
-
-export interface MirrorPatchSnapshot {
-  repoId: number
-  branch: string | null
-  head: string | null
+interface MirrorPatchPayload {
+  baseHead: string | null
   patch: string
+  force: boolean
+  directory?: string
 }
 
-export interface MirrorHead {
-  repoId: number
-  branch: string | null
-  head: string | null
-  dirty: boolean
+interface ManagerHeaders {
+  [name: string]: string
 }
 
-export interface MirrorBundleResult {
-  repoId: number
-  fullPath: string
-  branch: string | null
-  head: string | null
-  created: false
+interface StreamingRequestInit extends RequestInit {
+  duplex?: 'half'
 }
 
-function createByteCounter(onProgress: (bytesSent: number) => void): TransformStream<Uint8Array, Uint8Array> {
+function toRequestBody(stream: Readable, onProgress?: (bytesSent: number) => void): ReadableStream<Uint8Array> {
+  const iterator = stream[Symbol.asyncIterator]()
   let bytesSent = 0
-  return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await iterator.next()
+      if (next.done === true) {
+        controller.close()
+        return
+      }
+      const chunk: Uint8Array = next.value
       bytesSent += chunk.byteLength
-      onProgress(bytesSent)
+      onProgress?.(bytesSent)
       controller.enqueue(chunk)
     },
+    async cancel() {
+      await iterator.return?.(undefined)
+    },
   })
+}
+
+function headerRecord(headers: HeadersInit | undefined): ManagerHeaders {
+  if (headers === undefined) return {}
+  if (headers instanceof Headers) {
+    const record: Record<string, string> = {}
+    headers.forEach((value, key) => {
+      record[key] = value
+    })
+    return record
+  }
+  const tupleEntries = z.array(z.tuple([z.string(), z.string()])).safeParse(headers)
+  if (tupleEntries.success) return Object.fromEntries(tupleEntries.data)
+  const record = z.record(z.string(), z.string()).safeParse(headers)
+  return record.success ? record.data : {}
 }
 
 export const MANAGER_FEATURE_MISSING = 'MANAGER_FEATURE_MISSING'
@@ -88,7 +168,7 @@ export class ManagerApiError extends Error {
     public readonly status: number,
     public readonly code: string | null,
     public readonly operation: string,
-    public readonly details: unknown = null,
+    public readonly details: JsonValue | null = null,
     public readonly jsonBody: boolean = false,
   ) {
     super(message)
@@ -96,33 +176,25 @@ export class ManagerApiError extends Error {
   }
 }
 
-export function isManagerRouteMissing(error: unknown): boolean {
-  if (!(error instanceof ManagerApiError)) return false
-  if (error.code === MANAGER_FEATURE_MISSING) return true
-  return error.status === 404 && !error.jsonBody
+export function isManagerRouteMissing(cause: unknown): boolean {
+  if (!(cause instanceof ManagerApiError)) return false
+  if (cause.code === MANAGER_FEATURE_MISSING) return true
+  return cause.status === 404 && !cause.jsonBody
 }
 
 async function formatErrorResponse(res: Response, operation: string): Promise<ManagerApiError> {
   const text = await res.text().catch(() => '')
   let code: string | null = null
   let detail = text
-  let details: unknown = null
+  let details: JsonValue | null = null
   let jsonBody = false
   if (text) {
-    try {
-      const parsed = JSON.parse(text) as unknown
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        jsonBody = true
-        const body = parsed as { error?: unknown; message?: unknown; code?: unknown; details?: unknown }
-        const codeField = typeof body.code === 'string' ? body.code : null
-        const errField = typeof body.error === 'string' ? body.error : null
-        const msgField = typeof body.message === 'string' ? body.message : null
-        code = codeField
-        detail = msgField ?? errField ?? text
-        details = body.details ?? null
-      }
-    } catch {
-      /* not JSON, keep raw text */
+    const body = ManagerErrorBodySchema.safeParse(parseJsonText(text))
+    if (body.success) {
+      jsonBody = true
+      code = body.data.code ?? null
+      detail = body.data.message ?? body.data.error ?? text
+      details = body.data.details ?? null
     }
   }
   const message = detail
@@ -137,23 +209,22 @@ export class ManagerApi {
     private token: string,
   ) {}
 
-  private headers(extra: Record<string, string> = {}): Record<string, string> {
+  private headers(extra: Record<string, string> = {}): ManagerHeaders {
     return { Authorization: `Bearer ${this.token}`, ...extra }
   }
 
   private async requestJson<T>(
     path: string,
     operation: string,
-    parse: (body: unknown) => T,
+    parse: (body: JsonValue) => T,
     init?: RequestInit & { feature?: boolean; featureName?: string },
   ): Promise<T> {
     const { feature, featureName, ...requestInit } = init ?? {}
-    const baseHeaders = this.headers(
-      typeof requestInit.body === 'string' ? { 'Content-Type': 'application/json' } : {},
-    )
+    const jsonBody = z.string().safeParse(requestInit.body)
+    const baseHeaders = this.headers(jsonBody.success ? { 'Content-Type': 'application/json' } : {})
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...requestInit,
-      headers: { ...baseHeaders, ...(requestInit.headers as Record<string, string> | undefined) },
+      headers: { ...baseHeaders, ...headerRecord(requestInit.headers) },
     })
     if (!res.ok) {
       const featureLabel = feature === true ? (featureName ?? DEFAULT_FEATURE_NAME) : null
@@ -197,7 +268,7 @@ export class ManagerApi {
 
   async mirrorBegin(repoId: number, opts: MirrorBeginOpts): Promise<MirrorBeginResult> {
     const url = `${this.baseUrl}/api/internal/repos/${repoId}/mirror/begin`
-    const body: Record<string, unknown> = { force: opts.force === true }
+    const body: MirrorBeginPayload = { force: opts.force === true }
     if (opts.create) {
       body.create = true
       body.name = opts.create.name
@@ -210,16 +281,15 @@ export class ManagerApi {
       body: JSON.stringify(body),
     })
     if (!res.ok) throw await formatErrorResponse(res, 'mirror begin')
-    return (await res.json()) as MirrorBeginResult
+    return MirrorBeginResultSchema.parse(await res.json())
   }
 
   async mirrorUploadPart(repoId: number, uploadId: string, index: number, chunk: Buffer): Promise<void> {
     const url = `${this.baseUrl}/api/internal/repos/${repoId}/mirror/parts/${uploadId}/${index}`
-    const ab = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
     const res = await fetch(url, {
       method: 'PUT',
       headers: { ...this.headers(), 'Content-Type': 'application/octet-stream' },
-      body: ab as ArrayBuffer,
+      body: new Uint8Array(chunk),
     })
     if (!res.ok) throw await formatErrorResponse(res, `mirror part ${index}`)
   }
@@ -232,12 +302,12 @@ export class ManagerApi {
       body: JSON.stringify({ uploadId, totalParts, gzip }),
     })
     if (!res.ok) throw await formatErrorResponse(res, 'mirror commit')
-    return (await res.json()) as MirrorCommitResult
+    return MirrorCommitResultSchema.parse(await res.json())
   }
 
   async mirrorAbort(repoId: number, uploadId: string): Promise<void> {
     const url = `${this.baseUrl}/api/internal/repos/${repoId}/mirror/uploads/${uploadId}`
-    await fetch(url, { method: 'DELETE', headers: this.headers() }).catch(() => { /* best-effort */ })
+    await fetch(url, { method: 'DELETE', headers: this.headers() }).catch(() => { })
   }
 
   async mirrorDown(repoId: number, gzip: boolean): Promise<ReadableStream<Uint8Array>> {
@@ -254,7 +324,7 @@ export class ManagerApi {
     repoId: number,
     body: { baseHead: string | null; patch: string; force?: boolean; directory?: string },
   ): Promise<MirrorPatchResult> {
-    const payload: Record<string, unknown> = { baseHead: body.baseHead, patch: body.patch, force: body.force === true }
+    const payload: MirrorPatchPayload = { baseHead: body.baseHead, patch: body.patch, force: body.force === true }
     if (body.directory) payload.directory = body.directory
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/patch`, {
       method: 'POST',
@@ -263,7 +333,7 @@ export class ManagerApi {
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch')
-    return (await res.json()) as MirrorPatchResult
+    return MirrorPatchResultSchema.parse(await res.json())
   }
 
   async mirrorUploadBundle(
@@ -282,21 +352,21 @@ export class ManagerApi {
     if (opts.force === true) params.set('force', '1')
     if (opts.directory) params.set('directory', opts.directory)
     const query = params.size > 0 ? `?${params.toString()}` : ''
-    const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
+    const headers: ManagerHeaders = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
     if (opts.requireCurrentBranch === true) headers['X-OCM-Require-Current-Branch'] = '1'
     if (opts.targetBranch) headers['X-OCM-Target-Branch'] = opts.targetBranch
-    const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
-    const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
+    const body = toRequestBody(createReadStream(bundlePath), opts.onProgress)
+    const requestInit: StreamingRequestInit = {
       method: 'POST',
       headers,
-      body: body as BodyInit,
+      body,
       duplex: 'half',
-    } as RequestInit & { duplex: 'half' })
+    }
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, requestInit)
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror bundle upload')
-    return (await res.json()) as MirrorBundleResult
+    return MirrorBundleResultSchema.parse(await res.json())
   }
 
   async mirrorHead(repoId: number, directory?: string): Promise<MirrorHead> {
@@ -305,7 +375,7 @@ export class ManagerApi {
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror head')
-    return (await res.json()) as MirrorHead
+    return MirrorHeadSchema.parse(await res.json())
   }
 
   async mirrorCheckouts(repoId: number, branch: string): Promise<MirrorCheckoutsResponse> {
@@ -324,7 +394,7 @@ export class ManagerApi {
     opts: { branch: string; targetBranch: string; patch: string; onProgress?: (bytesSent: number) => void },
   ): Promise<MirrorWorktreeCreateResponse> {
     const patchBuf = Buffer.from(opts.patch, 'utf-8')
-    const headers: Record<string, string> = {
+    const headers: ManagerHeaders = {
       ...this.headers(),
       'Content-Type': 'application/octet-stream',
       'X-OCM-Branch': opts.branch,
@@ -337,26 +407,26 @@ export class ManagerApi {
         yield* createReadStream(bundlePath)
       })(),
     )
-    const fileStream = Readable.toWeb(source) as unknown as ReadableStream<Uint8Array>
-    const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/worktree`, {
+    const body = toRequestBody(source, opts.onProgress)
+    const requestInit: StreamingRequestInit = {
       method: 'POST',
       headers,
-      body: body as BodyInit,
+      body,
       duplex: 'half',
-    } as RequestInit & { duplex: 'half' })
+    }
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/worktree`, requestInit)
 
     if (!res.ok) throw await this.handleErrorResponse(res, 'mirror create worktree', MOVE_FEATURE_NAME)
     return MirrorWorktreeCreateResponseSchema.parse(await res.json())
   }
 
-  async mirrorContains(repoId: number, sha: string, directory?: string): Promise<{ contained: boolean }> {
+  async mirrorContains(repoId: number, sha: string, directory?: string): Promise<MirrorContainsResult> {
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/contains/${sha}${directoryQuery(directory)}`, {
       headers: this.headers(),
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror contains')
-    return (await res.json()) as { repoId: number; contained: boolean }
+    return MirrorContainsResultSchema.parse(await res.json())
   }
 
   async mirrorDownloadBundle(repoId: number, directory?: string): Promise<ReadableStream<Uint8Array>> {
@@ -374,14 +444,14 @@ export class ManagerApi {
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror patch snapshot')
-    return (await res.json()) as MirrorPatchSnapshot
+    return MirrorPatchSnapshotSchema.parse(await res.json())
   }
 
   listMultiRuns(repoId: number): Promise<MultiRun[]> {
     return this.requestJson(
       `/api/internal/multi-runs?repoId=${encodeURIComponent(repoId)}`,
       'list multi-runs',
-      (body) => MultiRunSchema.array().parse((body as { runs: unknown }).runs),
+      (body) => MultiRunsResponseSchema.parse(body).runs,
       { feature: true },
     )
   }
@@ -390,7 +460,7 @@ export class ManagerApi {
     return this.requestJson(
       '/api/internal/multi-runs',
       'launch multi-run',
-      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      (body) => MultiRunResponseSchema.parse(body).run,
       { method: 'POST', body: JSON.stringify(request), feature: true },
     )
   }
@@ -399,7 +469,7 @@ export class ManagerApi {
     return this.requestJson(
       `/api/internal/multi-runs/${encodeURIComponent(runId)}/fusions`,
       'fuse multi-run',
-      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      (body) => MultiRunResponseSchema.parse(body).run,
       { method: 'POST', body: JSON.stringify(request), feature: true },
     )
   }
@@ -408,7 +478,7 @@ export class ManagerApi {
     return this.requestJson(
       `/api/internal/multi-runs/${encodeURIComponent(runId)}/entries/${encodeURIComponent(entryId)}/discard`,
       'discard multi-run entry',
-      (body) => MultiRunSchema.parse((body as { run: unknown }).run),
+      (body) => MultiRunResponseSchema.parse(body).run,
       { method: 'POST', feature: true },
     )
   }

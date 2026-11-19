@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react'
 import { Pencil, Loader2 } from 'lucide-react'
+import { z } from 'zod'
 import { assistantText, formatOpenCodeModelRef } from '@opencode-manager/shared/opencode'
 import type {
   PromptAgentAttachment,
@@ -21,6 +22,7 @@ import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { useSettings } from '@/hooks/useSettings'
 import { CopyButton } from '@/components/ui/copy-button'
+import { readJsonString } from '@/components/jsonValue'
 import { InlineImage } from '@/components/ui/inline-image'
 import { TTSButton } from '@/components/ui/tts-button'
 import { backgroundShellID, collectBackgroundParts, type ShellNoticeOutcome } from '@/lib/backgroundWork'
@@ -182,6 +184,8 @@ function MessageDivider({ label }: { label: string }) {
 
 type SessionNoticeMessage = Extract<SessionMessageInfo, { type: 'synthetic' | 'system' }>
 
+const shellNoticeOutcomeSchema = z.enum(['completed', 'failed'])
+
 interface SessionNoticeContent {
   text: string
   completion?: {
@@ -192,8 +196,7 @@ interface SessionNoticeContent {
 }
 
 function noticeMetadataString(message: SessionNoticeMessage, key: string): string | undefined {
-  const value = message.metadata?.[key]
-  return typeof value === 'string' ? value : undefined
+  return readJsonString(message.metadata?.[key])
 }
 
 function sessionNoticeContent(message: SessionNoticeMessage): SessionNoticeContent {
@@ -669,10 +672,16 @@ export const MessageThread = memo(function MessageThread({
     () => [...collectBackgroundParts(messages).shellNotices].map(([id, outcome]) => `${id}=${outcome}`).join(','),
     [messages],
   )
-  const shellOutcomes = useMemo(
-    () => new Map(shellOutcomesKey ? shellOutcomesKey.split(',').map((entry) => entry.split('=') as [string, ShellNoticeOutcome]) : []),
-    [shellOutcomesKey],
-  )
+  const shellOutcomes = useMemo(() => {
+    const outcomes = new Map<string, ShellNoticeOutcome>()
+    if (!shellOutcomesKey) return outcomes
+    for (const entry of shellOutcomesKey.split(',')) {
+      const [id, outcome] = entry.split('=')
+      const parsedOutcome = shellNoticeOutcomeSchema.safeParse(outcome)
+      if (parsedOutcome.success) outcomes.set(id, parsedOutcome.data)
+    }
+    return outcomes
+  }, [shellOutcomesKey])
 
   const nextAssistantIdByMessageId = useMemo(() => {
     const map = new Map<string, string | undefined>()

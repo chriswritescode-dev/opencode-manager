@@ -1,24 +1,37 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { copyTextToClipboard } from './clipboard'
 
-function stubClipboard(value: {
-  write?: (items: unknown[]) => Promise<void>
-  writeText?: (text: string) => Promise<void>
-}) {
+const originalClipboard = navigator.clipboard
+const originalExecCommand = document.execCommand
+
+interface ClipboardStub {
+  writeText: Mock<(text: string) => Promise<void>>
+  readText: Mock<() => Promise<string>>
+  read: Mock<() => Promise<ClipboardItem[]>>
+  write?: Mock<(items: ClipboardItem[]) => Promise<void>>
+}
+
+function stubClipboard(options: { withWrite?: boolean; writeText?: ClipboardStub['writeText'] } = {}): ClipboardStub {
+  const clipboard: ClipboardStub = {
+    writeText: options.writeText ?? vi.fn<(text: string) => Promise<void>>(async () => undefined),
+    readText: vi.fn<() => Promise<string>>(async () => ''),
+    read: vi.fn<() => Promise<ClipboardItem[]>>(async () => []),
+  }
+  if (options.withWrite) {
+    clipboard.write = vi.fn<(items: ClipboardItem[]) => Promise<void>>(async () => undefined)
+  }
   Object.defineProperty(navigator, 'clipboard', {
-    value,
+    value: clipboard,
     writable: true,
     configurable: true,
   })
+  return clipboard
 }
 
 function stubExecCommand(result: boolean) {
   const execCommand = vi.fn(() => result)
-  Object.defineProperty(document, 'execCommand', {
-    value: execCommand,
-    writable: true,
-    configurable: true,
-  })
+  document.execCommand = execCommand
   return execCommand
 }
 
@@ -26,42 +39,45 @@ describe('copyTextToClipboard', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
-    delete (navigator as { clipboard?: unknown }).clipboard
-    delete (document as { execCommand?: unknown }).execCommand
+    Object.defineProperty(navigator, 'clipboard', {
+      value: originalClipboard,
+      writable: true,
+      configurable: true,
+    })
+    document.execCommand = originalExecCommand
   })
 
   it('writes the awaited text through writeText when ClipboardItem is unavailable', async () => {
     vi.stubGlobal('ClipboardItem', undefined)
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    stubClipboard({ writeText })
+    const clipboard = stubClipboard({ withWrite: true })
 
     await expect(copyTextToClipboard(Promise.resolve('hello'))).resolves.toBe(true)
-    expect(writeText).toHaveBeenCalledWith('hello')
+    expect(clipboard.writeText).toHaveBeenCalledWith('hello')
   })
 
   it('writes a ClipboardItem through clipboard.write when available', async () => {
-    const write = vi.fn().mockResolvedValue(undefined)
-    const writeText = vi.fn().mockResolvedValue(undefined)
+    const clipboard = stubClipboard({ withWrite: true })
     vi.stubGlobal('ClipboardItem', class {
-      constructor(public data: Record<string, unknown>) {}
+      data: Record<string, ClipboardItemData>
+
+      constructor(data: Record<string, ClipboardItemData>) {
+        this.data = data
+      }
     })
-    stubClipboard({ write, writeText })
 
     await expect(copyTextToClipboard('hello')).resolves.toBe(true)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(writeText).not.toHaveBeenCalled()
+    expect(clipboard.write).toHaveBeenCalledTimes(1)
+    expect(clipboard.writeText).not.toHaveBeenCalled()
   })
 
   it('resolves false when the content promise rejects', async () => {
-    vi.stubGlobal('ClipboardItem', undefined)
-    stubClipboard({ writeText: vi.fn().mockResolvedValue(undefined) })
+    stubClipboard()
 
     await expect(copyTextToClipboard(Promise.reject(new Error('nope')))).resolves.toBe(false)
   })
 
   it('falls back to execCommand when writeText rejects', async () => {
-    vi.stubGlobal('ClipboardItem', undefined)
-    stubClipboard({ writeText: vi.fn().mockRejectedValue(new Error('denied')) })
+    stubClipboard({ writeText: vi.fn(async () => Promise.reject(new Error('denied'))) })
     const execCommand = stubExecCommand(true)
 
     await expect(copyTextToClipboard('hello')).resolves.toBe(true)

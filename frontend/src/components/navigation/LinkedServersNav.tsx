@@ -23,7 +23,6 @@ const LOCAL_SERVER_LABEL = 'OC Manager'
 type LinkedServersVariant = 'sidebar' | 'rail' | 'header'
 
 interface LinkedServersNavProps {
-  /** `sidebar` renders the full-width trigger row, `rail` the collapsed icon button, `header` a compact page-header trigger. */
   variant?: LinkedServersVariant
 }
 
@@ -187,11 +186,6 @@ function LinkedServersMenuContent({
   )
 }
 
-/**
- * The server switcher. The trigger names the selected server and opens a menu that changes which
- * server's projects and sessions the sidebar lists; selecting never navigates. Hidden when no
- * linked server is enabled.
- */
 export function LinkedServersNav({ variant = 'sidebar' }: LinkedServersNavProps) {
   const { servers, isLoading } = useOpenCodeServers()
   const { statusById } = useOpenCodeServerStatuses()

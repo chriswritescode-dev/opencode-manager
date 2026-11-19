@@ -1,5 +1,5 @@
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
-import { usePermissions, useForms } from '@/contexts/EventContext'
+import { usePermissions, useForms } from '@/contexts/event-context'
 import { getFormText, getPermissionDetail, getPermissionLabel } from '@opencode-manager/shared/notifications'
 import { Bell, HelpCircle } from 'lucide-react'
 

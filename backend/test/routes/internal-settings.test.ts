@@ -1,12 +1,36 @@
-import { describe, it, expect, beforeEach } from 'bun:test'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { SettingsService } from '../../src/services/settings'
-import { allMigrations } from '../../src/db/migrations'
-import { getOrCreateInternalToken } from '../../src/services/internal-token'
-import { migrate } from '../../src/db/migration-runner'
+import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
+import { SettingsResponseSchema } from '@opencode-manager/shared/schemas'
 import type { UserPreferences } from '@opencode-manager/shared/types'
+import type { JsonObject } from '@opencode-manager/shared/utils'
+import { SettingsService } from '../../src/services/settings'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
+
+const ErrorResponseSchema = z.object({ error: z.string() })
+
+const persistenceCases: Array<Partial<UserPreferences>> = [
+  { theme: 'dark' },
+  { colorTheme: 'dracula' },
+  { activityWindowMinutes: 60 },
+  { walkthroughModel: 'openai/gpt-5-mini' },
+  { theme: 'light', mode: 'plan' },
+]
+
+const rejectedPatches: JsonObject[] = [
+  { gitCredentials: [{ name: 'test', token: 'secret' }] },
+  { tts: { apiKey: 'secret' } },
+  { tts: { apiKey: 'leak' } },
+  { tts: { endpoint: 'http://x' } },
+  { sessionDefaults: { permissionMode: 'auto' } },
+  { theme: 'rainbow' },
+  { colorTheme: 'not-a-theme' },
+  { activityWindowMinutes: 45 },
+]
 
 describe('internal/settings routes', () => {
   let db: Database
@@ -14,9 +38,18 @@ describe('internal/settings routes', () => {
   let app: Hono
   let token: string
 
+  async function authorizedRequest(init: { method?: string; body?: string } = {}): Promise<Response> {
+    return app.request('/api/internal/settings', {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+    })
+  }
+
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    db = createTestDatabase()
     settingsService = new SettingsService(db)
     app = new Hono()
     app.route('/api/internal', createInternalTestApp(db, { settingsService }))
@@ -25,49 +58,30 @@ describe('internal/settings routes', () => {
 
   it('GET /api/internal/settings returns 401 without bearer token', async () => {
     const res = await app.request('/api/internal/settings')
+
     expect(res.status).toBe(401)
   })
 
-  it('GET /api/internal/settings returns 200 with bearer token', async () => {
-    const res = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: unknown; updatedAt: number }
-    expect(body).toHaveProperty('preferences')
-    expect(body).toHaveProperty('updatedAt')
-  })
-
   it('GET /api/internal/settings returns merged defaults', async () => {
-    const res = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await authorizedRequest()
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { theme: string; mode: string } }
+    const body = await readJson(res, SettingsResponseSchema)
     expect(body.preferences.theme).toBe('dark')
     expect(body.preferences.mode).toBe('build')
-  })
-
-  it('GET /api/internal/settings returns manager colorTheme by default', async () => {
-    const res = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { colorTheme: string } }
     expect(body.preferences.colorTheme).toBe('manager')
   })
 
   it('GET /api/internal/settings recovers from a stored colorTheme removed from the catalog without losing other preferences', async () => {
     db.prepare(
       `INSERT INTO user_preferences (user_id, preferences, updated_at)
-       VALUES (?, ?, ?)`
+       VALUES (?, ?, ?)`,
     ).run('default', JSON.stringify({ colorTheme: 'removed-theme', autoScroll: false }), Date.now())
 
-    const res = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await authorizedRequest()
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { colorTheme: string; autoScroll: boolean } }
+    const body = await readJson(res, SettingsResponseSchema)
     expect(body.preferences.colorTheme).toBe('manager')
     expect(body.preferences.autoScroll).toBe(false)
   })
@@ -78,177 +92,31 @@ describe('internal/settings routes', () => {
       body: JSON.stringify({ theme: 'dark' }),
       headers: { 'content-type': 'application/json' },
     })
+
     expect(res.status).toBe(401)
   })
 
-  it('PATCH /api/internal/settings with { theme: "dark" } persists and returns new settings', async () => {
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ theme: 'dark' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(patchRes.status).toBe(200)
+  it.each(persistenceCases)('PATCH /api/internal/settings persists %o', async (patch) => {
+    const patchRes = await authorizedRequest({ method: 'PATCH', body: JSON.stringify(patch) })
 
-    const getRes = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    expect(patchRes.status).toBe(200)
+    expect((await readJson(patchRes, SettingsResponseSchema)).preferences).toMatchObject(patch)
+
+    const getRes = await authorizedRequest()
+
     expect(getRes.status).toBe(200)
-    const body = await getRes.json() as { preferences: { theme: string } }
-    expect(body.preferences.theme).toBe('dark')
+    expect((await readJson(getRes, SettingsResponseSchema)).preferences).toMatchObject(patch)
+    expect(settingsService.getSettings().preferences).toMatchObject(patch)
   })
 
-  it('PATCH /api/internal/settings with { colorTheme: "dracula" } persists and returns new settings', async () => {
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ colorTheme: 'dracula' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(patchRes.status).toBe(200)
+  it.each(rejectedPatches)('PATCH /api/internal/settings rejects %o with 400', async (patch) => {
+    const res = await authorizedRequest({ method: 'PATCH', body: JSON.stringify(patch) })
 
-    const getRes = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(getRes.status).toBe(200)
-    const body = await getRes.json() as { preferences: { colorTheme: string } }
-    expect(body.preferences.colorTheme).toBe('dracula')
-  })
-
-  it('PATCH /api/internal/settings with { gitCredentials: [...] } returns 400 (strict reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ gitCredentials: [{ name: 'test', token: 'secret' }] }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
     expect(res.status).toBe(400)
+    expect(await readJson(res, ErrorResponseSchema)).toEqual({ error: 'Invalid request body' })
   })
 
-  it('PATCH /api/internal/settings with { tts: { apiKey: "secret" } } returns 400 (strict reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ tts: { apiKey: 'secret' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('PATCH /api/internal/settings with { sessionDefaults: { permissionMode: "auto" } } returns 400 (strict reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ sessionDefaults: { permissionMode: 'auto' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('PATCH /api/internal/settings with { theme: "rainbow" } returns 400 (enum reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ theme: 'rainbow' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('PATCH /api/internal/settings with { colorTheme: "not-a-theme" } returns 400 (unknown theme reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ colorTheme: 'not-a-theme' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Invalid request body')
-  })
-
-  it('PATCH /api/internal/settings with { activityWindowMinutes: 45 } returns 400 (non-option reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ activityWindowMinutes: 45 }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Invalid request body')
-  })
-
-  it('PATCH /api/internal/settings with { activityWindowMinutes: 60 } persists an allowed option', async () => {
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ activityWindowMinutes: 60 }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(patchRes.status).toBe(200)
-
-    const getRes = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
-    })
-    expect(getRes.status).toBe(200)
-    const body = await getRes.json() as { preferences: { activityWindowMinutes: number } }
-    expect(body.preferences.activityWindowMinutes).toBe(60)
-  })
-
-  it('PATCH /api/internal/settings with { tts: { voice: "x", speed: 1.5 } } merges and preserves apiKey/endpoint', async () => {
-    // Seed a full TTS config (including secrets) directly via settingsService
-    settingsService.updateSettings({
-      tts: {
-        enabled: true,
-        provider: 'external',
-        autoPlay: false,
-        endpoint: 'https://custom.endpoint',
-        apiKey: 'sk-secret-123',
-        voice: 'alloy',
-        model: 'tts-1',
-        speed: 1.0,
-      },
-    } as Partial<UserPreferences>)
-
-    // Now patch only non-secret fields via the API
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ tts: { voice: 'nova', speed: 1.5 } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(patchRes.status).toBe(200)
-    const body = await patchRes.json() as { preferences: { tts: { voice: string; speed: number; apiKey: string; endpoint: string } } }
-    expect(body.preferences.tts.voice).toBe('nova')
-    expect(body.preferences.tts.speed).toBe(1.5)
-    expect(body.preferences.tts.apiKey).toBe('<redacted>')
-    expect(settingsService.getSettings().preferences.tts?.apiKey).toBe('sk-secret-123')
-    expect(body.preferences.tts.endpoint).toBe('https://custom.endpoint')
-  })
-
-  it('PATCH /api/internal/settings with { tts: { voice: "nova" } } preserves autoPlay and other omitted fields', async () => {
-    // Seed TTS with autoPlay: true (a non-default value)
+  it('PATCH /api/internal/settings merges TTS changes and keeps the stored credentials', async () => {
     settingsService.updateSettings({
       tts: {
         enabled: true,
@@ -260,51 +128,22 @@ describe('internal/settings routes', () => {
         model: 'tts-1',
         speed: 1.0,
       },
-    } as Partial<UserPreferences>)
-
-    // Patch only voice — autoPlay, provider, model, speed must remain as seeded
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ tts: { voice: 'nova' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
     })
-    expect(patchRes.status).toBe(200)
-    const body = await patchRes.json() as { preferences: { tts: { voice: string; autoPlay: boolean; speed: number; model: string } } }
-    expect(body.preferences.tts.voice).toBe('nova')
-    expect(body.preferences.tts.autoPlay).toBe(true)  // must NOT reset to default false
-    expect(body.preferences.tts.speed).toBe(1.0)       // preserved
-    expect(body.preferences.tts.model).toBe('tts-1')   // preserved
+
+    const res = await authorizedRequest({ method: 'PATCH', body: JSON.stringify({ tts: { voice: 'nova', speed: 1.5 } }) })
+
+    expect(res.status).toBe(200)
+    const tts = (await readJson(res, SettingsResponseSchema)).preferences.tts
+    expect(tts?.voice).toBe('nova')
+    expect(tts?.speed).toBe(1.5)
+    expect(tts?.autoPlay).toBe(true)
+    expect(tts?.model).toBe('tts-1')
+    expect(tts?.endpoint).toBe('https://custom.endpoint')
+    expect(tts?.apiKey).toBe('<redacted>')
+    expect(settingsService.getSettings().preferences.tts?.apiKey).toBe('sk-secret-123')
   })
 
-  it('PATCH /api/internal/settings with { tts: { apiKey: "leak" } } returns 400 (strict reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ tts: { apiKey: 'leak' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('PATCH /api/internal/settings with { tts: { endpoint: "http://x" } } returns 400 (strict reject)', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ tts: { endpoint: 'http://x' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('PATCH /api/internal/settings with { stt: { model: "whisper-1" } } preserves non-default language and omitted fields', async () => {
-    // Seed full STT config with a non-default language
+  it('PATCH /api/internal/settings preserves non-default STT language and omitted fields', async () => {
     settingsService.updateSettings({
       stt: {
         enabled: true,
@@ -314,37 +153,23 @@ describe('internal/settings routes', () => {
         model: 'whisper-1',
         language: 'fr-FR',
       },
-    } as Partial<UserPreferences>)
-
-    // Patch only model — language, provider, enabled must remain as seeded
-    const patchRes = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ stt: { model: 'whisper-2' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
     })
-    expect(patchRes.status).toBe(200)
-    const body = await patchRes.json() as { preferences: { stt: { model: string; language: string; provider: string; enabled: boolean } } }
-    expect(body.preferences.stt.model).toBe('whisper-2')
-    expect(body.preferences.stt.language).toBe('fr-FR')  // must NOT reset to default 'en-US'
-    expect(body.preferences.stt.provider).toBe('builtin') // preserved
-    expect(body.preferences.stt.enabled).toBe(true)        // preserved
+
+    const res = await authorizedRequest({ method: 'PATCH', body: JSON.stringify({ stt: { model: 'whisper-2' } }) })
+
+    expect(res.status).toBe(200)
+    const stt = (await readJson(res, SettingsResponseSchema)).preferences.stt
+    expect(stt?.model).toBe('whisper-2')
+    expect(stt?.language).toBe('fr-FR')
+    expect(stt?.provider).toBe('builtin')
+    expect(stt?.enabled).toBe(true)
   })
 
-  it('PATCH /api/internal/settings with { stt: { ... } } when no stt config exists returns 400', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ stt: { enabled: true, language: 'fr-FR' } }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
+  it('PATCH /api/internal/settings rejects an STT patch when no STT config exists', async () => {
+    const res = await authorizedRequest({ method: 'PATCH', body: JSON.stringify({ stt: { enabled: true, language: 'fr-FR' } }) })
+
     expect(res.status).toBe(400)
-    const body = await res.json() as { error: string }
-    expect(body.error).toContain('STT is not configured')
+    expect((await readJson(res, ErrorResponseSchema)).error).toContain('STT is not configured')
   })
 
   it('GET /api/internal/settings redacts stored credentials and keeps empty ones empty', async () => {
@@ -353,52 +178,32 @@ describe('internal/settings routes', () => {
         { name: 'GitHub', host: 'github.com', type: 'pat', token: 'ghp_secret', username: 'octo' },
         { name: 'Empty', host: 'example.com', type: 'pat', token: '' },
       ],
-      stt: { enabled: true, provider: 'external', endpoint: 'https://stt', apiKey: 'sk-stt', model: 'whisper-1', language: 'en-US' },
+      stt: {
+        enabled: true,
+        provider: 'external',
+        endpoint: 'https://stt',
+        apiKey: 'sk-stt',
+        model: 'whisper-1',
+        language: 'en-US',
+      },
       serverEnvVars: [{ key: 'API_TOKEN', value: 'shh' }],
       lastKnownGoodConfig: '{"provider":{"x":{"apiKey":"sk"}}}',
-    } as Partial<UserPreferences>)
-
-    const res = await app.request('/api/internal/settings', {
-      headers: { authorization: `Bearer ${token}` },
     })
+
+    const res = await authorizedRequest()
+
     expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: UserPreferences }
-    expect(body.preferences.gitCredentials?.[0]).toMatchObject({ token: '<redacted>', username: 'octo', host: 'github.com' })
+    const body = await readJson(res, SettingsResponseSchema)
+    expect(body.preferences.gitCredentials?.[0]).toMatchObject({
+      token: '<redacted>',
+      username: 'octo',
+      host: 'github.com',
+    })
     expect(body.preferences.gitCredentials?.[1]?.token).toBe('')
     expect(body.preferences.stt?.apiKey).toBe('<redacted>')
     expect(body.preferences.stt?.endpoint).toBe('https://stt')
     expect(body.preferences.serverEnvVars).toEqual([{ key: 'API_TOKEN', value: '<redacted>' }])
     expect(body.preferences.lastKnownGoodConfig).toBe('<redacted>')
     expect(JSON.stringify(body)).not.toMatch(/ghp_secret|sk-stt|shh/)
-  })
-
-  it('PATCH /api/internal/settings with existing keys (theme) still works after tts/stt additions', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ theme: 'light', mode: 'plan' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { theme: string; mode: string } }
-    expect(body.preferences.theme).toBe('light')
-    expect(body.preferences.mode).toBe('plan')
-  })
-
-  it('PATCH /api/internal/settings with { walkthroughModel } persists it', async () => {
-    const res = await app.request('/api/internal/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ walkthroughModel: 'openai/gpt-5-mini' }),
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-      },
-    })
-    expect(res.status).toBe(200)
-    const body = await res.json() as { preferences: { walkthroughModel?: string } }
-    expect(body.preferences.walkthroughModel).toBe('openai/gpt-5-mini')
-    expect(settingsService.getSettings().preferences.walkthroughModel).toBe('openai/gpt-5-mini')
   })
 })

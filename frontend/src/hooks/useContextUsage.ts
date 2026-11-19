@@ -3,7 +3,7 @@ import { skipToken, useQuery } from '@tanstack/react-query'
 import { findModelInfo } from '@opencode-manager/shared/opencode'
 import type { ModelInfo, SessionMessageInfo } from '@opencode-manager/shared/opencode'
 import { useProviders } from '@/hooks/useProviders'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { TranscriptCache } from '@/lib/session-projection'
@@ -68,13 +68,6 @@ function hasSameUsage(left: ContextUsage | null, right: ContextUsage | null): bo
     && left.contextLimit === right.contextLimit
 }
 
-/**
- * Latest assistant context usage for a session.
- *
- * The transcript cache is rewritten on every streaming flush, so the returned object keeps its
- * identity while the measured totals are unchanged. That lets consumers memoize on the reference
- * instead of re-rendering for each frame of a reply.
- */
 export const useContextUsage = (
   sessionID: string | undefined,
   directory?: string,

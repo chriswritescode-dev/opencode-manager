@@ -1,35 +1,50 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
+import { ChatSchema, CreateChatResponseSchema, ListChatsResponseSchema } from '@opencode-manager/shared/schemas'
+import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { ChatService } from '../../src/services/chats'
 import { createChatRoutes } from '../../src/routes/chats'
+import { createStubOpenCodeClient, sessionInfo } from '../helpers/stub-opencode-client'
+import { readJson } from '../helpers/read-json'
 
-function createFakeClient() {
+interface FakeSession {
+  create: Mock<OpenCodeApi['session']['create']>
+  get: Mock<OpenCodeApi['session']['get']>
+  remove: Mock<OpenCodeApi['session']['remove']>
+  list: Mock<OpenCodeApi['session']['list']>
+}
+
+function createFakeClient(): FakeSession {
   const session = {
-    create: vi.fn(async ({ location }: { location: { directory: string } }) => ({
-      id: 'ses_created',
-      location,
-    })),
-    get: vi.fn(async ({ sessionID }: { sessionID: string }) => ({
-      id: sessionID,
-      location: { directory: '/tmp/other-chat' },
-    })),
-    remove: vi.fn(async () => undefined),
-    list: vi.fn(async () => ({ data: [], cursor: {} })),
+    create: vi.fn<OpenCodeApi['session']['create']>(async () => sessionInfo({ id: 'ses_created' })),
+    get: vi.fn<OpenCodeApi['session']['get']>(async ({ sessionID }) =>
+      sessionInfo({ id: sessionID, location: { directory: '/tmp/other-chat' } })),
+    remove: vi.fn<OpenCodeApi['session']['remove']>(async () => undefined),
+    list: vi.fn<OpenCodeApi['session']['list']>(async () => ({ data: [], cursor: {} })),
   }
-  return { client: { api: { session } } as unknown as OpenCodeClient, session }
+  return session
 }
 
 const roots: string[] = []
 
 function createApp(root: string) {
-  const fake = createFakeClient()
+  const session = createFakeClient()
   const app = new Hono()
-  app.route('/chats', createChatRoutes(new ChatService(fake.client, { removeAll: vi.fn(async () => undefined) }, () => root)))
-  return { app, ...fake }
+  app.route(
+    '/chats',
+    createChatRoutes(
+      new ChatService(
+        createStubOpenCodeClient({ api: { session } }),
+        { removeAll: vi.fn(async () => undefined) },
+        () => root,
+      ),
+    ),
+  )
+  return { app, session }
 }
 
 function createRoot(): string {
@@ -54,12 +69,12 @@ describe('chat routes', () => {
 
     const first = await app.request('/chats?limit=1')
     expect(first.status).toBe(200)
-    const firstBody = await first.json() as { chats: Array<{ id: string }>; nextCursor?: string }
+    const firstBody = await readJson(first, ListChatsResponseSchema)
     expect(firstBody.chats.map((chat) => chat.id)).toEqual(['20260102-000000-bbbbbb'])
     expect(firstBody.nextCursor).toBe('20260102-000000-bbbbbb')
 
     const second = await app.request(`/chats?limit=1&cursor=${firstBody.nextCursor}`)
-    const secondBody = await second.json() as { chats: Array<{ id: string }>; nextCursor?: string }
+    const secondBody = await readJson(second, ListChatsResponseSchema)
     expect(secondBody.chats.map((chat) => chat.id)).toEqual(['20260101-000000-aaaaaa'])
     expect(secondBody.nextCursor).toBeUndefined()
   })
@@ -79,7 +94,7 @@ describe('chat routes', () => {
 
     const found = await app.request(`/chats/${id}`)
     expect(found.status).toBe(200)
-    const body = await found.json() as { id: string; directory: string }
+    const body = await readJson(found, ChatSchema)
     expect(body.id).toBe(id)
     expect(body.directory).toBe(path.join(root, id))
 
@@ -93,7 +108,7 @@ describe('chat routes', () => {
 
     const res = await app.request('/chats', { method: 'POST' })
     expect(res.status).toBe(201)
-    const body = await res.json() as { chat: { id: string; directory: string }; sessionId: string }
+    const body = await readJson(res, CreateChatResponseSchema)
     expect(body.chat.id).toMatch(/^\d{8}-\d{6}-[0-9a-f]{6}$/)
     expect(body.sessionId).toBe('ses_created')
     expect(existsSync(body.chat.directory)).toBe(true)
@@ -106,7 +121,7 @@ describe('chat routes', () => {
     const directory = path.join(root, id)
     mkdirSync(directory)
     const { app, session } = createApp(root)
-    session.get.mockResolvedValueOnce({ id: 'ses_1', location: { directory } })
+    session.get.mockResolvedValueOnce(sessionInfo({ id: 'ses_1', location: { directory } }))
 
     const res = await app.request(`/chats/${id}/sessions/ses_1`, { method: 'DELETE' })
     expect(res.status).toBe(200)

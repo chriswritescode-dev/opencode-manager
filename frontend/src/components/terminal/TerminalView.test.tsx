@@ -1,62 +1,42 @@
-import { createRef, type ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRef, type ComponentProps } from 'react'
 import { act, render } from '@testing-library/react'
-import { resizeTerminal } from '@/api/terminals'
+import { installMatchMedia, installResizeObserver, installWebSocket, type WebSocketFake } from '@/test/browserFakes'
+import { createFetchFake, type FetchFake } from '@/test/fetchFake'
 import { TerminalView, type TerminalViewHandle } from './TerminalView'
 
-const xterm = vi.hoisted(() => {
-  const onDataHandlers: Array<(data: string) => void> = []
-  return {
-    onDataHandlers,
-    write: vi.fn(),
-    focus: vi.fn(),
-    dispose: vi.fn(),
-  }
-})
+function xtermInput(): HTMLTextAreaElement {
+  const textarea = document.querySelector('.xterm-helper-textarea')
+  if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('xterm helper textarea missing')
+  return textarea
+}
 
-const socket = vi.hoisted(() => ({ send: vi.fn() }))
+function pressKey(key: string, keyCode: number) {
+  act(() => {
+    xtermInput().dispatchEvent(
+      new KeyboardEvent('keydown', { key, keyCode, which: keyCode, code: `Key${key.toUpperCase()}`, bubbles: true }),
+    )
+  })
+}
 
-vi.mock('@xterm/xterm', () => ({
-  Terminal: vi.fn().mockImplementation(() => ({
-    loadAddon: vi.fn(),
-    open: vi.fn(),
-    write: xterm.write,
-    focus: xterm.focus,
-    dispose: xterm.dispose,
-    onData: (handler: (data: string) => void) => {
-      xterm.onDataHandlers.push(handler)
-      return { dispose: vi.fn() }
-    },
-    options: {},
-    cols: 80,
-    rows: 24,
-  })),
-}))
+function terminalContainer(container: HTMLElement): HTMLElement {
+  const element = container.querySelector('[data-terminal-id="t1"]')
+  if (!(element instanceof HTMLElement)) throw new Error('terminal container missing')
+  return element
+}
 
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })),
-}))
+function setVisibleSize(container: HTMLElement) {
+  Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true })
+  Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true })
+}
 
-vi.mock('@xterm/addon-web-links', () => ({
-  WebLinksAddon: vi.fn().mockImplementation(() => ({})),
-}))
-
-vi.mock('@/api/terminals', () => ({
-  resizeTerminal: vi.fn().mockResolvedValue(undefined),
-}))
-
-vi.mock('@/lib/terminal-theme', () => ({
-  resolveTerminalTheme: vi.fn(() => ({})),
-}))
-
-vi.mock('@/hooks/useTerminalSocket', () => ({
-  useTerminalSocket: () => ({ send: socket.send, status: 'open' }),
-}))
+let socketFake: WebSocketFake
+let fetchFake: FetchFake
 
 function renderView(overrides: Partial<ComponentProps<typeof TerminalView>> = {}) {
   const ref = createRef<TerminalViewHandle>()
   const onCtrlConsumed = vi.fn()
-  const element = (
+  const view = render(
     <TerminalView
       ref={ref}
       target={{ kind: 'repo', repoId: 1 }}
@@ -68,37 +48,51 @@ function renderView(overrides: Partial<ComponentProps<typeof TerminalView>> = {}
       onOpenLink={vi.fn()}
       onExited={vi.fn()}
       {...overrides}
-    />
+    />,
   )
-  const view = render(element)
   return { ref, onCtrlConsumed, view }
 }
 
-describe('TerminalView input handling', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    xterm.onDataHandlers.length = 0
-  })
+function openSocket() {
+  const connection = socketFake.connectionFor('/terminals/t1/connect')
+  if (!connection) throw new Error('terminal socket missing')
+  act(() => connection.open())
+  return connection
+}
 
+beforeEach(() => {
+  installMatchMedia(false)
+  socketFake = installWebSocket()
+  fetchFake = createFetchFake([
+    { method: 'PATCH', path: '/api/repos/1/terminals/t1', respond: () => ({ status: 204 }) },
+  ])
+  fetchFake.install()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('TerminalView input handling', () => {
   it('applies the ctrl modifier and consumes it for imperative key-bar sends', () => {
     const { ref, onCtrlConsumed } = renderView({ ctrlArmed: true })
+    const connection = openSocket()
 
     act(() => {
       ref.current?.send('c')
     })
 
-    expect(socket.send).toHaveBeenCalledWith('\x03')
+    expect(connection.sent).toEqual(['\u0003'])
     expect(onCtrlConsumed).toHaveBeenCalledTimes(1)
   })
 
   it('applies the ctrl modifier to keyboard input while armed', () => {
     const { onCtrlConsumed } = renderView({ ctrlArmed: true })
+    const connection = openSocket()
 
-    act(() => {
-      xterm.onDataHandlers[0]('c')
-    })
+    pressKey('c', 67)
 
-    expect(socket.send).toHaveBeenCalledWith('\x03')
+    expect(connection.sent).toEqual(['\u0003'])
     expect(onCtrlConsumed).toHaveBeenCalledTimes(1)
   })
 
@@ -117,101 +111,72 @@ describe('TerminalView input handling', () => {
     }
 
     const { rerender } = render(<TerminalView ref={ref} {...props} />)
+    const connection = openSocket()
 
     act(() => {
       ref.current?.send('c')
     })
-    expect(socket.send).toHaveBeenLastCalledWith('\x03')
+    expect(connection.sent).toEqual(['\u0003'])
     expect(onCtrlConsumed).toHaveBeenCalledTimes(1)
 
     rerender(<TerminalView ref={ref} {...props} ctrlArmed={false} />)
 
-    act(() => {
-      xterm.onDataHandlers[xterm.onDataHandlers.length - 1]('c')
-    })
+    pressKey('c', 67)
 
-    expect(socket.send).toHaveBeenLastCalledWith('c')
+    expect(connection.sent).toEqual(['\u0003', 'c'])
     expect(onCtrlConsumed).toHaveBeenCalledTimes(1)
   })
 })
 
-class TestResizeObserver {
-  static instances: TestResizeObserver[] = []
-  readonly callback: ResizeObserverCallback
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback
-    TestResizeObserver.instances.push(this)
-  }
-
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-
-  trigger() {
-    this.callback([], this as unknown as ResizeObserver)
-  }
-}
-
-function setVisibleSize(container: HTMLElement) {
-  Object.defineProperty(container, 'clientWidth', { value: 800, configurable: true })
-  Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true })
-}
-
 describe('TerminalView resize', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    TestResizeObserver.instances = []
-    vi.stubGlobal('ResizeObserver', TestResizeObserver)
     vi.useFakeTimers()
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-    vi.unstubAllGlobals()
-  })
-
   it('sends a resize only when the fitted size changes', () => {
+    const resizeObserver = installResizeObserver()
     const { view } = renderView()
-    const container = view.container.querySelector('[data-terminal-id="t1"]') as HTMLElement
-    setVisibleSize(container)
+    setVisibleSize(terminalContainer(view.container))
 
     act(() => {
       vi.advanceTimersByTime(150)
     })
-    expect(resizeTerminal).toHaveBeenCalledTimes(1)
+    const resizeRequests = fetchFake.findRequests('PATCH', '/api/repos/1/terminals/t1')
+    expect(resizeRequests).toHaveLength(1)
+    expect(resizeRequests[0].body).toMatchObject({ directory: '/repo' })
 
     act(() => {
-      TestResizeObserver.instances[0].trigger()
+      resizeObserver.reportHeight(400)
       vi.advanceTimersByTime(150)
     })
     act(() => {
-      TestResizeObserver.instances[0].trigger()
+      resizeObserver.reportHeight(400)
       vi.advanceTimersByTime(150)
     })
 
-    expect(resizeTerminal).toHaveBeenCalledTimes(1)
+    expect(fetchFake.findRequests('PATCH', '/api/repos/1/terminals/t1')).toHaveLength(1)
   })
 
   it('does not send a resize while the view is hidden', () => {
+    installResizeObserver()
     const { view } = renderView({ active: false })
-    const container = view.container.querySelector('[data-terminal-id="t1"]') as HTMLElement
-    setVisibleSize(container)
+    setVisibleSize(terminalContainer(view.container))
 
     act(() => {
       vi.advanceTimersByTime(150)
     })
 
-    expect(resizeTerminal).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('PATCH', '/api/repos/1/terminals/t1')).toHaveLength(0)
   })
 
   it('does not send a resize when the container has no size', () => {
+    installResizeObserver()
     renderView()
 
     act(() => {
       vi.advanceTimersByTime(150)
     })
 
-    expect(resizeTerminal).not.toHaveBeenCalled()
+    expect(fetchFake.findRequests('PATCH', '/api/repos/1/terminals/t1')).toHaveLength(0)
   })
 })

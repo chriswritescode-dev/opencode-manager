@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { Database } from 'bun:sqlite'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
+import type { Database } from 'bun:sqlite'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { z } from 'zod'
 import { createRepo } from '../../src/db/queries'
 import { createGitService } from '../../src/services/git/GitService'
 import { ProjectConfigService } from '../../src/services/project-config'
@@ -13,23 +12,54 @@ import { SecretsService } from '../../src/services/secrets'
 import { RepoEnvService } from '../../src/services/repo-env'
 import { deleteRepoFiles } from '../../src/services/repo'
 import { invalidateRepoEnvCache } from '../../src/utils/repo-env-cache'
-import { executeCommand } from '../../src/utils/process'
-import { logger } from '../../src/utils/logger'
-import type { GitAuthService } from '../../src/services/git-auth'
+import { RepoProjectFileSchema } from '@opencode-manager/shared/schemas'
 import type { Repo } from '@opencode-manager/shared/types'
+import { createTestDatabase } from '../helpers/test-database'
+import { createGitAuthService } from '../helpers/git-fixtures'
+import { expectLoggedMessage } from '../helpers/log-assertions'
 
-vi.mock('../../src/utils/process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/utils/process')>()
-  return { ...actual, executeCommand: vi.fn(actual.executeCommand) }
-})
+type RepoProjectFileInput = z.input<typeof RepoProjectFileSchema>
 
-const gitAuthService = { getGitEnvironment: () => ({}) } as unknown as GitAuthService
+const gitAuthService = createGitAuthService()
 
 const EMPTY = { env: {}, maskValues: [] }
 
+let probeDir: string
+let probeLogPath: string
+let previousPath: string | undefined
+let previousLogLevel: string | undefined
+
 function topLevelProbes(): number {
-  return vi.mocked(executeCommand).mock.calls.filter(([args]) => args.includes('--show-toplevel')).length
+  try {
+    return fs.readFileSync(probeLogPath, 'utf-8')
+      .split('\n')
+      .filter((line) => line.includes('--show-toplevel'))
+      .length
+  } catch {
+    return 0
+  }
 }
+
+beforeAll(() => {
+  probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-git-probe-'))
+  probeLogPath = path.join(probeDir, 'git.log')
+  const realGitPath = execSync('command -v git', { shell: '/bin/sh' }).toString().trim()
+  const wrapperPath = path.join(probeDir, 'git')
+  fs.writeFileSync(wrapperPath, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${probeLogPath}'\nexec '${realGitPath}' "$@"\n`)
+  fs.chmodSync(wrapperPath, 0o755)
+  previousPath = process.env.PATH
+  process.env.PATH = `${probeDir}:${previousPath ?? ''}`
+  previousLogLevel = process.env.LOG_LEVEL
+  process.env.LOG_LEVEL = 'error'
+})
+
+afterAll(() => {
+  if (previousPath === undefined) delete process.env.PATH
+  else process.env.PATH = previousPath
+  if (previousLogLevel === undefined) delete process.env.LOG_LEVEL
+  else process.env.LOG_LEVEL = previousLogLevel
+  fs.rmSync(probeDir, { recursive: true, force: true })
+})
 
 describe('RepoEnvService', () => {
   let db: Database
@@ -51,7 +81,7 @@ describe('RepoEnvService', () => {
     execSync(`git -C "${dir}" commit --allow-empty -m "${message}"`)
   }
 
-  function writeProjectFile(dir: string, content: unknown): void {
+  function writeProjectFile(dir: string, content: RepoProjectFileInput): void {
     const filePath = path.join(dir, '.ocm', 'project.json')
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2))
@@ -74,9 +104,8 @@ describe('RepoEnvService', () => {
   }
 
   beforeEach(() => {
-    vi.mocked(executeCommand).mockClear()
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
+    fs.writeFileSync(probeLogPath, '')
+    db = createTestDatabase()
     projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
     secretsService = new SecretsService(db)
     repoEnvService = new RepoEnvService(db, projectConfigService, secretsService)
@@ -254,12 +283,9 @@ describe('RepoEnvService', () => {
     vi.spyOn(secretsService, 'resolveValues').mockImplementation(() => {
       throw new Error('boom')
     })
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
 
     expect(await repoEnvService.resolveForDirectory(root)).toEqual(EMPTY)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(root), expect.anything())
-
-    warn.mockRestore()
+    expectLoggedMessage(root, 'warn')
   })
 
   describe('caching', () => {

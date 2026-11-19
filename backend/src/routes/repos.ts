@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
+import { Readable } from 'node:stream'
 import { z } from 'zod'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import type { DeleteRepoResult, Repo } from '@opencode-manager/shared/types'
 import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema, CreateRepoWorkspaceRequestSchema, DeleteRepoRequestSchema } from '@opencode-manager/shared/schemas'
@@ -34,6 +34,18 @@ const DeleteWorkspaceRequestSchema = z.object({
   directory: z.string().trim().min(1),
 })
 
+const RepoOrderBodySchema = z.object({
+  order: z.array(z.number()),
+})
+
+const RepoGitCredentialBodySchema = z.object({
+  credentialId: z.string().optional(),
+})
+
+const RepoGitIdentityBodySchema = z.object({
+  identityId: z.string().optional(),
+})
+
 function withRepoSettings(database: Database, repo: Repo): Repo {
   return {
     ...repo,
@@ -41,11 +53,6 @@ function withRepoSettings(database: Database, repo: Repo): Repo {
   }
 }
 
-/**
- * Mounts the repo git, terminal, project-config, schedule and secret/variable sub-routers, and serves
- * repo CRUD with discovery, ordering, access, credential, identity, workspace, pull/branch, download
- * and assistant-mode routes. Handler failures are mapped to their status codes with a JSON message.
- */
 export function createRepoRoutes(
   database: Database,
   gitAuthService: GitAuthService,
@@ -104,7 +111,7 @@ export function createRepoRoutes(
       return c.json(repo)
     } catch (error: unknown) {
       logger.error('Failed to create repo:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -127,7 +134,7 @@ export function createRepoRoutes(
       return c.json(discovery)
     } catch (error: unknown) {
       logger.error('Failed to discover repos:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -154,14 +161,15 @@ app.get('/', async (c) => {
   app.put('/order', async (c) => {
     try {
       const body = await c.req.json()
+      const parsedBody = RepoOrderBodySchema.safeParse(body)
 
-      if (!Array.isArray(body.order) || body.order.some((id: unknown) => typeof id !== 'number')) {
+      if (!parsedBody.success) {
         return c.json({ error: 'order must be an array of numbers' }, 400)
       }
 
       const settingsService = new SettingsService(database)
       settingsService.updateSettings({
-        repoOrder: body.order,
+        repoOrder: parsedBody.data.order,
       })
 
       return c.json({ success: true })
@@ -235,9 +243,9 @@ app.get('/', async (c) => {
       }
 
       const body = await c.req.json()
-      const credentialId = typeof body.credentialId === 'string' && body.credentialId.trim() !== ''
-        ? body.credentialId.trim()
-        : null
+      const parsedBody = RepoGitCredentialBodySchema.safeParse(body)
+      const requestedCredentialId = parsedBody.success ? parsedBody.data.credentialId?.trim() : undefined
+      const credentialId = requestedCredentialId ? requestedCredentialId : null
 
       if (credentialId) {
         const settingsService = new SettingsService(database)
@@ -281,9 +289,9 @@ app.get('/', async (c) => {
       }
 
       const body = await c.req.json()
-      const identityId = typeof body.identityId === 'string' && body.identityId.trim() !== ''
-        ? body.identityId.trim()
-        : null
+      const parsedBody = RepoGitIdentityBodySchema.safeParse(body)
+      const requestedIdentityId = parsedBody.success ? parsedBody.data.identityId?.trim() : undefined
+      const identityId = requestedIdentityId ? requestedIdentityId : null
 
       let preset: { name: string; email: string } | null = null
       if (identityId) {
@@ -508,7 +516,7 @@ app.get('/', async (c) => {
       return c.json({ ...updatedRepo, currentBranch })
     } catch (error: unknown) {
       logger.error('Failed to create branch:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error))
     }
   })
 
@@ -546,7 +554,7 @@ app.get('/', async (c) => {
         archiveService.deleteArchive(archivePath)
       })
 
-      return new Response(archiveStream as unknown as ReadableStream, {
+      return new Response(Readable.toWeb(archiveStream), {
         headers: {
           'Content-Type': 'application/zip',
           'Content-Disposition': `attachment; filename="${repoName}.zip"`,

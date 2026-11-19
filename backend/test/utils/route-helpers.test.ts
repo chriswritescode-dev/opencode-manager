@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
 import { z, type ZodType } from 'zod'
 import { ClientError } from '@opencode-manager/shared/opencode'
+import { readJson } from '../helpers/read-json'
 import { handleOpenCodeError, parseJsonBody } from '../../src/utils/route-helpers'
 
 function createParseApp(schema: ZodType, options?: { allowEmpty?: boolean }) {
@@ -16,9 +17,9 @@ function createParseApp(schema: ZodType, options?: { allowEmpty?: boolean }) {
   return app
 }
 
-function createErrorApp(error: unknown, fallback: string, options?: { unknownStatus?: 500 | 502 }) {
+function createErrorApp(cause: Error, fallback: string, options?: { unknownStatus?: 500 | 502 }) {
   const app = new Hono()
-  app.get('/', (c) => handleOpenCodeError(c, error, fallback, options))
+  app.get('/', (c) => handleOpenCodeError(c, cause, fallback, options))
   return app
 }
 
@@ -70,7 +71,10 @@ describe('parseJsonBody', () => {
     })
 
     expect(response.status).toBe(400)
-    const body = await response.json() as { error: string; details: Array<{ message: string }> }
+    const body = await readJson(response, z.object({
+      error: z.string(),
+      details: z.array(z.object({ message: z.string() })),
+    }))
     expect(Array.isArray(body.details)).toBe(true)
     expect(body.details.length).toBeGreaterThan(0)
     expect(body.error).toBe(body.details[0]?.message)

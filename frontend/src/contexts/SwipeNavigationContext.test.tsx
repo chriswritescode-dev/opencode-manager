@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { SwipeNavigationProvider, useSwipeNavigation } from './SwipeNavigationContext'
+import { SwipeNavigationProvider } from './SwipeNavigationContext'
+import { useSwipeNavigation } from './swipe-navigation-context'
 
 describe('SwipeNavigationContext', () => {
   it('returns null when used outside provider', () => {

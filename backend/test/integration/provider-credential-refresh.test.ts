@@ -1,18 +1,12 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
+import { z } from 'zod'
 import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
 import { createProvidersRoutes } from '../../src/routes/providers'
 import { FetchOpenCodeClient } from '../../src/services/opencode/client'
 import { resolveOpenCode2Binary, startOpenCodeServe } from '../helpers/opencode-binary'
 import type { OpenCodeServe } from '../helpers/opencode-binary'
 
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
-}))
+const EventTypeSchema = z.object({ type: z.string() })
 
 const PROVIDER_ID = 'anthropic'
 const EVENT_TIMEOUT_MS = 30000
@@ -47,8 +41,9 @@ async function openEventStream(serve: OpenCodeServe): Promise<EventStream> {
         buffer = lines.pop() ?? ''
         for (const line of lines) {
           if (!line.startsWith('data:')) continue
-          const event = JSON.parse(line.slice(5)) as { type: string }
-          types.push(event.type)
+          const event = EventTypeSchema.safeParse(JSON.parse(line.slice(5)))
+          if (!event.success) continue
+          types.push(event.data.type)
           for (const listener of listeners) listener()
         }
       }

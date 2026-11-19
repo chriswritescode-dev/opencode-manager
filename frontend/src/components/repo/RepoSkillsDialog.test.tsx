@@ -1,324 +1,225 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import { RepoSkillsDialog } from './RepoSkillsDialog'
-import { OpenCodeServerProvider } from '@/contexts/OpenCodeServerContext'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute } from '@/test/fetchFake'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 
-const mocks = vi.hoisted(() => ({
-  listManagedSkills: vi.fn(),
-  listSkills: vi.fn(),
-  activateSkill: vi.fn(),
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    listManagedSkills: mocks.listManagedSkills,
-    deleteSkill: vi.fn(),
+const localSkills = [
+  {
+    name: 'test-skill',
+    description: 'A test skill for testing',
+    body: 'Test skill content',
+    location: '/repo/.opencode/skills/test-skill/SKILL.md',
+    scope: 'project',
   },
-}))
-
-vi.mock('@/api/opencode', () => ({
-  activateSkill: mocks.activateSkill,
-  listSkills: mocks.listSkills,
-}))
-
-vi.mock('@/lib/toast', () => ({
-  showToast: {
-    error: vi.fn(),
-    success: vi.fn(),
+  {
+    name: 'global-skill',
+    description: 'A global skill',
+    body: 'Global skill content',
+    location: '/home/user/.config/opencode/skills/global-skill/SKILL.md',
+    scope: 'global',
   },
-}))
+] satisfies SkillFileInfo[]
+
+const remoteSkill = {
+  id: 'sk_1',
+  name: 'remote-skill',
+  description: 'From the server',
+  path: '/home/me/app/.opencode/skills/remote-skill/SKILL.md',
+  content: 'Remote body',
+}
+
+function localRoutes(skills: SkillFileInfo[]): FetchRoute[] {
+  return [{ method: 'GET', path: '/api/settings/skills', respond: () => ({ json: skills }) }]
+}
+
+function renderDialog(options: {
+  skills?: SkillFileInfo[]
+  sessionId?: string
+  onSkillLoaded?: (skill: SkillFileInfo) => void
+  onOpenChange?: (open: boolean) => void
+  extraRoutes?: FetchRoute[]
+}) {
+  return renderWithProviders(
+    <RepoSkillsDialog
+      open
+      onOpenChange={options.onOpenChange ?? vi.fn()}
+      repoId={1}
+      sessionId={options.sessionId}
+      directory={options.sessionId ? '/test/repo' : undefined}
+      onSkillLoaded={options.onSkillLoaded}
+    />,
+    {
+      auth: false,
+      theme: false,
+      fetchRoutes: [...localRoutes(options.skills ?? localSkills), ...(options.extraRoutes ?? [])],
+    },
+  )
+}
 
 describe('RepoSkillsDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  const createWrapper = () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-    return ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-  }
-
-  const mockSkills: SkillFileInfo[] = [
-    {
-      name: 'test-skill',
-      description: 'A test skill for testing',
-      body: 'Test skill content',
-      location: '/repo/.opencode/skills/test-skill/SKILL.md',
-      scope: 'project',
-    },
-    {
-      name: 'global-skill',
-      description: 'A global skill',
-      body: 'Global skill content',
-      location: '/home/user/.config/opencode/skills/global-skill/SKILL.md',
-      scope: 'global',
-    },
-  ]
-
   describe('tabs and skill filtering', () => {
     it('shows both tabs when skills exist', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
+      renderDialog({})
 
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={vi.fn()}
-          repoId={1}
-        />,
-        { wrapper: createWrapper() }
-      )
-
-      expect(screen.getByText('Project')).toBeInTheDocument()
-      expect(screen.getByText('Global')).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /^Project/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /^Global/ })).toBeInTheDocument()
     })
 
     it('shows project skills in project tab', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
+      const user = userEvent.setup()
+      renderDialog({})
 
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={vi.fn()}
-          repoId={1}
-        />,
-        { wrapper: createWrapper() }
-      )
+      await user.click(await screen.findByRole('button', { name: /^Project/ }))
 
-      await waitFor(() => {
-        expect(screen.getByText('test-skill')).toBeInTheDocument()
-      })
+      expect(within(screen.getByText('test-skill').closest('li') ?? document.body).getByText('test-skill')).toBeInTheDocument()
+      expect(screen.queryByText('global-skill')).not.toBeInTheDocument()
     })
 
     it('shows global skills in global tab', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
+      const user = userEvent.setup()
+      renderDialog({})
 
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={vi.fn()}
-          repoId={1}
-        />,
-        { wrapper: createWrapper() }
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText('Project')).toBeInTheDocument()
-      })
-
-      const globalTab = screen.getByText('Global')
-      await userEvent.click(globalTab)
+      await user.click(await screen.findByRole('button', { name: /^Global/ }))
 
       expect(screen.getByText('global-skill')).toBeInTheDocument()
+      expect(screen.queryByText('test-skill')).not.toBeInTheDocument()
     })
 
     it('shows empty state for project tab when no project skills', async () => {
-      mocks.listManagedSkills.mockResolvedValue([
-        {
-          name: 'global-skill',
-          description: 'A global skill',
-          body: 'Global skill content',
-          location: '/home/user/.config/opencode/skills/global-skill/SKILL.md',
-          scope: 'global',
-        },
-      ])
+      const user = userEvent.setup()
+      renderDialog({ skills: [localSkills[1]] })
 
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={vi.fn()}
-          repoId={1}
-        />,
-        { wrapper: createWrapper() }
-      )
+      await user.click(await screen.findByRole('button', { name: /^Project/ }))
 
-      const projectTab = screen.getByText('Project')
-      await userEvent.click(projectTab)
-
-      await waitFor(() => {
-        expect(screen.getByText('No skills found')).toBeInTheDocument()
-      })
+      await waitFor(() => expect(screen.getByText('No skills found')).toBeInTheDocument())
     })
   })
 
   describe('load functionality', () => {
-    it('makes skill cards clickable when sessionId is provided', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.activateSkill.mockResolvedValue(undefined)
+    it('offers a load action for skill rows when sessionId is provided', async () => {
+      renderDialog({ sessionId: 'test-session' })
 
-      const onSkillLoaded = vi.fn()
-      const onOpenChange = vi.fn()
-
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={onOpenChange}
-          repoId={1}
-          sessionId="test-session"
-          directory="/test/repo"
-          onSkillLoaded={onSkillLoaded}
-        />,
-        { wrapper: createWrapper() }
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText('test-skill')).toBeInTheDocument()
-      })
-
-      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')
-      expect(card).toBeTruthy()
+      expect(await screen.findByText('test-skill')).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: 'Load' })).toHaveLength(2)
     })
 
-    it('does not make skill cards clickable when sessionId is not provided', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
+    it('hides the load action when sessionId is not provided', async () => {
+      renderDialog({})
 
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={vi.fn()}
-          repoId={1}
-        />,
-        { wrapper: createWrapper() }
-      )
+      await screen.findByText('test-skill')
 
-      await waitFor(() => {
-        expect(screen.getByText('test-skill')).toBeInTheDocument()
-      })
-
-      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')
-      expect(card).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Load' })).not.toBeInTheDocument()
     })
 
-    it('calls sendCommand and closes dialog on card click', async () => {
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.activateSkill.mockReturnValue(new Promise(() => {}))
-
-      const onSkillLoaded = vi.fn()
-      const onOpenChange = vi.fn()
+    it('activates the skill and closes the dialog on card click', async () => {
       const user = userEvent.setup()
-
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={onOpenChange}
-          repoId={1}
-          sessionId="test-session"
-          directory="/test/repo"
-          onSkillLoaded={onSkillLoaded}
-        />,
-        { wrapper: createWrapper() }
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText('test-skill')).toBeInTheDocument()
+      const onSkillLoaded = vi.fn()
+      const onOpenChange = vi.fn()
+      const { fetchFake } = renderDialog({
+        sessionId: 'test-session',
+        onSkillLoaded,
+        onOpenChange,
+        extraRoutes: [
+          { method: 'POST', path: '/api/opencode/api/experimental/session/test-session/skill', respond: () => ({ status: 204 }) },
+        ],
       })
 
-      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')!
-      await user.click(card)
+      await user.click(await screen.findByText('test-skill'))
 
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/opencode/api/experimental/session/test-session/skill')?.body).toEqual({
+          id: 'test-skill',
+        }),
+      )
+      expect(onSkillLoaded).toHaveBeenCalledWith(localSkills[0])
       expect(onOpenChange).toHaveBeenCalledWith(false)
-      expect(onSkillLoaded).toHaveBeenCalledWith(mockSkills[0])
-      expect(mocks.activateSkill).toHaveBeenCalledWith('test-session', 'test-skill', 'local')
     })
 
-    it('shows toast error on activateSkill failure', async () => {
-      const { showToast } = await import('@/lib/toast')
-      mocks.listManagedSkills.mockResolvedValue(mockSkills)
-      mocks.activateSkill.mockRejectedValue(new Error('Failed to load'))
-
-      const onOpenChange = vi.fn()
+    it('shows a toast error when activating the skill fails', async () => {
       const user = userEvent.setup()
-
-      render(
-        <RepoSkillsDialog
-          open
-          onOpenChange={onOpenChange}
-          repoId={1}
-          sessionId="test-session"
-          directory="/test/repo"
-        />,
-        { wrapper: createWrapper() }
-      )
-
-      await waitFor(() => {
-        expect(screen.getByText('test-skill')).toBeInTheDocument()
+      const onOpenChange = vi.fn()
+      renderDialog({
+        sessionId: 'test-session',
+        onOpenChange,
+        extraRoutes: [
+          {
+            method: 'POST',
+            path: '/api/opencode/api/experimental/session/test-session/skill',
+            respond: () => ({ status: 500, json: { error: 'Failed to load' } }),
+          },
+        ],
       })
 
-      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')!
-      await user.click(card)
+      await user.click(await screen.findByText('test-skill'))
 
-      await waitFor(() => {
-        expect(showToast.error).toHaveBeenCalledWith('Failed to load')
-      })
-
+      expect(await screen.findByText('UnexpectedStatus: 500')).toBeInTheDocument()
       expect(onOpenChange).toHaveBeenCalledWith(false)
     })
   })
 
   describe('linked server', () => {
-    const remoteSkill = {
-      id: 'sk_1',
-      name: 'remote-skill',
-      description: 'From the server',
-      path: '/home/me/app/.opencode/skills/remote-skill/SKILL.md',
-      content: 'Remote body',
+    function renderRemote(options: {
+      onSkillLoaded?: (skill: SkillFileInfo) => void
+      onOpenChange?: (open: boolean) => void
+      extraRoutes?: FetchRoute[]
+    } = {}) {
+      return renderWithProviders(
+        <RepoSkillsDialog
+          open
+          onOpenChange={options.onOpenChange ?? vi.fn()}
+          repoId={0}
+          sessionId="ses_remote"
+          directory="/home/me/app"
+          onSkillLoaded={options.onSkillLoaded}
+        />,
+        {
+          auth: false,
+          theme: false,
+          serverId: 'srv_kitchen',
+          fetchRoutes: [
+            { method: 'GET', path: '/api/opencode/servers/srv_kitchen/api/skill', respond: () => ({ json: { location: { directory: '/home/me/app' }, data: [remoteSkill] } }) },
+            ...(options.extraRoutes ?? []),
+          ],
+        },
+      )
     }
 
-    const renderRemote = (onSkillLoaded = vi.fn(), onOpenChange = vi.fn()) =>
-      render(
-        <OpenCodeServerProvider serverId="srv_kitchen">
-          <RepoSkillsDialog
-            open
-            onOpenChange={onOpenChange}
-            repoId={0}
-            sessionId="ses_remote"
-            directory="/home/me/app"
-            onSkillLoaded={onSkillLoaded}
-          />
-        </OpenCodeServerProvider>,
-        { wrapper: createWrapper() },
-      )
-
     it('lists skills from the linked server and hides install and delete actions', async () => {
-      mocks.listSkills.mockResolvedValue([remoteSkill])
+      const { fetchFake } = renderRemote()
 
-      renderRemote()
-
-      await waitFor(() => {
-        expect(screen.getByText('remote-skill')).toBeInTheDocument()
-      })
-
-      expect(mocks.listSkills).toHaveBeenCalledWith('/home/me/app', 'srv_kitchen')
-      expect(mocks.listManagedSkills).not.toHaveBeenCalled()
+      expect(await screen.findByText('remote-skill')).toBeInTheDocument()
+      expect(fetchFake.lastRequest('GET', '/api/opencode/servers/srv_kitchen/api/skill')?.searchParams.get('location[directory]')).toBe('/home/me/app')
+      expect(fetchFake.findRequests('GET', '/api/settings/skills')).toHaveLength(0)
       expect(screen.queryByRole('button', { name: /install skill/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Actions for remote-skill' })).not.toBeInTheDocument()
     })
 
     it('loads a linked-server skill into the current session', async () => {
-      mocks.listSkills.mockResolvedValue([remoteSkill])
-      mocks.activateSkill.mockReturnValue(new Promise(() => {}))
+      const user = userEvent.setup()
       const onSkillLoaded = vi.fn()
       const onOpenChange = vi.fn()
-      const user = userEvent.setup()
-
-      renderRemote(onSkillLoaded, onOpenChange)
-
-      await waitFor(() => {
-        expect(screen.getByText('remote-skill')).toBeInTheDocument()
+      const { fetchFake } = renderRemote({
+        onSkillLoaded,
+        onOpenChange,
+        extraRoutes: [
+          {
+            method: 'POST',
+            path: '/api/opencode/servers/srv_kitchen/api/experimental/session/ses_remote/skill',
+            respond: () => ({ status: 204 }),
+          },
+        ],
       })
 
-      await user.click(screen.getByText('remote-skill').closest('[class*="cursor-pointer"]')!)
+      await user.click(await screen.findByText('remote-skill'))
 
-      expect(mocks.activateSkill).toHaveBeenCalledWith('ses_remote', 'remote-skill', 'srv_kitchen')
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('POST', '/api/opencode/servers/srv_kitchen/api/experimental/session/ses_remote/skill')?.body).toEqual({
+          id: 'remote-skill',
+        }),
+      )
       expect(onSkillLoaded).toHaveBeenCalledWith({
         name: 'remote-skill',
         description: 'From the server',

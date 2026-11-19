@@ -7,7 +7,6 @@ interface UseAutoPlayLastResponseParams {
   sessionId: string
   lastAssistantMessage: SessionMessageInfo | undefined
   lastAssistantText: string
-  /** Whether a finished reply may start playing; false while hands-free voice owns playback. */
   enabled?: boolean
 }
 

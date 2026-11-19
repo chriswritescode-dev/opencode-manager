@@ -1,18 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}))
-
-import {
-  closeSessionConnections,
-  registerSessionConnection,
-} from '../../src/services/session-connections'
-import { logger } from '../../src/utils/logger'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { closeSessionConnections, registerSessionConnection } from '../../src/services/session-connections'
+import { testLogEntries } from '../helpers/log-assertions'
 
 describe('session connections registry', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     closeSessionConnections('session-a')
     closeSessionConnections('session-b')
   })
@@ -91,11 +82,11 @@ describe('session connections registry', () => {
 
     expect(failing).toHaveBeenCalledTimes(1)
     expect(healthy).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledTimes(1)
+    expect(testLogEntries('error')).toHaveLength(1)
   })
 
   it('ignores sessions without registered connections', () => {
     expect(() => closeSessionConnections('unknown-session')).not.toThrow()
-    expect(logger.error).not.toHaveBeenCalled()
+    expect(testLogEntries('error')).toEqual([])
   })
 })

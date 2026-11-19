@@ -1,9 +1,5 @@
 const URL_SCHEME = /^[a-z][a-z\d+.-]*:/i
 
-/**
- * Extracts the local file path a markdown link points at, decoded and without query or fragment.
- * Returns null for anchors, protocol-relative URLs, links with a URL scheme, and malformed encodings.
- */
 export function getLocalLinkPath(href: string | undefined): string | null {
   if (!href || href.startsWith('#') || href.startsWith('//') || URL_SCHEME.test(href)) {
     return null
@@ -17,11 +13,6 @@ export function getLocalLinkPath(href: string | undefined): string | null {
   }
 }
 
-/**
- * Resolves a local link path against the workspace path of the file that contains it.
- * Absolute link paths are returned unchanged for the files API to validate. Leading parent segments
- * are kept for relative bases, while an absolute base keeps its leading slash and never climbs above root.
- */
 export function resolvePathFromFile(fromFilePath: string, linkPath: string): string | null {
   if (linkPath.startsWith('/')) {
     return linkPath
@@ -46,10 +37,6 @@ export function resolvePathFromFile(fromFilePath: string, linkPath: string): str
   return isAbsolute ? `/${resolved}` : resolved || null
 }
 
-/**
- * Maps a file path referenced from a working directory to the path the file browser opens.
- * Relative paths resolve against the directory, and paths inside the repo root become repo-local workspace paths.
- */
 export function getWorkspaceFilePath(
   filePath: string,
   workspace: { directory?: string; repoFullPath?: string; repoLocalPath?: string },
@@ -64,7 +51,6 @@ export function getWorkspaceFilePath(
     : absolutePath
 }
 
-/** Returns whether a link targets an external http(s) page. */
 export function isExternalLink(href: string | undefined): boolean {
   return !!href && /^https?:\/\//i.test(href)
 }

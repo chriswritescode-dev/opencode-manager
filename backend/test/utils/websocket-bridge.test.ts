@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import type { WSContext } from 'hono/ws'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WSContext } from 'hono/ws'
+import { FakePeer, FakeWebSocket, type WebSocketFrame } from '../helpers/fake-websocket'
 import {
   bridgeWebSocket,
   connectUpstreamWebSocket,
@@ -10,172 +11,71 @@ import {
   MAX_PEER_BUFFERED_BYTES,
   MAX_UPSTREAM_BUFFERED_BYTES,
   type WebSocketBridge,
-  type WebSocketPeer,
 } from '../../src/utils/websocket-bridge'
 
-type Listener = (event: unknown) => void
+class ControllableWebSocket extends FakeWebSocket {
+  static instances: ControllableWebSocket[] = []
 
-class FakeUpstream {
-  binaryType: 'blob' | 'arraybuffer' = 'blob'
-  readyState = 0
-  bufferedAmount = 0
-  sent: Array<string | Uint8Array> = []
-  private readonly listeners = new Map<string, Set<Listener>>()
+  readonly protocols: string | string[] | undefined
 
-  addEventListener(type: string, listener: Listener): void {
-    const set = this.listeners.get(type) ?? new Set<Listener>()
-    set.add(listener)
-    this.listeners.set(type, set)
+  constructor(url: string, protocols?: string | string[]) {
+    super(url)
+    this.protocols = protocols
+    ControllableWebSocket.instances.push(this)
   }
 
-  send(data: string | Uint8Array): void {
+  static last(): ControllableWebSocket {
+    const instance = ControllableWebSocket.instances.at(-1)
+    if (!instance) throw new Error('No ControllableWebSocket instance')
+    return instance
+  }
+}
+
+interface CapturedContext {
+  ws: WSContext
+  sent: WebSocketFrame[]
+  closeCalls: Array<{ code?: number; reason?: string }>
+  raw: { bufferedAmount: number }
+}
+
+function createContext(readyState: 0 | 1 | 2 | 3 = 1): CapturedContext {
+  const sent: WebSocketFrame[] = []
+  const closeCalls: Array<{ code?: number; reason?: string }> = []
+  const raw = { bufferedAmount: 0 }
+  const ws = new WSContext({
+    send: (data) => {
+      sent.push(data)
+    },
+    close: (code, reason) => {
+      closeCalls.push({ code, reason })
+    },
+    raw,
+    readyState,
+  })
+  return { ws, sent, closeCalls, raw }
+}
+
+class RecordingBridge implements WebSocketBridge {
+  sent: WebSocketFrame[] = []
+  closeCalls = 0
+
+  send(data: string | ArrayBuffer | Uint8Array<ArrayBuffer>): void {
     this.sent.push(data)
   }
 
-  close = vi.fn()
-
-  emit(type: string, event: unknown): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  close(): void {
+    this.closeCalls += 1
   }
-}
-
-interface FakePeer extends WebSocketPeer {
-  sent: Array<string | Uint8Array>
-  closeCalls: Array<{ code?: number; reason?: string }>
-  buffered: number
-}
-
-function createPeer(): FakePeer {
-  const peer: FakePeer = {
-    sent: [],
-    closeCalls: [],
-    buffered: 0,
-    send(data) {
-      peer.sent.push(data)
-    },
-    close(code, reason) {
-      peer.closeCalls.push({ code, reason })
-    },
-    bufferedAmount() {
-      return peer.buffered
-    },
-  }
-  return peer
-}
-
-function asUpstream(upstream: FakeUpstream): WebSocket {
-  return upstream as unknown as WebSocket
-}
-
-interface FakeWs {
-  raw: { bufferedAmount: number }
-  sent: Array<string | ArrayBuffer | Uint8Array>
-  closeCalls: Array<{ code?: number; reason?: string }>
-  send(data: string | ArrayBuffer | Uint8Array): void
-  close(code?: number, reason?: string): void
-}
-
-function createWs(): FakeWs {
-  const ws: FakeWs = {
-    raw: { bufferedAmount: 0 },
-    sent: [],
-    closeCalls: [],
-    send(data) {
-      ws.sent.push(data)
-    },
-    close(code, reason) {
-      ws.closeCalls.push({ code, reason })
-    },
-  }
-  return ws
-}
-
-function asWsContext(ws: FakeWs): WSContext {
-  return ws as unknown as WSContext
-}
-
-interface FakeBridge extends WebSocketBridge {
-  sent: Array<string | ArrayBuffer | Uint8Array>
-  closeCalls: number
-}
-
-function createBridge(): FakeBridge {
-  const bridge: FakeBridge = {
-    sent: [],
-    closeCalls: 0,
-    send(data) {
-      bridge.sent.push(data)
-    },
-    close() {
-      bridge.closeCalls += 1
-    },
-  }
-  return bridge
 }
 
 function flushAsync(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-class ControllableUpstream {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSING = 2
-  static readonly CLOSED = 3
-  static instances: ControllableUpstream[] = []
-
-  binaryType: 'blob' | 'arraybuffer' = 'blob'
-  readyState = ControllableUpstream.CONNECTING
-  bufferedAmount = 0
-  sent: Array<string | Uint8Array> = []
-  closeCalls = 0
-  private readonly listeners = new Map<string, Set<Listener>>()
-
-  constructor(
-    readonly url: string,
-    readonly protocols?: string | string[],
-  ) {
-    ControllableUpstream.instances.push(this)
-  }
-
-  static last(): ControllableUpstream {
-    const instance = ControllableUpstream.instances.at(-1)
-    if (!instance) throw new Error('No ControllableUpstream instance')
-    return instance
-  }
-
-  static reset(): void {
-    ControllableUpstream.instances = []
-  }
-
-  addEventListener(type: string, listener: Listener): void {
-    const set = this.listeners.get(type) ?? new Set<Listener>()
-    set.add(listener)
-    this.listeners.set(type, set)
-  }
-
-  removeEventListener(type: string, listener: Listener): void {
-    this.listeners.get(type)?.delete(listener)
-  }
-
-  send(data: string | Uint8Array): void {
-    this.sent.push(data)
-  }
-
-  close(): void {
-    this.closeCalls += 1
-    this.readyState = ControllableUpstream.CLOSED
-  }
-
-  open(): void {
-    this.readyState = ControllableUpstream.OPEN
-    this.emit('open', {})
-  }
-
-  emit(type: string, event: unknown): void {
-    for (const listener of [...(this.listeners.get(type) ?? [])]) listener(event)
-  }
-}
+beforeEach(() => {
+  ControllableWebSocket.instances = []
+  vi.stubGlobal('WebSocket', ControllableWebSocket)
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -184,90 +84,85 @@ afterEach(() => {
 
 describe('bridgeWebSocket', () => {
   it('requests arraybuffer frames from the upstream', () => {
-    const upstream = new FakeUpstream()
-    const bridge = bridgeWebSocket(asUpstream(upstream), createPeer())
+    const upstream = new FakeWebSocket('ws://upstream')
+    const bridge = bridgeWebSocket(upstream, new FakePeer())
+
     expect(upstream.binaryType).toBe('arraybuffer')
     bridge.close()
   })
 
   it('queues client sends until the upstream opens and preserves order', () => {
-    const upstream = new FakeUpstream()
-    const bridge = bridgeWebSocket(asUpstream(upstream), createPeer())
+    const upstream = new FakeWebSocket('ws://upstream')
+    const bridge = bridgeWebSocket(upstream, new FakePeer())
 
     bridge.send('first')
     bridge.send(new Uint8Array([1, 2]))
     expect(upstream.sent).toEqual([])
 
-    upstream.emit('open', {})
+    upstream.open()
 
     expect(upstream.sent).toEqual(['first', new Uint8Array([1, 2])])
   })
 
   it('forwards text as text and binary as bytes to the peer', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer)
 
-    upstream.emit('message', { data: 'plain text' })
-    upstream.emit('message', { data: new Uint8Array([0, 1, 2]).buffer })
+    upstream.emitMessage('plain text')
+    upstream.emitMessage(new Uint8Array([0, 1, 2]).buffer)
 
-    expect(peer.sent[0]).toBe('plain text')
-    expect(peer.sent[1]).toEqual(new Uint8Array([0, 1, 2]))
+    expect(peer.sent).toEqual(['plain text', new Uint8Array([0, 1, 2])])
     bridge.close()
   })
 
-  it('passes a normal close through and maps abnormal codes to 1011', () => {
-    const normalUpstream = new FakeUpstream()
-    const normalPeer = createPeer()
-    bridgeWebSocket(asUpstream(normalUpstream), normalPeer)
-    normalUpstream.emit('close', { code: 4404 })
-    expect(normalPeer.closeCalls).toEqual([{ code: 4404, reason: undefined }])
+  it.each([
+    [4404, 4404],
+    [1000, 1000],
+    [1006, 1011],
+    [1001, 1011],
+  ])('maps upstream close code %i to peer close code %i', (upstreamCode, peerCode) => {
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    bridgeWebSocket(upstream, peer)
 
-    const cleanUpstream = new FakeUpstream()
-    const cleanPeer = createPeer()
-    bridgeWebSocket(asUpstream(cleanUpstream), cleanPeer)
-    cleanUpstream.emit('close', { code: 1000 })
-    expect(cleanPeer.closeCalls).toEqual([{ code: 1000, reason: undefined }])
+    upstream.emitClose(upstreamCode)
 
-    const abnormalUpstream = new FakeUpstream()
-    const abnormalPeer = createPeer()
-    bridgeWebSocket(asUpstream(abnormalUpstream), abnormalPeer)
-    abnormalUpstream.emit('close', { code: 1006 })
-    expect(abnormalPeer.closeCalls).toEqual([{ code: 1011, reason: undefined }])
+    expect(peer.closeCalls).toEqual([{ code: peerCode, reason: undefined }])
   })
 
   it('closes the peer with 1011 on an upstream error', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    bridgeWebSocket(asUpstream(upstream), peer)
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    bridgeWebSocket(upstream, peer)
 
-    upstream.emit('error', {})
+    upstream.emitError()
 
     expect(peer.closeCalls).toEqual([{ code: 1011, reason: undefined }])
   })
 
   it('closes the upstream and peer with 1013 when the peer buffer overflows', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
     peer.buffered = MAX_PEER_BUFFERED_BYTES + 1
 
-    bridgeWebSocket(asUpstream(upstream), peer)
-    upstream.emit('message', { data: 'overflow' })
+    bridgeWebSocket(upstream, peer)
+    upstream.emitMessage('overflow')
 
     expect(peer.closeCalls).toEqual([{ code: 1013, reason: 'Client too slow' }])
     expect(upstream.close).toHaveBeenCalledTimes(1)
 
-    upstream.emit('close', { code: 1000 })
+    upstream.emitClose(1000)
     expect(peer.closeCalls).toHaveLength(1)
   })
 
   it('keeps bridging while the peer buffer stays within the limit', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
     peer.buffered = MAX_PEER_BUFFERED_BYTES
 
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
-    upstream.emit('message', { data: 'within limit' })
+    const bridge = bridgeWebSocket(upstream, peer)
+    upstream.emitMessage('within limit')
 
     expect(peer.sent).toEqual(['within limit'])
     expect(peer.closeCalls).toEqual([])
@@ -276,8 +171,8 @@ describe('bridgeWebSocket', () => {
   })
 
   it('closes the upstream only once and ignores later sends', () => {
-    const upstream = new FakeUpstream()
-    const bridge = bridgeWebSocket(asUpstream(upstream), createPeer())
+    const upstream = new FakeWebSocket('ws://upstream')
+    const bridge = bridgeWebSocket(upstream, new FakePeer())
 
     bridge.close()
     bridge.close()
@@ -288,9 +183,9 @@ describe('bridgeWebSocket', () => {
   })
 
   it('treats an already-open upstream as open immediately', () => {
-    const upstream = new FakeUpstream()
-    upstream.readyState = WebSocket.OPEN
-    const bridge = bridgeWebSocket(asUpstream(upstream), createPeer())
+    const upstream = new FakeWebSocket('ws://upstream')
+    upstream.open()
+    const bridge = bridgeWebSocket(upstream, new FakePeer())
 
     bridge.send('immediate')
 
@@ -299,10 +194,10 @@ describe('bridgeWebSocket', () => {
   })
 
   it('closes the peer with 1011 when the upstream is already closed', () => {
-    const upstream = new FakeUpstream()
-    upstream.readyState = WebSocket.CLOSED
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
+    const upstream = new FakeWebSocket('ws://upstream')
+    upstream.emitClose(1000)
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer)
 
     expect(peer.closeCalls).toEqual([{ code: 1011, reason: undefined }])
 
@@ -311,9 +206,9 @@ describe('bridgeWebSocket', () => {
   })
 
   it('closes both sides with 1013 when queued client bytes exceed the cap', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer)
 
     bridge.send('a'.repeat(MAX_UPSTREAM_BUFFERED_BYTES + 1))
 
@@ -322,11 +217,11 @@ describe('bridgeWebSocket', () => {
   })
 
   it('closes both sides with 1013 when the upstream buffer exceeds the cap after a send', () => {
-    const upstream = new FakeUpstream()
-    upstream.readyState = WebSocket.OPEN
+    const upstream = new FakeWebSocket('ws://upstream')
+    upstream.open()
     upstream.bufferedAmount = MAX_UPSTREAM_BUFFERED_BYTES + 1
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer)
 
     bridge.send('payload')
 
@@ -335,13 +230,13 @@ describe('bridgeWebSocket', () => {
   })
 
   it('closes both sides with 1013 when the upstream buffer overflows during a queued flush', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer)
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer)
 
     bridge.send('queued')
     upstream.bufferedAmount = MAX_UPSTREAM_BUFFERED_BYTES + 1
-    upstream.emit('open', {})
+    upstream.open()
 
     expect(peer.closeCalls).toEqual([{ code: 1013, reason: 'Upstream too slow' }])
     expect(upstream.close).toHaveBeenCalledTimes(1)
@@ -349,9 +244,9 @@ describe('bridgeWebSocket', () => {
 
   it('closes both sides with 1011 when the upstream does not open in time', () => {
     vi.useFakeTimers()
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    bridgeWebSocket(asUpstream(upstream), peer, { connectTimeoutMs: 50 })
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    bridgeWebSocket(upstream, peer, { connectTimeoutMs: 50 })
 
     vi.advanceTimersByTime(50)
 
@@ -361,11 +256,11 @@ describe('bridgeWebSocket', () => {
 
   it('clears the connect deadline once the upstream opens', () => {
     vi.useFakeTimers()
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    bridgeWebSocket(asUpstream(upstream), peer, { connectTimeoutMs: 50 })
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    bridgeWebSocket(upstream, peer, { connectTimeoutMs: 50 })
 
-    upstream.emit('open', {})
+    upstream.open()
     vi.advanceTimersByTime(1000)
 
     expect(peer.closeCalls).toEqual([])
@@ -373,24 +268,24 @@ describe('bridgeWebSocket', () => {
   })
 
   it('delivers initialMessages before later upstream messages', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
-    const bridge = bridgeWebSocket(asUpstream(upstream), peer, {
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
+    const bridge = bridgeWebSocket(upstream, peer, {
       initialMessages: ['early text', new Uint8Array([9]).buffer],
     })
 
-    upstream.emit('message', { data: 'later' })
+    upstream.emitMessage('later')
 
     expect(peer.sent).toEqual(['early text', new Uint8Array([9]), 'later'])
     bridge.close()
   })
 
   it('applies the peer buffer cap while delivering initialMessages', () => {
-    const upstream = new FakeUpstream()
-    const peer = createPeer()
+    const upstream = new FakeWebSocket('ws://upstream')
+    const peer = new FakePeer()
     peer.buffered = MAX_PEER_BUFFERED_BYTES + 1
 
-    bridgeWebSocket(asUpstream(upstream), peer, { initialMessages: ['overflow'] })
+    bridgeWebSocket(upstream, peer, { initialMessages: ['overflow'] })
 
     expect(peer.closeCalls).toEqual([{ code: 1013, reason: 'Client too slow' }])
     expect(upstream.close).toHaveBeenCalledTimes(1)
@@ -399,96 +294,91 @@ describe('bridgeWebSocket', () => {
 
 describe('connectUpstreamWebSocket', () => {
   it('resolves on open, forwards protocols and buffers messages until attach', async () => {
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
     const promise = connectUpstreamWebSocket('ws://upstream', { protocols: ['vite-hmr'] })
-    const socket = ControllableUpstream.last()
+    const socket = ControllableWebSocket.last()
     expect(socket.protocols).toEqual(['vite-hmr'])
     expect(socket.binaryType).toBe('arraybuffer')
 
     socket.open()
     const pending = await promise
 
-    socket.emit('message', { data: 'early' })
-    const peer = createPeer()
+    socket.emitMessage('early')
+    const peer = new FakePeer()
     const bridge = pending.attach(peer)
 
     expect(peer.sent).toEqual(['early'])
 
-    socket.emit('message', { data: new Uint8Array([1, 2]).buffer })
-    expect(peer.sent[1]).toEqual(new Uint8Array([1, 2]))
+    socket.emitMessage(new Uint8Array([1, 2]).buffer)
+    expect(peer.sent).toEqual(['early', new Uint8Array([1, 2])])
 
     bridge.close()
   })
 
-  it('rejects and closes the socket when the upstream errors before open', async () => {
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
+  it('converts byte frames buffered before attach to ArrayBuffer', async () => {
     const promise = connectUpstreamWebSocket('ws://upstream')
-    const socket = ControllableUpstream.last()
-    socket.emit('error', {})
+    const socket = ControllableWebSocket.last()
+    socket.open()
+    const pending = await promise
+
+    socket.dispatchEvent(new MessageEvent('message', { data: new Uint8Array([3, 4]) }))
+    const peer = new FakePeer()
+    const bridge = pending.attach(peer)
+
+    expect(peer.sent).toEqual([new Uint8Array([3, 4])])
+    bridge.close()
+  })
+
+  it('rejects and closes the socket when the upstream errors before open', async () => {
+    const promise = connectUpstreamWebSocket('ws://upstream')
+    const socket = ControllableWebSocket.last()
+    socket.emitError()
 
     await expect(promise).rejects.toThrow('Failed to connect')
-    expect(socket.closeCalls).toBe(1)
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 
   it('rejects and closes the socket when the upstream closes before open', async () => {
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
     const promise = connectUpstreamWebSocket('ws://upstream')
-    const socket = ControllableUpstream.last()
-    socket.emit('close', {})
+    const socket = ControllableWebSocket.last()
+    socket.emitClose(1006)
 
     await expect(promise).rejects.toThrow('closed before connect')
-    expect(socket.closeCalls).toBe(1)
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 
   it('rejects and closes the socket when the connect times out', async () => {
     vi.useFakeTimers()
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
     const promise = connectUpstreamWebSocket('ws://upstream', { timeoutMs: 50 })
-    const socket = ControllableUpstream.last()
+    const socket = ControllableWebSocket.last()
     const rejection = expect(promise).rejects.toThrow('timed out')
 
     await vi.advanceTimersByTimeAsync(50)
     await rejection
 
-    expect(socket.closeCalls).toBe(1)
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 
   it('closes the socket when attach is not called within the timeout', async () => {
     vi.useFakeTimers()
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
     const promise = connectUpstreamWebSocket('ws://upstream', { timeoutMs: 50 })
-    const socket = ControllableUpstream.last()
+    const socket = ControllableWebSocket.last()
     socket.open()
-    const pending = await promise
+    await promise
 
-    expect(pending).toBeDefined()
     await vi.advanceTimersByTimeAsync(50)
 
-    expect(socket.closeCalls).toBe(1)
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 
   it('abandon closes the socket', async () => {
-    vi.stubGlobal('WebSocket', ControllableUpstream)
-    ControllableUpstream.reset()
-
     const promise = connectUpstreamWebSocket('ws://upstream')
-    const socket = ControllableUpstream.last()
+    const socket = ControllableWebSocket.last()
     socket.open()
     const pending = await promise
 
     pending.abandon()
 
-    expect(socket.closeCalls).toBe(1)
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 
   it('rejects when the WebSocket constructor throws', async () => {
@@ -504,12 +394,12 @@ describe('connectUpstreamWebSocket', () => {
 
 describe('createBridgedSocketEvents', () => {
   it('opens the bridge and forwards messages after the connect resolves', async () => {
-    const bridge = createBridge()
+    const bridge = new RecordingBridge()
     const events = createBridgedSocketEvents(() => Promise.resolve(bridge))
-    const ws = createWs()
+    const { ws } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
-    await events.onMessage!({ data: 'hello' } as MessageEvent, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
+    await events.onMessage?.(new MessageEvent('message', { data: 'hello' }), ws)
 
     expect(bridge.sent).toEqual(['hello'])
   })
@@ -518,50 +408,50 @@ describe('createBridgedSocketEvents', () => {
     const events = createBridgedSocketEvents(() => {
       throw new Error('boom')
     })
-    const ws = createWs()
+    const { ws, closeCalls } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
     await flushAsync()
 
-    expect(ws.closeCalls).toEqual([{ code: 1011, reason: 'boom' }])
+    expect(closeCalls).toEqual([{ code: 1011, reason: 'boom' }])
   })
 
   it('closes the client with 1011 when the bridge factory rejects', async () => {
     const events = createBridgedSocketEvents(() => Promise.reject(new Error('nope')))
-    const ws = createWs()
+    const { ws, closeCalls } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
     await flushAsync()
 
-    expect(ws.closeCalls).toEqual([{ code: 1011, reason: 'nope' }])
+    expect(closeCalls).toEqual([{ code: 1011, reason: 'nope' }])
   })
 
   it('does not close the client when it already closed', async () => {
     const events = createBridgedSocketEvents(() => {
       throw new Error('late')
     })
-    const ws = createWs()
+    const { ws, closeCalls } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
-    events.onClose!({} as CloseEvent, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
+    events.onClose?.(new CloseEvent('close'), ws)
     await flushAsync()
 
-    expect(ws.closeCalls).toEqual([])
+    expect(closeCalls).toEqual([])
   })
 
   it('closes a bridge that resolves after the client closed', async () => {
-    let resolveBridge!: (bridge: WebSocketBridge) => void
+    let resolveBridge: (bridge: WebSocketBridge) => void = () => {}
     const events = createBridgedSocketEvents(
       () => new Promise<WebSocketBridge>((resolve) => {
         resolveBridge = resolve
       }),
     )
-    const ws = createWs()
+    const { ws } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
-    events.onClose!({} as CloseEvent, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
+    events.onClose?.(new CloseEvent('close'), ws)
 
-    const bridge = createBridge()
+    const bridge = new RecordingBridge()
     resolveBridge(bridge)
     await flushAsync()
 
@@ -569,18 +459,18 @@ describe('createBridgedSocketEvents', () => {
   })
 
   it('waits for the connect before forwarding messages', async () => {
-    let resolveBridge!: (bridge: WebSocketBridge) => void
+    let resolveBridge: (bridge: WebSocketBridge) => void = () => {}
     const events = createBridgedSocketEvents(
       () => new Promise<WebSocketBridge>((resolve) => {
         resolveBridge = resolve
       }),
     )
-    const ws = createWs()
+    const { ws } = createContext()
 
-    events.onOpen!({} as Event, asWsContext(ws))
-    const messagePromise = events.onMessage!({ data: 'queued' } as MessageEvent, asWsContext(ws))
+    events.onOpen?.(new Event('open'), ws)
+    const messagePromise = events.onMessage?.(new MessageEvent('message', { data: 'queued' }), ws)
 
-    const bridge = createBridge()
+    const bridge = new RecordingBridge()
     resolveBridge(bridge)
     await messagePromise
 
@@ -590,16 +480,16 @@ describe('createBridgedSocketEvents', () => {
 
 describe('toWebSocketPeer', () => {
   it('forwards send, close and bufferedAmount to the context', () => {
-    const ws = createWs()
-    ws.raw.bufferedAmount = 42
-    const peer = toWebSocketPeer(asWsContext(ws))
+    const { ws, sent, closeCalls, raw } = createContext()
+    raw.bufferedAmount = 42
+    const peer = toWebSocketPeer(ws)
 
     peer.send('data')
     peer.send(new Uint8Array([1]))
     peer.close(1000, 'done')
 
-    expect(ws.sent).toEqual(['data', new Uint8Array([1])])
-    expect(ws.closeCalls).toEqual([{ code: 1000, reason: 'done' }])
+    expect(sent).toEqual(['data', new Uint8Array([1])])
+    expect(closeCalls).toEqual([{ code: 1000, reason: 'done' }])
     expect(peer.bufferedAmount()).toBe(42)
   })
 })
@@ -614,25 +504,17 @@ describe('isAllowedUpgradeOrigin', () => {
 })
 
 describe('forwardPeerMessage', () => {
-  function createSentBridge(sent: Array<string | ArrayBuffer | Uint8Array>): WebSocketBridge {
-    return {
-      send(data) {
-        sent.push(data)
-      },
-      close() {},
-    }
-  }
-
   it('forwards strings, ArrayBuffers and Blobs to the bridge', async () => {
-    const sent: Array<string | ArrayBuffer | Uint8Array> = []
-    const bridge = createSentBridge(sent)
+    const bridge = new RecordingBridge()
 
     await forwardPeerMessage(bridge, 'plain text')
     await forwardPeerMessage(bridge, new Uint8Array([1, 2]).buffer)
     await forwardPeerMessage(bridge, new Blob(['blob body']))
 
-    expect(sent[0]).toBe('plain text')
-    expect(sent[1]).toEqual(new Uint8Array([1, 2]).buffer)
-    expect(new TextDecoder().decode(sent[2] as ArrayBuffer)).toBe('blob body')
+    expect(bridge.sent).toEqual([
+      'plain text',
+      new Uint8Array([1, 2]).buffer,
+      new TextEncoder().encode('blob body').buffer,
+    ])
   })
 })

@@ -1,37 +1,26 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { compareSemver, parseSemver } from '@opencode-manager/shared/utils'
+import { compareSemver, parseSemver, parseJsonText } from '@opencode-manager/shared/utils'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
-interface PackageManifest {
-  version: string
-  devDependencies: Record<string, string>
-  peerDependencies: Record<string, string>
-  peerDependenciesMeta: Record<string, { optional?: boolean }>
-}
+const PackageManifestSchema = z.object({
+  version: z.string(),
+  devDependencies: z.record(z.string(), z.string()).default({}),
+  peerDependencies: z.record(z.string(), z.string()).default({}),
+  peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() })).default({}),
+})
 
 const PINNED_PACKAGES = ['@opentui/core', '@opentui/solid', '@opencode/theme'] as const
 
-/**
- * Reads and parses a package manifest from an absolute path.
- */
-function readManifest(path: string): PackageManifest {
-  return JSON.parse(readFileSync(path, 'utf8')) as PackageManifest
+function readManifest(path: string): z.infer<typeof PackageManifestSchema> {
+  return PackageManifestSchema.parse(parseJsonText(readFileSync(path, 'utf8')))
 }
 
-/**
- * Reads the version of a dependency installed in ocm-cli's node_modules.
- */
 function installedVersion(name: string): string {
   return readManifest(join(__dirname, '..', 'node_modules', name, 'package.json')).version
 }
 
-/**
- * Derives the minor-line peer range for an exact dependency version.
- *
- * A `0.x.y` version is constrained to its minor line; a version at major `1` or above
- * is constrained to its major line.
- */
 function deriveMinorLineRange(version: string): string {
   const parsed = parseSemver(version)
   if (!parsed || parsed.prerelease.length > 0) {
@@ -44,10 +33,6 @@ function deriveMinorLineRange(version: string): string {
   return `>=${version} <${major + 1}.0.0`
 }
 
-/**
- * Asserts that an installed version satisfies a plugin peer declaration: an exact
- * pin, or space-separated `>=`, `<=` and `<` bounds such as `>=0.8.0 <0.9.0`.
- */
 function expectVersionSatisfiesPeer(version: string, peer: string): void {
   const comparators = peer.trim().split(/\s+/)
   if (!comparators.every((comparator) => comparator.startsWith('>=') || comparator.startsWith('<'))) {

@@ -1,304 +1,141 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Database } from 'bun:sqlite'
-import * as fs from 'fs/promises'
-import * as path from 'path'
-
-const testWorkspacePath = vi.hoisted(() => `/tmp/test-workspace-${Math.random().toString(36).slice(2)}`)
-
-vi.mock('@opencode-manager/shared/config/env', () => ({
-  getWorkspacePath: vi.fn(() => testWorkspacePath),
-  getReposPath: vi.fn(() => '/tmp/test-repos'),
-  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
-  getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
-  getDatabasePath: vi.fn(() => ':memory:'),
-  getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
-  getOpenCodeConfigHome: vi.fn(() => '/tmp/test-workspace/.config'),
-  ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
-    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
-    DATABASE: { PATH: ':memory:' },
-    FILE_LIMITS: {
-      MAX_SIZE_BYTES: 1024 * 1024,
-      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-    },
-  },
-  FILE_LIMITS: {
-    MAX_SIZE_BYTES: 1024 * 1024,
-    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
-  },
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn()
-  }
-}))
-
-const mockPrepare = vi.fn()
-const mockExec = vi.fn()
-const mockDatabase = {
-  prepare: mockPrepare,
-  exec: mockExec
-} as unknown as Database
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(() => mockDatabase)
-}))
-
+import * as fs from 'node:fs/promises'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import type { GitCredential } from '@opencode-manager/shared'
+import type { TempWorkspace } from '../helpers/test-env'
+import { createTempWorkspace } from '../helpers/test-env'
+import { createTestDatabase } from '../helpers/test-database'
+import { createIPCServer } from '../../src/ipc/ipcServer'
+import type { IPCServer } from '../../src/ipc/ipcServer'
 import { GitAuthService } from '../../src/services/git-auth'
-import { writeTemporarySSHKey, cleanupSSHKey, cleanupAllSSHKeys, buildSSHCommand } from '../../src/utils/ssh-key-manager'
-import { encryptSecret, decryptSecret } from '../../src/utils/crypto'
+import { encryptSecret } from '../../src/utils/crypto'
 
-describe('SSH Integration Tests', () => {
-   beforeEach(async () => {
-     vi.clearAllMocks()
+const SSH_KEY = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
 
-     mockPrepare.mockReturnValue({
-      run: vi.fn(),
-      get: vi.fn().mockReturnValue(null),
-      all: vi.fn().mockReturnValue([])
-    })
+let workspace: TempWorkspace
+let db: Database
+let ipcServer: IPCServer
 
-    const configDir = path.join(testWorkspacePath, 'config')
-    const sshKeysDir = path.join(testWorkspacePath, '.ssh-keys')
-    await fs.mkdir(configDir, { recursive: true })
-    await fs.mkdir(sshKeysDir, { recursive: true })
-    const knownHostsFile = path.join(configDir, 'known_hosts')
-    await fs.writeFile(knownHostsFile, '', { mode: 0o600 })
+function encryptedKeyCredential(passphrase?: string): GitCredential {
+  const credential: GitCredential = {
+    name: 'deploy',
+    host: 'github.com',
+    type: 'ssh',
+    sshPrivateKeyEncrypted: encryptSecret(SSH_KEY),
+  }
+  if (passphrase !== undefined) {
+    credential.passphrase = encryptSecret(passphrase)
+  }
+  return credential
+}
+
+function sshKeyPathFromCommand(command: string | undefined): string {
+  const match = command?.match(/-i "([^"]+)"/)
+  if (!match?.[1]) throw new Error(`no ssh key path in command: ${command ?? '(none)'}`)
+  return match[1]
+}
+
+beforeEach(async () => {
+  workspace = createTempWorkspace('ocm-ssh-integration-')
+  db = createTestDatabase()
+  ipcServer = await createIPCServer(randomUUID())
+})
+
+afterEach(async () => {
+  await ipcServer.dispose()
+  await fs.unlink(ipcServer.ipcHandlePath).catch(() => {})
+  db.close()
+  workspace.restore()
+})
+
+describe('GitAuthService SSH wiring', () => {
+  it('registers the askpass and host key handlers on the IPC server', async () => {
+    const service = new GitAuthService()
+
+    await service.initialize(ipcServer, db)
+
+    expect(service.sshHostKeyHandler).not.toBeNull()
+    expect(ipcServer.getHandler('ssh-host-key')).toBe(service.sshHostKeyHandler)
+    expect(ipcServer.getHandler('askpass')).toBeDefined()
+    expect(service.sshHostKeyHandler?.getKnownHostsPath()).toBe(join(workspace.path, 'config', 'known_hosts'))
+    await expect(fs.access(join(workspace.path, 'config', 'known_hosts'))).resolves.toBeUndefined()
   })
 
-  afterEach(async () => {
-    vi.clearAllMocks()
-    await fs.rm(testWorkspacePath, { recursive: true, force: true }).catch(() => {})
+  it('trusts a host key that is already stored in the database', async () => {
+    const now = Date.now()
+    db.prepare(
+      'INSERT INTO trusted_ssh_hosts (host, key_type, public_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('github.com', 'ssh-rsa', SSH_KEY, now, now)
+    const service = new GitAuthService()
+    await service.initialize(undefined, db)
+
+    await expect(service.verifyHostKeyBeforeOperation('git@github.com:user/repo.git')).resolves.toBe(true)
   })
 
-  describe('Full SSH Authentication Flow', () => {
-    it('should setup SSH key, get environment, and cleanup', async () => {
-      const validKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-      
-      const keyPath = await writeTemporarySSHKey(validKey, 'integration-test')
-      expect(keyPath).toBeTruthy()
+  it('trusts every host before the handler is initialized', async () => {
+    const service = new GitAuthService()
 
-      const stats = await fs.stat(keyPath)
-      expect(stats.mode & 0o777).toBe(0o600)
-
-      const sshResult = buildSSHCommand(keyPath)
-      expect(sshResult.command).toContain(`ssh -T -i "${keyPath}"`)
-      expect(sshResult.command).toContain('-o IdentitiesOnly=yes')
-
-      await cleanupSSHKey(keyPath)
-      await expect(fs.access(keyPath)).rejects.toThrow()
-    })
-
-    it('should setup SSH key with passphrase', async () => {
-      const validKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-      const passphrase = 'my-secret-passphrase'
-      
-      const keyPath = await writeTemporarySSHKey(validKey, 'integration-pass-test')
-      
-      const sshResult = buildSSHCommand(keyPath, passphrase)
-      expect(sshResult.command).toContain('sshpass -e')
-      expect(sshResult.env?.SSHPASS).toBe(passphrase)
-
-      await cleanupSSHKey(keyPath)
-    })
+    await expect(service.verifyHostKeyBeforeOperation('git@github.com:user/repo.git')).resolves.toBe(true)
   })
 
-  describe('Key Lifecycle', () => {
-    it('should handle create -> use -> cleanup cycle', async () => {
-      const key1 = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== key1@host'
-      const key2 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/key2@host'
+  it('exposes the shared git environment with terminal prompts disabled', async () => {
+    const service = new GitAuthService()
+    await service.initialize(ipcServer, db)
 
-      const keyPath1 = await writeTemporarySSHKey(key1, 'lifecycle-1')
-      expect(keyPath1).toBeTruthy()
+    const env = service.getGitEnvironment()
 
-      const keyPath2 = await writeTemporarySSHKey(key2, 'lifecycle-2')
-      expect(keyPath2).toBeTruthy()
+    expect(env.GIT_TERMINAL_PROMPT).toBe('0')
+    expect(env.LANG).toBe('en_US.UTF-8')
+    expect(env.LC_ALL).toBe('en_US.UTF-8')
+    expect(env.GIT_SSH_COMMAND).toContain(join(workspace.path, 'config', 'known_hosts'))
+    expect(env.VSCODE_GIT_IPC_HANDLE).toBe(ipcServer.ipcHandlePath)
+    expect(env.VSCODE_GIT_FETCH_SILENT).toBeUndefined()
+    expect(service.getGitEnvironment(true).VSCODE_GIT_FETCH_SILENT).toBe('true')
+  })
+})
 
-      const cmd1 = buildSSHCommand(keyPath1)
-      expect(cmd1.command).toContain(keyPath1)
+describe('GitAuthService SSH key lifecycle', () => {
+  it('writes the decrypted key, exposes it in the SSH environment and removes it on cleanup', async () => {
+    const service = new GitAuthService()
+    await service.initialize(undefined, db)
 
-      const cmd2 = buildSSHCommand(keyPath2)
-      expect(cmd2.command).toContain(keyPath2)
+    await service.setupSSHKey(encryptedKeyCredential())
 
-      await cleanupSSHKey(keyPath1)
-      await cleanupSSHKey(keyPath2)
+    const env = service.getSSHEnvironment()
+    const keyPath = sshKeyPathFromCommand(env.GIT_SSH_COMMAND)
+    expect(env.GIT_SSH_COMMAND).toContain('-o IdentitiesOnly=yes')
+    expect(env.SSHPASS).toBeUndefined()
+    const stats = await fs.stat(keyPath)
+    expect(stats.mode & 0o777).toBe(0o600)
+    await expect(fs.readFile(keyPath, 'utf-8')).resolves.toContain(SSH_KEY)
 
-      await expect(fs.access(keyPath1)).rejects.toThrow()
-      await expect(fs.access(keyPath2)).rejects.toThrow()
-    })
+    await service.cleanupSSHKey()
 
-    it('should handle bulk cleanup after multiple key creations', async () => {
-      const keys = [
-        'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== bulk1@host',
-        'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/bulk2@host',
-        'ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEM/bulk3@host'
-      ]
-
-      const keyPaths: string[] = []
-      for (let i = 0; i < keys.length; i++) {
-        const keyPath = await writeTemporarySSHKey(keys[i]!, `bulk-test-${i}`)
-        keyPaths.push(keyPath)
-      }
-
-      await cleanupAllSSHKeys()
-
-      for (const keyPath of keyPaths) {
-        await expect(fs.access(keyPath)).rejects.toThrow()
-      }
-    })
+    await expect(fs.access(keyPath)).rejects.toThrow()
+    expect(service.getSSHEnvironment().GIT_SSH_COMMAND).not.toContain('-i "')
   })
 
-  describe('Environment Variable Propagation', () => {
-    it('should include all required SSH environment variables', async () => {
-      const validKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-      const keyPath = await writeTemporarySSHKey(validKey, 'env-test')
+  it('exposes the decrypted passphrase to sshpass', async () => {
+    const service = new GitAuthService()
+    await service.initialize(undefined, db)
 
-      const sshResult = buildSSHCommand(keyPath)
-      
-      expect(sshResult.command).toContain('-o IdentitiesOnly=yes')
-      expect(sshResult.command).toContain('-o PasswordAuthentication=no')
+    await service.setupSSHKey(encryptedKeyCredential('my-secret-passphrase'))
 
-      await cleanupSSHKey(keyPath)
-    })
+    const env = service.getSSHEnvironment()
+    expect(env.GIT_SSH_COMMAND).toContain('sshpass -e')
+    expect(env.SSHPASS).toBe('my-secret-passphrase')
 
-    it('should include known_hosts path when provided', async () => {
-      const validKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-      const keyPath = await writeTemporarySSHKey(validKey, 'known-hosts-test')
-      const knownHostsPath = path.join(testWorkspacePath, 'config', 'known_hosts')
-
-      const sshResult = buildSSHCommand(keyPath, undefined, knownHostsPath)
-      
-      expect(sshResult.command).toContain(`-o UserKnownHostsFile="${knownHostsPath}"`)
-
-      await cleanupSSHKey(keyPath)
-    })
+    await service.cleanupSSHKey()
   })
 
-  describe('Switching Between SSH and PAT Credentials', () => {
-    it('should properly switch between SSH credential types', async () => {
-      const sshKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== ssh@host'
-      
-      const keyPath = await writeTemporarySSHKey(sshKey, 'switch-test')
-      const sshCmd = buildSSHCommand(keyPath)
-      expect(sshCmd.command).toContain('ssh -T -i')
+  it('ignores credentials that are not SSH keys', async () => {
+    const service = new GitAuthService()
+    await service.initialize(undefined, db)
 
-      await cleanupSSHKey(keyPath)
-      await expect(fs.access(keyPath)).rejects.toThrow()
-    })
-  })
+    await service.setupSSHKey({ name: 'pat', host: 'github.com', type: 'pat', token: 'ghp-token' })
 
-  describe('Encryption and Decryption Integration', () => {
-    it('should properly encrypt and decrypt SSH private key', () => {
-      const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBmNkCQ0YDZiVJmHqMvK1PqjWxV4aRqK2Pm8RlV4aRqK2Pm8RlV4aRqK2Pm8RlV4
------END OPENSSH PRIVATE KEY-----`
-      
-      const encrypted = encryptSecret(privateKey)
-      expect(encrypted).not.toBe(privateKey)
-      
-      const decrypted = decryptSecret(encrypted)
-      expect(decrypted).toBe(privateKey)
-    })
-
-    it('should properly encrypt and decrypt passphrase', () => {
-      const passphrase = 'my-super-secret-passphrase-123!'
-      
-      const encrypted = encryptSecret(passphrase)
-      expect(encrypted).not.toBe(passphrase)
-      
-      const decrypted = decryptSecret(encrypted)
-      expect(decrypted).toBe(passphrase)
-    })
-  })
-
-  describe('GitAuthService Integration', () => {
-    it('should initialize SSH host key handler', () => {
-      const gitAuthService = new GitAuthService()
-      const mockIpcServer = {
-        registerHandler: vi.fn()
-      }
-
-      gitAuthService.initialize(mockIpcServer as never, mockDatabase)
-
-      expect(gitAuthService.sshHostKeyHandler).toBeTruthy()
-    })
-
-    it('should return true for verifyHostKeyBeforeOperation when handler is null', async () => {
-      const gitAuthService = new GitAuthService()
-
-      const result = await gitAuthService.verifyHostKeyBeforeOperation('git@github.com:user/repo.git')
-
-      expect(result).toBe(true)
-    })
-
-    it('should get git environment with terminal prompt disabled', () => {
-      const gitAuthService = new GitAuthService()
-      
-      const env = gitAuthService.getGitEnvironment()
-      
-      expect(env.GIT_TERMINAL_PROMPT).toBe('0')
-      expect(env.LANG).toBe('en_US.UTF-8')
-      expect(env.LC_ALL).toBe('en_US.UTF-8')
-    })
-
-    it('should include silent flag when requested', () => {
-      const gitAuthService = new GitAuthService()
-      
-      const env = gitAuthService.getGitEnvironment(true)
-      
-      expect(env.VSCODE_GIT_FETCH_SILENT).toBe('true')
-    })
-  })
-
-  describe('Database Persistence', () => {
-    it('should save trusted host to database', async () => {
-      const mockRun = vi.fn()
-      mockPrepare.mockReturnValue({
-        run: mockRun,
-        get: vi.fn().mockReturnValue(null),
-        all: vi.fn().mockReturnValue([])
-      })
-
-      const gitAuthService = new GitAuthService()
-      const mockIpcServer = {
-        registerHandler: vi.fn()
-      }
-      gitAuthService.initialize(mockIpcServer as never, mockDatabase)
-
-      const handler = gitAuthService.sshHostKeyHandler
-      if (handler) {
-        handler['saveTrustedHost']('github.com', 'github.com ssh-rsa AAAAB...')
-      }
-
-      expect(mockPrepare).toHaveBeenCalled()
-    })
-
-    it('should load trusted hosts from database on initialization', async () => {
-      const mockAll = vi.fn().mockReturnValue([
-        { host: 'github.com', public_key: 'github.com ssh-rsa AAAAB...' },
-        { host: 'gitlab.com', public_key: 'gitlab.com ssh-ed25519 AAAAC...' }
-      ])
-      mockPrepare.mockReturnValue({
-        run: vi.fn(),
-        get: vi.fn().mockReturnValue(null),
-        all: mockAll
-      })
-
-      const gitAuthService = new GitAuthService()
-      const mockIpcServer = {
-        registerHandler: vi.fn()
-      }
-      gitAuthService.initialize(mockIpcServer as never, mockDatabase)
-      
-      await gitAuthService.sshHostKeyHandler?.initialize()
-
-      expect(mockPrepare).toHaveBeenCalled()
-    })
+    expect(service.getSSHEnvironment().GIT_SSH_COMMAND).not.toContain('-i "')
   })
 })

@@ -1,98 +1,93 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, useLocation } from 'react-router-dom'
-import type { ReactNode } from 'react'
 import type { Chat } from '@opencode-manager/shared/schemas'
+import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { ChatsNavGroup } from './ChatsNavGroup'
-
-type SessionFixture = {
-  id: string
-  projectID: string
-  title: string
-  time: { created: number; updated: number; archived?: number }
-  location: { directory: string }
-  cost: number
-  tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
-}
-
-const mocks = vi.hoisted(() => ({
-  listChats: vi.fn(),
-  createChat: vi.fn(),
-  sessionsData: [] as SessionFixture[],
-  useSessionsAcrossDirectories: vi.fn(),
-  useSessionPins: vi.fn(),
-  showToast: { success: vi.fn(), error: vi.fn() },
-}))
-
-vi.mock('@/api/chats', () => ({
-  listChats: mocks.listChats,
-  createChat: mocks.createChat,
-}))
-
-vi.mock('@/hooks/useOpenCode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useOpenCode')>()
-  return {
-    ...actual,
-    useSessionsAcrossDirectories: mocks.useSessionsAcrossDirectories,
-    removeDeletedSessionsFromListCaches: vi.fn(),
-    cleanupSessionPins: vi.fn(),
-  }
-})
-
-vi.mock('@/hooks/useSessionPins', () => ({
-  SESSION_PINS_QUERY_KEY: ['session-pins'],
-  useSessionPins: mocks.useSessionPins,
-}))
-
-vi.mock('@/lib/toast', () => ({ showToast: mocks.showToast }))
-
-vi.mock('@/contexts/EventContext', () => ({
-  usePermissions: () => ({ hasForSession: () => false }),
-  useForms: () => ({ hasForSession: () => false }),
-}))
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { makeSession } from '@/test/fixtures/api'
+import type { FetchRoute } from '@/test/fetchFake'
 
 function chat(id: string, directory: string): Chat {
-  return { id, directory, filesPath: `${directory}/files`, createdAt: 1000 }
+  return { id, directory, filesPath: `chats/${id}`, createdAt: 1000 }
 }
 
-function createSession(id: string, directory: string, updated = Date.now()): SessionFixture {
+function createSession(id: string, directory: string, updated = Date.now()): SessionInfo {
+  return makeSession({ id, title: `Session ${id}`, location: { directory }, time: { created: updated - 10000, updated } })
+}
+
+const chatA = chat('20240103-120000-aaaaaa', '/chats/a')
+const chatB = chat('20240102-120000-bbbbbb', '/chats/b')
+const chatC = chat('20240101-120000-cccccc', '/chats/c')
+const chatD = chat('20231231-120000-dddddd', '/chats/d')
+const chatE = chat('20231230-120000-eeeeee', '/chats/e')
+const chatF = chat('20231229-120000-ffffff', '/chats/f')
+
+const defaultSessions = [
+  createSession('a1', '/chats/a'),
+  createSession('b1', '/chats/b'),
+  createSession('c1', '/chats/c'),
+  createSession('d1', '/chats/d'),
+  createSession('e1', '/chats/e'),
+  createSession('f1', '/chats/f'),
+]
+
+interface RenderOptions {
+  route?: string
+  chats?: readonly Chat[]
+  sessions?: readonly SessionInfo[]
+  nextCursor?: string
+  createdChat?: Chat
+}
+
+function chatsRoute(options: RenderOptions): FetchRoute {
   return {
-    id,
-    projectID: 'proj-1',
-    title: `Session ${id}`,
-    time: { created: updated - 10000, updated },
-    location: { directory },
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    method: 'GET',
+    path: '/api/chats',
+    respond: (request) => {
+      const cursor = request.searchParams.get('cursor')
+      if (cursor === null) {
+        const page = (options.chats ?? []).slice(0, 3)
+        const nextCursor = options.nextCursor ?? (page.length === 3 ? page[page.length - 1]?.id : undefined)
+        return { json: nextCursor === undefined ? { chats: page } : { chats: page, nextCursor } }
+      }
+      return { json: { chats: (options.chats ?? []).slice(3) } }
+    },
   }
 }
 
-const chatA = chat('20240103120000-aaaaaa', '/chats/a')
-const chatB = chat('20240102120000-bbbbbb', '/chats/b')
-const chatC = chat('20240101120000-cccccc', '/chats/c')
-const chatD = chat('20231231120000-dddddd', '/chats/d')
-const chatE = chat('20231230120000-eeeeee', '/chats/e')
-const chatF = chat('20231229120000-ffffff', '/chats/f')
-
-function LocationDisplay() {
-  const location = useLocation()
-  return <div data-testid="location">{location.pathname}</div>
+function createChatRoute(createdChat: Chat): FetchRoute {
+  return {
+    method: 'POST',
+    path: '/api/chats',
+    respond: () => ({ json: { chat: createdChat, sessionId: 'ses_new' } }),
+  }
 }
 
-function createWrapper(initialEntries: string[]) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>
-        {children}
-        <LocationDisplay />
-      </MemoryRouter>
-    </QueryClientProvider>
+function renderChatsNav(options: RenderOptions = {}) {
+  const capturedPathname = { current: '' }
+  const capturedSearch = { current: '' }
+  const result = renderWithProviders(
+    <>
+      <ChatsNavGroup />
+      <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+    </>,
+    {
+      route: options.route ?? '/',
+      events: true,
+      fetchRoutes: [
+        chatsRoute(options),
+        createChatRoute(options.createdChat ?? chat('20240104-120000-111111', '/chats/new')),
+        ...appRoutes({
+          sessions: options.sessions ?? defaultSessions,
+          pins: [],
+        }),
+      ],
+    },
   )
+  return { ...result, capturedPathname, capturedSearch }
 }
 
 const chatRows = () => screen.getAllByText(/^Session /).map((row) => row.textContent)
@@ -100,44 +95,15 @@ const chatRows = () => screen.getAllByText(/^Session /).map((row) => row.textCon
 describe('ChatsNavGroup', () => {
   beforeEach(() => {
     localStorage.clear()
-    mocks.listChats.mockReset()
-    mocks.createChat.mockReset()
-    mocks.sessionsData.splice(
-      0,
-      mocks.sessionsData.length,
-      createSession('a1', '/chats/a'),
-      createSession('b1', '/chats/b'),
-      createSession('c1', '/chats/c'),
-      createSession('d1', '/chats/d'),
-      createSession('e1', '/chats/e'),
-      createSession('f1', '/chats/f'),
-    )
-    mocks.listChats.mockImplementation(async ({ cursor }: { cursor?: string }) => {
-      if (cursor === 'cursor_2') return { chats: [chatD, chatE, chatF] }
-      return { chats: [chatA, chatB, chatC], nextCursor: 'cursor_2' }
-    })
-    mocks.createChat.mockResolvedValue({
-      chat: chat('20240104120000-111111', '/chats/new'),
-      sessionId: 'ses_new',
-    })
-    mocks.useSessionsAcrossDirectories.mockImplementation((directories: string[]) => ({
-      data: mocks.sessionsData.filter((session) => directories.includes(session.location.directory)),
-      isLoading: false,
-      isError: false,
-      error: null,
-    }))
-    mocks.useSessionPins.mockReturnValue({ data: [] })
-    mocks.showToast.success.mockReset()
-    mocks.showToast.error.mockReset()
   })
 
   it('lists the newest chats and loads the next page with Show more', async () => {
     const user = userEvent.setup()
-    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    const { fetchFake } = renderChatsNav({ chats: [chatA, chatB, chatC, chatD, chatE, chatF] })
 
     await screen.findByRole('button', { name: /^Session a1/ })
     expect(chatRows()).toEqual(['Session a1', 'Session b1', 'Session c1'])
-    expect(mocks.listChats).toHaveBeenCalledWith({ limit: 3, cursor: undefined })
+    expect(fetchFake.lastRequest('GET', '/api/chats')?.searchParams.get('limit')).toBe('3')
 
     await user.click(screen.getByText('Show more'))
 
@@ -150,28 +116,29 @@ describe('ChatsNavGroup', () => {
       'Session e1',
       'Session f1',
     ])
-    expect(mocks.listChats).toHaveBeenLastCalledWith({ limit: 3, cursor: 'cursor_2' })
+    expect(fetchFake.lastRequest('GET', '/api/chats')?.searchParams.get('cursor')).toBe(chatC.id)
     expect(screen.queryByText('Show more')).toBeNull()
   })
 
   it('creates a chat and opens its session from the + button', async () => {
     const user = userEvent.setup()
-    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    const createdChat = chat('20240104-120000-111111', '/chats/new')
+    const { capturedPathname, fetchFake } = renderChatsNav({ chats: [chatA, chatB, chatC], createdChat })
 
     await screen.findByRole('button', { name: /^Session a1/ })
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
-    await waitFor(() => expect(mocks.createChat).toHaveBeenCalledWith({}))
+    await waitFor(() => expect(fetchFake.findRequests('POST', '/api/chats')).toHaveLength(1))
+    expect(fetchFake.lastRequest('POST', '/api/chats')?.body).toEqual({})
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe(
-        '/chats/20240104120000-111111/sessions/ses_new',
-      ),
+      expect(capturedPathname.current).toBe(`/chats/${createdChat.id}/sessions/ses_new`),
     )
   })
 
   it('folds the group and keeps that choice for the next mount', async () => {
     const user = userEvent.setup()
-    const firstRender = render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    const firstRender = renderChatsNav({ chats: [chatA, chatB, chatC] })
+    const { unmount } = firstRender
 
     await screen.findByRole('button', { name: /^Session a1/ })
     expect(screen.getByRole('button', { name: 'Show sessions in Chats' })).toHaveAttribute(
@@ -187,8 +154,8 @@ describe('ChatsNavGroup', () => {
     )
     expect(screen.queryByRole('button', { name: /^Session a1/ })).toBeNull()
 
-    firstRender.unmount()
-    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    unmount()
+    renderChatsNav({ chats: [chatA, chatB, chatC] })
 
     expect(screen.getByRole('button', { name: 'Show sessions in Chats' })).toHaveAttribute(
       'aria-expanded',
@@ -198,9 +165,7 @@ describe('ChatsNavGroup', () => {
   })
 
   it('marks the open chat session and group as current', async () => {
-    render(<ChatsNavGroup />, {
-      wrapper: createWrapper([`/chats/${chatA.id}/sessions/a1`]),
-    })
+    renderChatsNav({ route: `/chats/${chatA.id}/sessions/a1`, chats: [chatA, chatB, chatC] })
 
     expect(await screen.findByRole('button', { name: /^Session a1/ })).toHaveAttribute(
       'aria-current',
@@ -211,17 +176,14 @@ describe('ChatsNavGroup', () => {
   })
 
   it('shows an empty state when there are no chats', async () => {
-    mocks.listChats.mockResolvedValue({ chats: [] })
-
-    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    renderChatsNav({ chats: [] })
 
     expect(await screen.findByText('No chats')).toBeTruthy()
+    expect(screen.queryByText('Show more')).toBeNull()
   })
 
   it('keeps Show more available when the loaded chats have no visible sessions', async () => {
-    mocks.sessionsData.splice(0, mocks.sessionsData.length)
-
-    render(<ChatsNavGroup />, { wrapper: createWrapper(['/']) })
+    renderChatsNav({ chats: [chatA, chatB, chatC, chatD, chatE, chatF], sessions: [] })
 
     expect(await screen.findByText('No chats')).toBeTruthy()
     expect(screen.getByText('Show more')).toBeTruthy()

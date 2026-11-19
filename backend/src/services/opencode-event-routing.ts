@@ -6,6 +6,7 @@ import {
   type V2Event,
 } from '@opencode-manager/shared/opencode'
 import { logger } from '../utils/logger'
+import { parseJsonObject, type JsonObject } from '@opencode-manager/shared/utils'
 
 type PermissionAskedEvent = Extract<V2Event, { type: 'permission.asked' }>
 type FormCreatedEvent = Extract<V2Event, { type: 'form.created' }>
@@ -15,7 +16,7 @@ export type ReplayEvent = PermissionAskedEvent | FormCreatedEvent | SessionStatu
 
 type ReplayEventArguments =
   | [type: PermissionAskedEvent['type'], directory: string, data: PermissionAskedEvent['data']]
-  | [type: FormCreatedEvent['type'], directory: string, data: { form: FormInfo }]
+  | [type: FormCreatedEvent['type'], directory: string, data: FormCreatedEvent['data']]
   | [type: SessionStatusEvent['type'], directory: string, data: SessionStatusEvent['data']]
 
 export type ReplayEventBuilder = (...args: ReplayEventArguments) => ReplayEvent
@@ -26,8 +27,13 @@ export interface RoutedOpenCodeEvent {
   resolvedDirectory: string | undefined
 }
 
+export interface PendingReplayApi {
+  permission: { request: Pick<OpenCodeApi['permission']['request'], 'list'> }
+  form: Pick<OpenCodeApi['form'], 'list'>
+}
+
 export interface PendingReplayRequest {
-  api: OpenCodeApi
+  api: PendingReplayApi
   directory: string
   buildEvent: ReplayEventBuilder
   logScope: string
@@ -44,15 +50,11 @@ export interface SessionStatusReplayPlan {
   busy: string[]
 }
 
-/**
- * Partitions tracked sessions into those that must be replayed as idle and the
- * active sessions that must be replayed as busy.
- */
 export function planSessionStatusReplay(
-  active: Record<string, unknown>,
+  active: JsonObject,
   tracked: ReadonlyMap<string, string>,
 ): SessionStatusReplayPlan {
-  const busy = Object.keys(active ?? {})
+  const busy = Object.keys(parseJsonObject(active) ?? {})
   const busySet = new Set(busy)
   const idle: Array<{ sessionID: string; directory: string }> = []
   for (const [sessionID, directory] of tracked) {
@@ -61,14 +63,6 @@ export function planSessionStatusReplay(
   return { idle, busy }
 }
 
-/**
- * Builds a `session.status` replay event restating the activity state of one session.
- *
- * @param buildEvent Replay event builder owned by the hub that delivers the event.
- * @param directory Directory the replayed event belongs to.
- * @param sessionID Session whose status is replayed.
- * @param status Activity state to replay.
- */
 export function buildSessionStatusReplayEvent(
   buildEvent: ReplayEventBuilder,
   directory: string,
@@ -78,13 +72,6 @@ export function buildSessionStatusReplayEvent(
   return buildEvent('session.status', directory, { sessionID, status: { type: status } })
 }
 
-/**
- * Records the activity state an event implies for its session, so that directory-scoped work can be
- * limited to the sessions that are actually running.
- *
- * @param busySessions Sessions currently running on the server, updated in place.
- * @param event Event observed on the server stream.
- */
 export function applySessionActivity(busySessions: Set<string>, event: V2Event): void {
   switch (event.type) {
     case 'session.status': {
@@ -105,11 +92,11 @@ export function applySessionActivity(busySessions: Set<string>, event: V2Event):
   }
 }
 
-/**
- * Returns a builder that stamps each replayed permission, form or session-status event with the
- * current time and a monotonically increasing `${idPrefix}${count}` id, so replayed events stay
- * ordered and distinct from live ones.
- */
+function toFormCreatedEventData(form: FormInfo): FormCreatedEvent['data'] {
+  const data: FormCreatedEvent['data'] = { form: JSON.parse(JSON.stringify(form)) }
+  return data
+}
+
 export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
   let count = 0
   return (...args) => {
@@ -119,20 +106,13 @@ export function createReplayEventBuilder(idPrefix: string): ReplayEventBuilder {
       case 'permission.asked':
         return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] }
       case 'form.created':
-        return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] as FormCreatedEvent['data'] }
+        return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] }
       case 'session.status':
         return { ...base, type: args[0], location: { directory: args[1] }, data: args[2] }
     }
   }
 }
 
-/**
- * Resolves the directory a parsed event belongs to and updates the remembered session directories.
- *
- * @param event Parsed event received from an OpenCode server.
- * @param sessionDirectories Session directories remembered across events, updated in place.
- * @returns The event with its resolved directories.
- */
 export function routeOpenCodeEvent(
   event: V2Event,
   sessionDirectories: Map<string, string>,
@@ -174,7 +154,7 @@ export async function collectPendingReplayEvents(request: PendingReplayRequest):
     logger.warn(`${logScope}: failed to fetch pending forms for ${logTarget}: ${String(formsResult.reason)}`)
   } else {
     for (const form of formsResult.value.data) {
-      forms.push(buildEvent('form.created', directory, { form }))
+      forms.push(buildEvent('form.created', directory, toFormCreatedEventData(form)))
     }
   }
 

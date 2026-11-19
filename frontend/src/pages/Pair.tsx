@@ -4,6 +4,7 @@ import { AlertCircle, Loader2 } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import { readPairingCodeFromHash } from '@opencode-manager/shared/schemas'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { readFailureMessage } from '@/components/jsonValue'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
@@ -11,7 +12,6 @@ import { getSession } from '@/lib/auth-client'
 
 type PairState = 'redeeming' | 'missing' | 'error'
 
-/** Signs the browser in from a `/pair#c=<code>` link. */
 export function Pair() {
   const navigate = useNavigate()
   const theme = useTheme()
@@ -54,8 +54,8 @@ export function Pair() {
       }
     }
 
-    void run().catch((error: unknown) => {
-      setErrorMessage(error instanceof Error && error.message ? error.message : 'Sign-in failed')
+    void run().catch((cause: unknown) => {
+      setErrorMessage(readFailureMessage(cause) || 'Sign-in failed')
       setState('error')
     })
   }, [code, navigate, signInWithPairingCode])

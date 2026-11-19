@@ -60,7 +60,28 @@ function decodePathSegment(segment: string): string | null {
   }
 }
 
-export function parseServerSessionRoute(pathname: string): { serverId: string; sessionId: string } | null {
+export interface ServerSessionRoute {
+  serverId: string
+  sessionId: string
+}
+
+export interface ChatSessionRoute {
+  chatId: string
+  sessionId: string
+}
+
+export interface ActivePickerSession {
+  sessionId?: string
+  serverId?: string
+}
+
+export interface RepoRoute {
+  repoId: number | null
+  section: string | null
+  sessionId: string | null
+}
+
+export function parseServerSessionRoute(pathname: string): ServerSessionRoute | null {
   const match = /^\/servers\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
   if (!match) return null;
   const serverId = decodePathSegment(match[1]);
@@ -69,7 +90,7 @@ export function parseServerSessionRoute(pathname: string): { serverId: string; s
   return { serverId, sessionId };
 }
 
-export function parseChatSessionRoute(pathname: string): { chatId: string; sessionId: string } | null {
+export function parseChatSessionRoute(pathname: string): ChatSessionRoute | null {
   const match = /^\/chats\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
   if (!match) return null;
   const chatId = decodePathSegment(match[1]);
@@ -78,13 +99,7 @@ export function parseChatSessionRoute(pathname: string): { chatId: string; sessi
   return { chatId, sessionId };
 }
 
-/**
- * Reads the session route in view, whether it belongs to the local server or a linked one.
- *
- * @param pathname Pathname of the location to read.
- * @returns The routed session and its server; both are omitted when the location is not a session route.
- */
-export function parseActivePickerSession(pathname: string): { sessionId?: string; serverId?: string } {
+export function parseActivePickerSession(pathname: string): ActivePickerSession {
   const repoRoute = parseRepoRoute(pathname);
   if (repoRoute.sessionId) {
     return { sessionId: repoRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
@@ -105,7 +120,7 @@ export function isSessionDetailRoute(pathname: string): boolean {
     || parseChatSessionRoute(normalizedPathname) !== null;
 }
 
-export function parseRepoRoute(pathname: string): { repoId: number | null; section: string | null; sessionId: string | null } {
+export function parseRepoRoute(pathname: string): RepoRoute {
   const match = /^\/repos\/(\d+)(?:\/([^/]+)(?:\/([^/]+))?)?/.exec(pathname);
   if (!match) {
     return { repoId: null, section: null, sessionId: null };

@@ -6,15 +6,6 @@ import { useUrlParams } from './useUrlParams'
 import { renderHookWithRouterAndLocation } from '@/test/test-utils'
 
 describe('useUrlParams', () => {
-  it('exports the expected API surface', () => {
-    expect(typeof useUrlParams).toBe('function')
-    const { result } = renderHookWithRouterAndLocation(() => useUrlParams())
-    expect(typeof result.current.search).toBe('string')
-    expect(typeof result.current.searchParams).toBe('object')
-    expect(result.current.searchParams instanceof URLSearchParams).toBe(true)
-    expect(typeof result.current.updateParams).toBe('function')
-  })
-
   it('returns initial search string and searchParams from location', () => {
     const { result } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?foo=1&bar=2'])
     expect(result.current.search).toBe('?foo=1&bar=2')

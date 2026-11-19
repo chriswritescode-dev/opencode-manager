@@ -8,19 +8,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const target = join(root, 'dist', 'ocm.js')
 
 if (!existsSync(target)) {
-  // dist not built yet — silently skip
   process.exit(0)
 }
 
 try {
   chmodSync(target, 0o755)
 } catch {
-  // best effort
 }
 
-// If installed via `npm i -g` / `bun add -g`, the binary is already linked
-// by the package manager via the `bin` field. Only do the ~/.local/bin
-// symlink for local workspace installs.
 if (process.env.npm_config_global === 'true' || process.env.npm_config_global === true) {
   process.exit(0)
 }
@@ -55,7 +50,6 @@ try {
     process.exit(0)
   }
 } catch {
-  // missing — fine
 }
 
 try {

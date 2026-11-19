@@ -6,6 +6,7 @@ import { dirname, join } from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { randomUUID } from 'crypto'
+import { z } from 'zod'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { mkdirSafe, mkdirSyncSafe } from '../../utils/fs-safe'
 
@@ -14,19 +15,21 @@ const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000
 
 export const TOTAL_PARTS_INVALID_MESSAGE = 'totalParts must be a positive integer'
 
-export function isValidTotalParts(totalParts: number): boolean {
-  return Number.isInteger(totalParts) && totalParts >= 1
+export function isValidTotalParts(totalParts: number | undefined): totalParts is number {
+  return totalParts !== undefined && Number.isInteger(totalParts) && totalParts >= 1
 }
 
-export interface UploadMeta {
-  uploadId: string
-  repoId: number
-  fullPath: string
-  created: boolean
-  createdRepoId?: number
-  force: boolean
-  startedAt: number
-}
+const UploadMetaSchema = z.object({
+  uploadId: z.string(),
+  repoId: z.number(),
+  fullPath: z.string(),
+  created: z.boolean(),
+  createdRepoId: z.number().optional(),
+  force: z.boolean(),
+  startedAt: z.number(),
+})
+
+export type UploadMeta = z.infer<typeof UploadMetaSchema>
 
 export function getStagingRoot(): string {
   return join(getReposPath(), '.ocm-staging')
@@ -63,7 +66,8 @@ export async function createUploadSession(meta: Omit<UploadMeta, 'uploadId' | 's
 export async function readUploadMeta(uploadId: string): Promise<UploadMeta | null> {
   try {
     const raw = await fsp.readFile(getMetaPath(uploadId), 'utf-8')
-    return JSON.parse(raw) as UploadMeta
+    const parsed = UploadMetaSchema.safeParse(JSON.parse(raw))
+    return parsed.success ? parsed.data : null
   } catch {
     return null
   }
@@ -95,10 +99,12 @@ export interface ExtractResult {
   staging: string
 }
 
-function isStdinClosedError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false
-  const code = (error as { code?: unknown }).code
-  return code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'EPIPE'
+const ErrorCodeSchema = z.object({ code: z.string().optional() })
+
+function isStdinClosedError(cause: unknown): boolean {
+  const parsed = ErrorCodeSchema.safeParse(cause)
+  if (!parsed.success) return false
+  return parsed.data.code === 'ERR_STREAM_PREMATURE_CLOSE' || parsed.data.code === 'EPIPE'
 }
 
 export async function extractPartsToStaging(uploadId: string, totalParts: number, gzip: boolean): Promise<ExtractResult> {
@@ -129,7 +135,7 @@ export async function extractPartsToStaging(uploadId: string, totalParts: number
   })
   tarDone.catch(() => {})
 
-  let writeError: unknown = null
+  let writeError: unknown
   const partStreams = Readable.from(
     (async function* () {
       for (let i = 0; i < totalParts; i++) {
@@ -167,7 +173,7 @@ export async function extractPartsToStaging(uploadId: string, totalParts: number
       if (statSync(candidate).isDirectory()) {
         extractedRoot = candidate
       }
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   return { extractedRoot, staging }

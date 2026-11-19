@@ -1,84 +1,137 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { z } from 'zod'
 import { AgentsMdEditor } from './AgentsMdEditor'
+import { renderWithProviders } from '@/test/render'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    getAgentsMd: vi.fn().mockResolvedValue({ content: '# Rules\n\nline two\nline three\n' }),
-    updateAgentsMd: vi.fn().mockResolvedValue({ success: true, restartRequired: false }),
-    getDefaultAgentsMd: vi.fn().mockResolvedValue({ content: '# Default' }),
-  },
-}))
+const DEFAULT_CONTENT = '# Rules\n\nline two\nline three\n'
 
-vi.mock('@/lib/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
-}))
+const agentsMdRequestSchema = z.object({ content: z.string() })
 
-const createWrapper = () => {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+interface AgentsMdServerOptions {
+  initialContent?: string
+  putResult?: FetchRouteResult
+  deferSave?: boolean
+  deferRefetch?: boolean
+}
+
+function createAgentsMdServer(options: AgentsMdServerOptions = {}) {
+  let content = options.initialContent ?? DEFAULT_CONTENT
+  let reads = 0
+  let releaseSave: (() => void) | undefined
+  let releaseRefetch: (() => void) | undefined
+  let saveGate = options.deferSave ? new Promise<void>((resolve) => { releaseSave = resolve }) : null
+
+  const routes: FetchRoute[] = [
+    {
+      method: 'GET',
+      path: '/api/settings/agents-md',
+      respond: async () => {
+        reads += 1
+        if (reads > 1 && options.deferRefetch) {
+          await new Promise<void>((resolve) => { releaseRefetch = resolve })
+        }
+        return { json: { content } }
+      },
+    },
+    {
+      method: 'PUT',
+      path: '/api/settings/agents-md',
+      respond: async (request) => {
+        const body = agentsMdRequestSchema.parse(request.body)
+        if (saveGate) {
+          await saveGate
+          saveGate = null
+        }
+        content = body.content
+        return options.putResult ?? { json: { success: true, restartRequired: false } }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/settings/agents-md/default',
+      respond: () => ({ json: { content: '# Default' } }),
+    },
+  ]
+
+  return {
+    routes,
+    reads: () => reads,
+    releaseSave: () => releaseSave?.(),
+    releaseRefetch: () => releaseRefetch?.(),
+  }
+}
+
+function renderEditor(options: AgentsMdServerOptions = {}) {
+  const server = createAgentsMdServer(options)
+  const result = renderWithProviders(<AgentsMdEditor />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes: server.routes,
+  })
+  return { ...result, ...server }
+}
+
+async function findTextarea() {
+  return screen.findByLabelText('AGENTS.md content')
 }
 
 describe('AgentsMdEditor', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('loads the current AGENTS.md into the editor', async () => {
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    await waitFor(() =>
-      expect(screen.getByLabelText('AGENTS.md content')).toHaveValue('# Rules\n\nline two\nline three\n'),
-    )
+    renderEditor()
+
+    expect(await findTextarea()).toHaveValue(DEFAULT_CONTENT)
   })
 
   it('renders a line number gutter', async () => {
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    await waitFor(() => expect(screen.getByLabelText('AGENTS.md content')).toBeInTheDocument())
+    renderEditor()
+    await findTextarea()
+
     const numbers = Array.from(document.body.querySelectorAll('[data-line-number]'))
     expect(numbers.map((n) => n.textContent?.trim())).toEqual(['1', '2', '3', '4', '5'])
   })
 
   it('finds matches in the content', async () => {
     const user = userEvent.setup()
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    await waitFor(() => expect(screen.getByLabelText('AGENTS.md content')).toBeInTheDocument())
-    const findInput = screen.getByLabelText('Find in content')
-    await user.type(findInput, 'line')
+    renderEditor()
+    await findTextarea()
+
+    await user.type(screen.getByLabelText('Find in content'), 'line')
+
     expect(screen.getByTestId('find-match-count')).toHaveTextContent('1 of 2')
-    const marks = document.body.querySelectorAll('mark')
-    expect(marks.length).toBe(2)
+    expect(document.body.querySelectorAll('mark')).toHaveLength(2)
   })
 
   it('keeps Save disabled until the content changes', async () => {
     const user = userEvent.setup()
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
+    renderEditor()
     const saveButton = await screen.findByRole('button', { name: 'Save' })
     expect(saveButton).toBeDisabled()
-    const textarea = screen.getByLabelText('AGENTS.md content') as HTMLTextAreaElement
-    await user.type(textarea, '!')
+
+    await user.type(await findTextarea(), '!')
+
     expect(saveButton).toBeEnabled()
   })
 
   it('saves the edited content', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
-    const edited = '# Rules\n\nline two\nline three\n# new section\n'
+    const { fetchFake } = renderEditor()
+    const textarea = await findTextarea()
+    const edited = `${DEFAULT_CONTENT}# new section\n`
     fireEvent.change(textarea, { target: { value: edited } })
-    const saveButton = screen.getByRole('button', { name: 'Save' })
-    await user.click(saveButton)
-    await waitFor(() => expect(settingsApi.updateAgentsMd).toHaveBeenCalled())
-    expect(settingsApi.updateAgentsMd).toHaveBeenCalledWith(edited)
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(fetchFake.lastRequest('PUT', '/api/settings/agents-md')?.body).toEqual({ content: edited })
   })
 
   it('uses a 16px editor font on mobile', async () => {
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = await screen.findByLabelText('AGENTS.md content')
+    renderEditor()
+
+    const textarea = await findTextarea()
     expect(textarea.className).toContain('text-[16px]')
     expect(textarea.className).toContain('min-[769px]:text-sm')
     expect(textarea.className).not.toContain('text-xs')
@@ -86,83 +139,74 @@ describe('AgentsMdEditor', () => {
 
   it('locks the editor while a save is pending and preserves submitted content', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    let resolveSave: (value: { success: boolean; restartRequired?: boolean }) => void = () => {}
-    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockReturnValueOnce(
-      new Promise<{ success: boolean; restartRequired?: boolean }>((resolve) => {
-        resolveSave = resolve
-      }),
-    )
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
-    const edited = '# Rules\n\nline two\nline three\nedit\n'
+    const { releaseSave } = renderEditor({ deferSave: true })
+    const textarea = await findTextarea()
+    const edited = `${DEFAULT_CONTENT}edit\n`
     fireEvent.change(textarea, { target: { value: edited } })
+
     await user.click(screen.getByRole('button', { name: 'Save' }))
+
     await waitFor(() => expect(textarea).toBeDisabled())
-    try {
-      await user.type(textarea, 'lost edit')
-    } catch {
-      // user-event refuses to type into a disabled element; expected
-    }
+    await user.type(textarea, 'lost edit').catch(() => undefined)
     expect(textarea).toHaveValue(edited)
-    resolveSave({ success: true, restartRequired: false })
+
+    releaseSave()
+
     await waitFor(() => expect(textarea).not.toBeDisabled())
     expect(textarea).toHaveValue(edited)
   })
 
   it('preserves a post-save edit when a deferred refetch arrives with the saved value', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    ;(settingsApi.getAgentsMd as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ content: 'A' })
-      .mockResolvedValueOnce({ content: 'B' })
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
-    await waitFor(() => expect(textarea).toHaveValue('A'))
+    const { reads, releaseRefetch } = renderEditor({ deferRefetch: true })
+    const textarea = await findTextarea()
+    await waitFor(() => expect(textarea).toHaveValue(DEFAULT_CONTENT))
+
     fireEvent.change(textarea, { target: { value: 'B' } })
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(settingsApi.updateAgentsMd).toHaveBeenCalledWith('B'))
+    await waitFor(() => expect(reads()).toBeGreaterThanOrEqual(2))
+
     fireEvent.change(textarea, { target: { value: 'A' } })
-    await waitFor(() => expect(settingsApi.getAgentsMd).toHaveBeenCalledTimes(2))
+    releaseRefetch()
+
+    await waitFor(() => expect(reads()).toBe(2))
     expect(textarea).toHaveValue('A')
   })
 
   it('reports a save as applied without a restart', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    const { showToast } = await import('@/lib/toast')
-    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: false })
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
-    fireEvent.change(textarea, { target: { value: '# Rules\n\napplied\n' } })
+    renderEditor()
+    const textarea = await findTextarea()
+    fireEvent.change(textarea, { target: { value: `${DEFAULT_CONTENT}applied\n` } })
+
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('AGENTS.md saved'))
+
+    expect(await screen.findByText('AGENTS.md saved')).toBeInTheDocument()
   })
 
   it('requests a restart when the in-place reload fails', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    const { showToast } = await import('@/lib/toast')
-    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: true })
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    const textarea = (await screen.findByLabelText('AGENTS.md content')) as HTMLTextAreaElement
-    fireEvent.change(textarea, { target: { value: '# Rules\n\nneeds restart\n' } })
+    renderEditor({ putResult: { json: { success: true, restartRequired: true } } })
+    const textarea = await findTextarea()
+    fireEvent.change(textarea, { target: { value: `${DEFAULT_CONTENT}needs restart\n` } })
+
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() =>
-      expect(showToast.success).toHaveBeenCalledWith(
+
+    expect(
+      await screen.findByText(
         'Configuration saved, but OpenCode could not reload it. Restart the server to apply changes.',
       ),
-    )
+    ).toBeInTheDocument()
   })
 
-  it('reports resetting to default as applied without a restart', async () => {
+  it('resets to the default content and reports it as applied', async () => {
     const user = userEvent.setup()
-    const { settingsApi } = await import('@/api/settings')
-    const { showToast } = await import('@/lib/toast')
-    ;(settingsApi.updateAgentsMd as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ success: true, restartRequired: false })
-    render(<AgentsMdEditor />, { wrapper: createWrapper() })
-    await screen.findByLabelText('AGENTS.md content')
+    const { fetchFake } = renderEditor()
+    await findTextarea()
+
     await user.click(screen.getByRole('button', { name: 'Reset to Default' }))
-    await waitFor(() => expect(showToast.success).toHaveBeenCalledWith('AGENTS.md reset to default'))
+
+    expect(await screen.findByText('AGENTS.md reset to default')).toBeInTheDocument()
+    expect(fetchFake.lastRequest('PUT', '/api/settings/agents-md')?.body).toEqual({ content: '# Default' })
   })
 })

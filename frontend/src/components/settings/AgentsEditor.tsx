@@ -13,21 +13,17 @@ import { DirectoryFilesList } from './DirectoryFilesList'
 interface AgentsEditorProps {
   agents: Record<string, OpenCodeAgentConfig>
   directoryAgents?: OpenCodeDirectoryFileInfo[]
-  onSave: (name: string, agent: OpenCodeAgentPatch, previousName?: string) => void
+  onSave: (name: string, agent: OpenCodeAgentPatch) => void
   onDelete: (name: string) => void
 }
 
-/**
- * Renders configured agents alongside agent files discovered in the workspace directory, with add,
- * edit and delete entry points against the managed config.
- */
 export function AgentsEditor({ agents, directoryAgents = [], onSave, onDelete }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<{ name: string; agent: OpenCodeAgentConfig } | null>(null)
   const hasAgents = Object.keys(agents).length > 0 || directoryAgents.length > 0
 
   const handleAgentSubmit = (name: string, agent: OpenCodeAgentPatch) => {
-    onSave(name, agent, editingAgent?.name)
+    onSave(name, agent)
     setEditingAgent(null)
     setIsCreateDialogOpen(false)
   }

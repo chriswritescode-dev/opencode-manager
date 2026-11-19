@@ -1,7 +1,9 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { z } from 'zod'
 import { OPENCODE_PINNED_VERSION } from '../shared/src/opencode/release'
 import { OPENCODE_SYNTAX_TOKENS } from '../shared/src/themes/types'
+import { JsonValueSchema, type JsonObject, type JsonValue } from '../shared/src/utils/json'
 import type {
   HexColor,
   OpenCodeSyntaxPalette,
@@ -54,34 +56,40 @@ const THEME_BASE_URL = `https://raw.githubusercontent.com/anomalyco/opencode/${O
 
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]+$/
 
-interface RawVariant {
-  palette?: Record<string, unknown>
-  overrides?: Record<string, unknown>
+const HexColorSchema = z.string().regex(HEX_COLOR_PATTERN)
+
+const RawVariantSchema = z.looseObject({
+  palette: z.record(z.string(), JsonValueSchema).optional(),
+  overrides: z.record(z.string(), JsonValueSchema).optional(),
+})
+
+const RawThemeSchema = z.looseObject({
+  id: JsonValueSchema.optional(),
+  name: JsonValueSchema.optional(),
+  light: RawVariantSchema.optional(),
+  dark: RawVariantSchema.optional(),
+})
+
+type RawVariant = z.infer<typeof RawVariantSchema>
+
+type RawTheme = z.infer<typeof RawThemeSchema>
+
+function isHexColor(value: JsonValue | undefined): value is HexColor {
+  return HexColorSchema.safeParse(value).success
 }
 
-interface RawTheme {
-  id?: unknown
-  name?: unknown
-  light?: RawVariant
-  dark?: RawVariant
-}
-
-function isHexColor(value: unknown): value is HexColor {
-  return typeof value === 'string' && HEX_COLOR_PATTERN.test(value)
-}
-
-function readHex(value: unknown, field: string): HexColor {
+function readHex(value: JsonValue | undefined, field: string): HexColor {
   if (!isHexColor(value)) {
     throw new Error(`Invalid hex color for ${field}: ${JSON.stringify(value)}`)
   }
   return value
 }
 
-function readOptionalHex(value: unknown, field: string): HexColor | undefined {
+function readOptionalHex(value: JsonValue | undefined, field: string): HexColor | undefined {
   return value === undefined ? undefined : readHex(value, field)
 }
 
-function readSyntax(overrides: Record<string, unknown> | undefined): OpenCodeSyntaxPalette | undefined {
+function readSyntax(overrides: JsonObject | undefined): OpenCodeSyntaxPalette | undefined {
   if (!overrides) return undefined
   const syntax: OpenCodeSyntaxPalette = {}
   for (const token of OPENCODE_SYNTAX_TOKENS) {
@@ -92,17 +100,17 @@ function readSyntax(overrides: Record<string, unknown> | undefined): OpenCodeSyn
 }
 
 function readPalette(raw: RawVariant | undefined, field: string): OpenCodeThemePalette {
-  if (!raw || typeof raw !== 'object' || !raw.palette || typeof raw.palette !== 'object') {
+  const palette = raw?.palette
+  if (!palette) {
     throw new Error(`Missing palette for ${field}`)
   }
-  const palette = raw.palette
   const accent = readOptionalHex(palette.accent, `${field}.accent`)
   const diffAdd = readOptionalHex(palette.diffAdd, `${field}.diffAdd`)
   const diffDelete = readOptionalHex(palette.diffDelete, `${field}.diffDelete`)
-  const textWeakValue = raw.overrides?.['text-weak']
+  const textWeakValue = raw?.overrides?.['text-weak']
   const textWeak = isHexColor(textWeakValue) ? textWeakValue : undefined
-  const syntax = readSyntax(raw.overrides)
-  return {
+  const syntax = readSyntax(raw?.overrides)
+  const themePalette: OpenCodeThemePalette = {
     neutral: readHex(palette.neutral, `${field}.neutral`),
     ink: readHex(palette.ink, `${field}.ink`),
     primary: readHex(palette.primary, `${field}.primary`),
@@ -110,12 +118,13 @@ function readPalette(raw: RawVariant | undefined, field: string): OpenCodeThemeP
     warning: readHex(palette.warning, `${field}.warning`),
     error: readHex(palette.error, `${field}.error`),
     info: readHex(palette.info, `${field}.info`),
-    ...(accent === undefined ? {} : { accent }),
-    ...(diffAdd === undefined ? {} : { diffAdd }),
-    ...(diffDelete === undefined ? {} : { diffDelete }),
-    ...(textWeak === undefined ? {} : { textWeak }),
-    ...(syntax === undefined ? {} : { syntax }),
   }
+  if (accent !== undefined) themePalette.accent = accent
+  if (diffAdd !== undefined) themePalette.diffAdd = diffAdd
+  if (diffDelete !== undefined) themePalette.diffDelete = diffDelete
+  if (textWeak !== undefined) themePalette.textWeak = textWeak
+  if (syntax !== undefined) themePalette.syntax = syntax
+  return themePalette
 }
 
 async function fetchTheme(file: string): Promise<RawTheme> {
@@ -123,19 +132,21 @@ async function fetchTheme(file: string): Promise<RawTheme> {
   if (!response.ok) {
     throw new Error(`Failed to fetch ${file}.json: ${response.status} ${response.statusText}`)
   }
-  return (await response.json()) as RawTheme
+  return RawThemeSchema.parse(await response.json())
 }
 
 function buildTheme(raw: RawTheme, file: string): OpenCodeThemeDefinition {
-  if (typeof raw.id !== 'string' || raw.id.length === 0) {
+  const id = z.string().min(1).safeParse(raw.id)
+  if (!id.success) {
     throw new Error(`Missing id for ${file}`)
   }
-  if (typeof raw.name !== 'string' || raw.name.length === 0) {
+  const name = z.string().min(1).safeParse(raw.name)
+  if (!name.success) {
     throw new Error(`Missing name for ${file}`)
   }
   return {
-    id: raw.id,
-    name: raw.name,
+    id: id.data,
+    name: name.data,
     light: readPalette(raw.light, `${file}.light`),
     dark: readPalette(raw.dark, `${file}.dark`),
   }

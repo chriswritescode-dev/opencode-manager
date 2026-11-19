@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { clearRevert, stageRevert } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { showToast } from '@/lib/toast'
 import { sessionTranscriptQueryKey } from '@/lib/queryInvalidation'
 

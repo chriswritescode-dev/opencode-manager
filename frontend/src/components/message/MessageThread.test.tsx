@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render as rtlRender, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import type { UserPreferences } from '@/api/types/settings'
 import { MessageThread } from './MessageThread'
 import { useUIState } from '@/stores/uiStateStore'
 import { applySessionEvent, emptySessionTranscript } from '@/lib/session-projection'
+import { createTestQueryClient, renderWithProviders } from '@/test/render'
+import { makeSettingsResponse, makeUserPreferences } from '@/test/fixtures/api'
 import {
   SESSION_ID,
   compactionSequence,
@@ -20,68 +22,36 @@ import type {
   V2Event,
 } from '@opencode-manager/shared/opencode'
 
-const mocks = vi.hoisted(() => ({
-  useSettings: vi.fn(),
-  useRefreshMessage: vi.fn(),
-  useSessionAgent: vi.fn(),
-  useMobile: vi.fn(),
-}))
+let preferencesFixture: Partial<UserPreferences> = {}
 
-vi.mock('@/hooks/useSettings', () => ({
-  useSettings: mocks.useSettings,
-}))
-
-vi.mock('@/hooks/useMobile', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useMobile')>()),
-  useMobile: mocks.useMobile,
-}))
-
-vi.mock('@/hooks/useRemoveMessage', () => ({
-  useRefreshMessage: () => mocks.useRefreshMessage(),
-}))
-
-vi.mock('@/hooks/useSessionAgent', () => ({
-  useSessionAgent: () => mocks.useSessionAgent(),
-}))
-
-vi.mock('@/hooks/useTTS', () => ({
-  useTTS: () => ({
-    speakMessage: vi.fn(),
-    stop: vi.fn(),
-    unlock: vi.fn(),
-    isEnabled: false,
-    isPlaying: false,
-    isLoading: false,
-    activeMessageId: null,
-  }),
-}))
-
-vi.mock('@/api/opencode', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/api/opencode')>()),
-  getSession: () => new Promise(() => {}),
-  listShells: () => Promise.resolve([]),
-}))
-
-interface MockSettingsReturn {
-  preferences: {
-    simpleChatMode: boolean
-    showReasoning: boolean
-    groupToolCalls?: boolean
-  } | undefined
+const setupSettings = (preferences: Partial<UserPreferences>) => {
+  preferencesFixture = preferences
 }
 
-const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
-  mocks.useSettings.mockReturnValue({
-    preferences,
-    isLoading: false,
-    updateSettings: vi.fn(),
-    isUpdating: false,
+const renderThread = (ui: ReactElement) => {
+  const preferences = makeUserPreferences(preferencesFixture)
+  const queryClient = createTestQueryClient()
+  queryClient.setQueryData(['settings', 'default'], makeSettingsResponse({ preferences }))
+  return renderWithProviders(ui, {
+    tts: true,
+    queryClient,
+    fetchRoutes: [
+      { method: 'GET', path: '/api/settings', respond: () => ({ json: makeSettingsResponse({ preferences }) }) },
+      { method: 'GET', path: '/api/opencode/api/session/:sessionId', respond: () => ({ json: { id: 'test-session', projectID: 'proj_1', time: { created: 1, updated: 1 } } }) },
+      { method: 'GET', path: '/api/opencode/api/agent', respond: () => ({ json: { data: [] } }) },
+      { method: 'POST', path: '/api/opencode/api/session/:sessionId/interrupt', respond: () => ({ json: {} }) },
+      { method: 'POST', path: '/api/opencode/api/experimental/session/:sessionId/wait', respond: () => ({ status: 204 }) },
+      { method: 'POST', path: '/api/opencode/api/session/:sessionId/revert/stage', respond: () => ({ json: { messageID: '2' } }) },
+      { method: 'POST', path: '/api/opencode/api/session/:sessionId/revert/commit', respond: () => ({ status: 204 }) },
+      { method: 'POST', path: '/api/opencode/api/session/:sessionId/agent', respond: () => ({ status: 204 }) },
+      { method: 'POST', path: '/api/opencode/api/session/:sessionId/model', respond: () => ({ status: 204 }) },
+      {
+        method: 'POST',
+        path: '/api/opencode/api/session/:sessionId/prompt',
+        respond: () => ({ json: { id: 'inbox_1', sessionID: 'test-session', type: 'user', payload: { text: '' }, time: { created: 1 } } }),
+      },
+    ],
   })
-}
-
-const render = (ui: ReactElement) => {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 const project = (events: V2Event[]): SessionMessageInfo[] =>
@@ -148,13 +118,6 @@ const shellTool = (command: string): SessionMessageAssistantTool => ({
 
 describe('MessageThread', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.useRefreshMessage.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    })
-    mocks.useSessionAgent.mockReturnValue({ agent: 'test-agent' })
-    mocks.useMobile.mockReturnValue(false)
     useUIState.getState().setIsEditingMessage(false)
   })
 
@@ -164,7 +127,7 @@ describe('MessageThread', () => {
       assistantMessage('1', [readTool('r1', '/repo/a.ts'), readTool('r2', '/repo/b.ts'), shellTool('pnpm test')]),
     ]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     const summary = screen.getByRole('button', { name: /Explored: 2 reads/ })
     expect(screen.queryByText('/repo/a.ts')).not.toBeInTheDocument()
@@ -181,7 +144,7 @@ describe('MessageThread', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false, groupToolCalls: false })
     const messages = [assistantMessage('1', [readTool('r1', '/repo/a.ts'), readTool('r2', '/repo/b.ts')])]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     expect(screen.queryByText(/Explored/)).not.toBeInTheDocument()
     expect(screen.getByText('/repo/a.ts')).toBeInTheDocument()
@@ -201,7 +164,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     expect(screen.getByText(/Instructions updated$/)).toBeInTheDocument()
     expect(screen.getByText(/Instructions updated: AGENTS\.md/)).toBeInTheDocument()
@@ -232,7 +195,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -278,7 +241,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    const { container } = render(
+    const { container } = renderThread(
       <MessageThread sessionID="test-session" messages={messages} pending={[]} />,
     )
 
@@ -294,7 +257,7 @@ describe('MessageThread', () => {
       { id: 'syn-text', type: 'synthetic', text: 'Background task finished', time: { created: Date.now() } },
     ]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     expect(screen.getByText(/Background task finished/)).toBeInTheDocument()
   })
@@ -307,7 +270,7 @@ describe('MessageThread', () => {
       assistantMessage('2', [subagentTool('Review changes', 'child-session')]),
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -329,7 +292,7 @@ describe('MessageThread', () => {
       assistantMessage('2', [subagentTool('Explore codebase structure', 'child-session')]),
     ]
 
-    const { container } = render(
+    const { container } = renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -354,7 +317,7 @@ describe('MessageThread', () => {
       assistantMessage('2', [textPart('This is a response')]),
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -377,7 +340,7 @@ describe('MessageThread', () => {
       ]),
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -402,7 +365,7 @@ describe('MessageThread', () => {
       ]),
     ]
 
-    const { container } = render(
+    const { container } = renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -430,7 +393,7 @@ describe('MessageThread', () => {
       }),
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -457,7 +420,7 @@ describe('MessageThread', () => {
       }),
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -473,7 +436,7 @@ describe('MessageThread', () => {
   it('renders user messages normally', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[userMessage('1', 'Hello')]}
@@ -488,7 +451,7 @@ describe('MessageThread', () => {
   it('renders the assistant footer with agent, model, and duration', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[
@@ -509,7 +472,7 @@ describe('MessageThread', () => {
   it('exposes the message id on a rendered user message', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    const { container } = render(
+    const { container } = renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[userMessage('user-42', 'Hello')]}
@@ -536,7 +499,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     const image = screen.getByAltText('shot.png')
     expect(image).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
@@ -547,7 +510,7 @@ describe('MessageThread', () => {
   it('renders a projected shell message from the fixtures', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID={SESSION_ID}
         messages={project(shellSequence)}
@@ -577,7 +540,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     expect(screen.getByText('(15 earlier lines)')).toBeInTheDocument()
     expect(screen.getByText(/line-25/)).toBeInTheDocument()
@@ -592,7 +555,7 @@ describe('MessageThread', () => {
   it('renders a projected compaction banner from the fixtures', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID={SESSION_ID}
         messages={project(compactionSequence)}
@@ -607,7 +570,7 @@ describe('MessageThread', () => {
   it('renders a projected assistant transcript from the fixtures', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID={SESSION_ID}
         messages={project(promptSequence)}
@@ -633,7 +596,7 @@ describe('MessageThread', () => {
       },
     ]
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[userMessage('1', 'Hello')]}
@@ -649,7 +612,7 @@ describe('MessageThread', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
     const onFileClick = vi.fn()
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[
@@ -670,7 +633,7 @@ describe('MessageThread', () => {
   it('hides step file changes in simple chat mode', () => {
     setupSettings({ simpleChatMode: true, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[
@@ -689,7 +652,7 @@ describe('MessageThread', () => {
     const messages = [assistantMessage('2', [textPart('Updated files')], { agent: 'build' })]
 
     setupSettings({ simpleChatMode: true, showReasoning: false })
-    const simple = render(
+    const simple = renderThread(
       <MessageThread sessionID="test-session" messages={messages} pending={[]} />,
     )
 
@@ -699,7 +662,7 @@ describe('MessageThread', () => {
     simple.unmount()
 
     setupSettings({ simpleChatMode: false, showReasoning: false })
-    render(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
+    renderThread(<MessageThread sessionID="test-session" messages={messages} pending={[]} />)
 
     expect(screen.getByText('Build')).toBeInTheDocument()
     expect(screen.getByText('test-model')).toBeInTheDocument()
@@ -708,7 +671,7 @@ describe('MessageThread', () => {
   it('shows the empty state when there are no messages or pending prompts', () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
 
-    render(
+    renderThread(
       <MessageThread
         sessionID="test-session"
         messages={[]}
@@ -727,7 +690,7 @@ describe('MessageThread', () => {
       assistantMessage('2', [textPart('This is a response')]),
     ]
 
-    const { unmount } = render(
+    const { unmount } = renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -747,20 +710,15 @@ describe('MessageThread', () => {
     expect(useUIState.getState().isEditingMessage).toBe(false)
   })
 
-  it('resends an edited prompt after the edit textarea blurs', () => {
+  it('resends an edited prompt after the edit textarea blurs', async () => {
     setupSettings({ simpleChatMode: false, showReasoning: false })
-    const mutate = vi.fn()
-    mocks.useRefreshMessage.mockReturnValue({
-      isPending: false,
-      mutate,
-    })
 
     const messages = [
       userMessage('1', 'Hello'),
       assistantMessage('2', [textPart('This is a response')]),
     ]
 
-    render(
+    const { fetchFake } = renderThread(
       <MessageThread
         sessionID="test-session"
         messages={messages}
@@ -774,12 +732,10 @@ describe('MessageThread', () => {
     fireEvent.blur(textarea)
     fireEvent.click(screen.getByRole('button', { name: /resend/i }))
 
-    expect(mutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantMessageID: '2',
-        userMessageContent: 'Updated prompt',
-      }),
-      expect.any(Object),
-    )
+    await waitFor(() => {
+      expect(fetchFake.lastRequest('POST', '/api/opencode/api/session/test-session/prompt')?.body).toMatchObject({
+        text: 'Updated prompt',
+      })
+    })
   })
 })

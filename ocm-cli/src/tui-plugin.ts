@@ -1,16 +1,18 @@
-import type { Context } from '@opencode/plugin/tui/context'
+import type { InstallNotice } from './state.js'
 import { readInstallNotice } from './state.js'
 import { resolveManagerAuth } from './manager-auth.js'
+import type { ManagerAuth } from './manager-auth.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi } from './manager-api.js'
 import { prepareMirror, mirrorUpFast, pickMatchedRepo, chooseMoveDestination } from './mirror.js'
-import type { MirrorPlan, MoveDestination } from './mirror.js'
+import type { MirrorPlan, MirrorMoveApi, MirrorUpFastOpts, MirrorUpFastResult, MoveDestination } from './mirror.js'
 import { getBranchName } from './local-repo.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerSessionTransfer } from './remote-session.js'
 import type { ManagerSessionTransfer } from './remote-session.js'
 import { confirmDialog, requireSessionTarget, selectDialog } from './tui-dialogs.js'
 import { setPendingWarp, runPendingWarp } from './warp.js'
+import type { PendingWarp } from './warp.js'
 import { pushPhaseProgress, importProgress } from './move-progress.js'
 import { warmRepoProxy } from './repo-proxy.js'
 import type { MoveProgress } from './move-progress.js'
@@ -18,6 +20,7 @@ import { MULTI_RUN_COMMAND, runMultiRunCommand } from './tui-multi-run.js'
 import type { MultiRunLaunchDialogProps, MultiRunsDialogProps } from './tui-multi-run.js'
 import { runOcmSwitch } from './tui-ocm.js'
 import type { RemoteContext } from './remote-context.js'
+import type { OcmTuiContext } from './tui-context.js'
 
 export type MoveProgressSetter = (progress: MoveProgress | null) => void
 
@@ -31,8 +34,47 @@ export type OcmFeatures = {
   dialogs: OcmDialogs
 }
 
-export async function setupOcm(context: Context, setMoveProgress: MoveProgressSetter, features: OcmFeatures): Promise<() => void> {
-  showInstallNotice(context)
+export interface OcmPluginDeps {
+  readInstallNotice: () => InstallNotice | null
+  resolveManagerAuth: () => Promise<ManagerAuth>
+  fetchRepos: typeof fetchRepos
+  toRemoteRepoSummaries: typeof toRemoteRepoSummaries
+  prepareMirror: typeof prepareMirror
+  getBranchName: typeof getBranchName
+  pickMatchedRepo: typeof pickMatchedRepo
+  warmRepoProxy: typeof warmRepoProxy
+  createManagerSessionTransfer: (managerUrl: string, token: string) => ManagerSessionTransfer
+  createManagerApi: (managerUrl: string, token: string) => MirrorMoveApi
+  chooseMoveDestination: typeof chooseMoveDestination
+  mirrorUpFast: (plan: MirrorPlan, opts: MirrorUpFastOpts) => Promise<MirrorUpFastResult>
+  setPendingWarp: (warp: PendingWarp) => void
+  runPendingWarp: () => void
+}
+
+export const ocmPluginDeps: OcmPluginDeps = {
+  readInstallNotice,
+  resolveManagerAuth: () => resolveManagerAuth(),
+  fetchRepos,
+  toRemoteRepoSummaries,
+  prepareMirror,
+  getBranchName,
+  pickMatchedRepo,
+  warmRepoProxy,
+  createManagerSessionTransfer,
+  createManagerApi: (managerUrl, token) => new ManagerApi(managerUrl, token),
+  chooseMoveDestination,
+  mirrorUpFast,
+  setPendingWarp,
+  runPendingWarp,
+}
+
+export async function setupOcm(
+  context: OcmTuiContext,
+  setMoveProgress: MoveProgressSetter,
+  features: OcmFeatures,
+  deps: OcmPluginDeps = ocmPluginDeps,
+): Promise<() => void> {
+  showInstallNotice(context, deps)
   context.ui.slot({
     append: 'app',
     render: () => {
@@ -46,7 +88,7 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
             group: 'OpenCode Manager',
             palette: true,
             slash: { name: 'ocm-move' },
-            run: () => runSessionMove(context, setMoveProgress),
+            run: () => runSessionMove(context, setMoveProgress, deps),
           },
           {
             id: 'ocm.switch',
@@ -80,11 +122,11 @@ export async function setupOcm(context: Context, setMoveProgress: MoveProgressSe
       return null
     },
   })
-  return () => runPendingWarp()
+  return () => deps.runPendingWarp()
 }
 
-function showInstallNotice(context: Context): void {
-  const notice = readInstallNotice()
+function showInstallNotice(context: OcmTuiContext, deps: OcmPluginDeps): void {
+  const notice = deps.readInstallNotice()
   if (!notice) return
 
   context.ui.toast.show({
@@ -125,48 +167,48 @@ function moveConfirmMessage(repoName: string, destination: MoveDestination, loca
   }
 }
 
-async function runSessionMove(context: Context, setMoveProgress: MoveProgressSetter): Promise<void> {
+async function runSessionMove(context: OcmTuiContext, setMoveProgress: MoveProgressSetter, deps: OcmPluginDeps): Promise<void> {
   try {
     const sessionTarget = requireSessionTarget(context)
     if (!sessionTarget) return
     const { sessionID, directory, session } = sessionTarget
 
-    const auth = await resolveManagerAuth()
+    const auth = await deps.resolveManagerAuth()
     if (!auth.ok) {
       context.ui.toast.show({ variant: 'error', message: auth.message })
       return
     }
 
-    const repos = await fetchRepos(auth.managerUrl, auth.token)
-    const plan = await prepareMirror(directory, toRemoteRepoSummaries(repos))
+    const repos = await deps.fetchRepos(auth.managerUrl, auth.token)
+    const plan = await deps.prepareMirror(directory, deps.toRemoteRepoSummaries(repos))
 
     if (plan.matched.length === 0) {
       context.ui.toast.show({ variant: 'error', message: 'No matching Manager repo; run `ocm push --create` first' })
       return
     }
 
-    const localBranch = getBranchName(plan.repoRoot)
+    const localBranch = deps.getBranchName(plan.repoRoot)
     if (!localBranch) {
       context.ui.toast.show({ variant: 'error', message: 'Check out a branch before moving; a detached HEAD cannot be moved.' })
       return
     }
-    const matched = pickMatchedRepo(plan.matched, localBranch)
+    const matched = deps.pickMatchedRepo(plan.matched, localBranch)
       ?? await selectDialog(context, 'Move session to Manager repo', plan.matched.map((r) => ({ title: r.name, description: `id=${r.repoId} branch=${r.branch ?? '-'}`, value: r })))
     if (!matched) return
     const matchedRepoId = matched.repoId
 
-    await warmRepoProxy(auth.managerUrl, auth.token, matchedRepoId)
+    await deps.warmRepoProxy(auth.managerUrl, auth.token, matchedRepoId)
 
-    const transfer = createManagerSessionTransfer(auth.managerUrl, auth.token)
+    const transfer = deps.createManagerSessionTransfer(auth.managerUrl, auth.token)
     const blocker = await describeMoveBlocker(transfer, sessionID, session.parentID)
     if (blocker) {
       context.ui.toast.show({ variant: 'error', message: blocker })
       return
     }
 
-    const managerApi = new ManagerApi(auth.managerUrl, auth.token)
+    const managerApi = deps.createManagerApi(auth.managerUrl, auth.token)
     const checkouts = await managerApi.mirrorCheckouts(matched.repoId, localBranch)
-    const destination = chooseMoveDestination(plan.repoRoot, localBranch, checkouts)
+    const destination = deps.chooseMoveDestination(plan.repoRoot, localBranch, checkouts)
 
     const proceed = await confirmDialog(context, {
       title: 'Move session to Manager',
@@ -175,7 +217,7 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
     if (!proceed) return
 
     const selectedPlan: MirrorPlan = { ...plan, matched: [matched] }
-    const pushed = await mirrorUpFast(selectedPlan, {
+    const pushed = await deps.mirrorUpFast(selectedPlan, {
       api: managerApi,
       force: true,
       ...(destination.kind === 'new-worktree'
@@ -214,8 +256,8 @@ async function runSessionMove(context: Context, setMoveProgress: MoveProgressSet
         setMoveProgress(null)
         const warp = await confirmDialog(context, { title: 'Attach to moved session?', message: 'Exit this TUI and attach to the moved session on the Manager now?' })
         if (warp) {
-          await warmRepoProxy(auth.managerUrl, auth.token, matched.repoId)
-          setPendingWarp({
+          await deps.warmRepoProxy(auth.managerUrl, auth.token, matched.repoId)
+          deps.setPendingWarp({
             kind: 'attach',
             target: { managerUrl: auth.managerUrl, token: auth.token, repoId: matched.repoId, sessionID: result.sessionID, repoName: matched.name },
           })

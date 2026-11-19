@@ -1,12 +1,19 @@
 import { createHash } from 'crypto'
 import { readFile, writeFile, stat, unlink } from 'fs/promises'
 import { join } from 'path'
+import { z } from 'zod'
+import type { ZodType } from 'zod'
 import { logger } from './logger'
 import { mkdirSafe } from './fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
-const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')
+const discoveryCacheDir = (): string => join(getWorkspacePath(), 'cache', 'discovery')
 const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000
+
+const ModelsResponseSchema = z.union([
+  z.object({ data: z.array(z.object({ id: z.string().optional() })) }),
+  z.array(z.string()),
+])
 
 export function normalizeToBaseUrl(endpoint: string): string {
   return endpoint
@@ -19,12 +26,12 @@ export function normalizeToBaseUrl(endpoint: string): string {
 }
 
 async function ensureDiscoveryCacheDir(): Promise<void> {
-  await mkdirSafe(DISCOVERY_CACHE_DIR)
+  await mkdirSafe(discoveryCacheDir())
 }
 
-async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {
+async function getCachedDiscovery<T>(cacheKey: string, schema: ZodType<T>): Promise<T | null> {
   try {
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
+    const filePath = join(discoveryCacheDir(), `${cacheKey}.json`)
     const fileStat = await stat(filePath)
 
     if (Date.now() - fileStat.mtimeMs > DISCOVERY_CACHE_TTL_MS) {
@@ -33,7 +40,8 @@ async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {
     }
 
     const content = await readFile(filePath, 'utf-8')
-    return JSON.parse(content) as T
+    const parsed = schema.safeParse(JSON.parse(content))
+    return parsed.success ? parsed.data : null
   } catch {
     return null
   }
@@ -42,7 +50,7 @@ async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {
 async function cacheDiscovery<T>(cacheKey: string, data: T): Promise<void> {
   try {
     await ensureDiscoveryCacheDir()
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
+    const filePath = join(discoveryCacheDir(), `${cacheKey}.json`)
     await writeFile(filePath, JSON.stringify(data))
   } catch (error) {
     logger.error(`Failed to cache discovery data for ${cacheKey}:`, error)
@@ -77,21 +85,14 @@ async function fetchAvailableModels(
       })
 
       if (response.ok) {
-        const data = await response.json() as { data?: { id?: string }[] } | unknown[]
+        const parsed = ModelsResponseSchema.safeParse(await response.json())
 
-        if ('data' in data && Array.isArray(data.data)) {
-          const filtered = data.data
-            .filter((model) => model.id && typeof model.id === 'string')
-            .filter((model) => filterPattern.test(model.id!.toLowerCase()))
-            .map((model) => model.id!)
+        if (parsed.success) {
+          const candidates = Array.isArray(parsed.data)
+            ? parsed.data
+            : parsed.data.data.flatMap((model) => (model.id === undefined ? [] : [model.id]))
+          const filtered = candidates.filter((id) => filterPattern.test(id.toLowerCase()))
 
-          if (filtered.length > 0) {
-            return filtered
-          }
-        } else if (Array.isArray(data)) {
-          const filtered = data.filter((item): item is string =>
-            typeof item === 'string' && filterPattern.test(item.toLowerCase())
-          )
           if (filtered.length > 0) {
             return filtered
           }
@@ -111,12 +112,13 @@ export async function discoverCached<T>(opts: {
   apiKey: string
   type: string
   forceRefresh: boolean
+  schema: ZodType<T>
   fetcher: () => Promise<T>
 }): Promise<{ value: T; cached: boolean }> {
   const cacheKey = generateDiscoveryCacheKey(opts.baseUrl, opts.apiKey, opts.type)
 
   if (!opts.forceRefresh) {
-    const cached = await getCachedDiscovery<T>(cacheKey)
+    const cached = await getCachedDiscovery(cacheKey, opts.schema)
     if (cached) return { value: cached, cached: true }
   }
 
@@ -142,6 +144,7 @@ export async function discoverModelsCached(opts: {
     apiKey: opts.apiKey,
     type: opts.type,
     forceRefresh: opts.forceRefresh,
+    schema: z.array(z.string()),
     fetcher: () => fetchAvailableModels(opts.baseUrl, opts.apiKey, opts.filterPattern, opts.defaultModels),
   })
   return { models: value, cached }

@@ -1,14 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
 import { makeOpenCodeConfigFile, makeOpenCodeConfigSource } from '@/test/fixtures/opencode-config'
 import { FetchError } from '@/api/fetchWrapper'
-import { saveFile } from '@/lib/download'
-
-vi.mock('@/lib/download', () => ({
-  saveFile: vi.fn().mockResolvedValue(true),
-}))
+import { renderWithProviders } from '@/test/render'
+import { installObjectUrl, installPointerCapture, installWindowSize } from '@/test/browserFakes'
 
 const RAW = `{
   "$schema": "https://opencode.ai/config.json",
@@ -33,72 +30,77 @@ const multiSourceConfig = makeOpenCodeConfigFile({
   ],
 })
 
-function setContent(textarea: HTMLTextAreaElement, value: string) {
+function setContent(textarea: HTMLElement, value: string) {
   fireEvent.change(textarea, { target: { value } })
+}
+
+function renderEditor(
+  overrides: Partial<Parameters<typeof OpenCodeConfigEditor>[0]> = {},
+) {
+  const onUpdate = vi.fn().mockResolvedValue(undefined)
+  const onClose = vi.fn()
+  const result = renderWithProviders(
+    <OpenCodeConfigEditor config={config} isOpen onClose={onClose} onUpdate={onUpdate} {...overrides} />,
+    { auth: false, theme: false, tts: false },
+  )
+  return { ...result, onUpdate, onClose }
+}
+
+function configContent() {
+  return screen.getByLabelText('Config content')
+}
+
+function detailsFor(title: string) {
+  const details = screen.getByText(title).closest('details')
+  if (!(details instanceof HTMLDetailsElement)) throw new Error('details not found')
+  return details
 }
 
 describe('OpenCodeConfigEditor', () => {
   beforeAll(() => {
-    Element.prototype.hasPointerCapture ??= () => false
-    Element.prototype.setPointerCapture ??= () => {}
-    Element.prototype.releasePointerCapture ??= () => {}
+    installPointerCapture()
   })
-
-  const renderEditor = (
-    overrides: Partial<React.ComponentProps<typeof OpenCodeConfigEditor>> = {},
-  ) => {
-    const onUpdate = vi.fn().mockResolvedValue(undefined)
-    const onClose = vi.fn()
-    const result = render(
-      <OpenCodeConfigEditor
-        config={config}
-        isOpen
-        onClose={onClose}
-        onUpdate={onUpdate}
-        {...overrides}
-      />,
-    )
-    return { ...result, onUpdate, onClose }
-  }
 
   beforeEach(() => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 })
-  })
-
-  afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 })
+    installWindowSize(375)
   })
 
   it('loads rawContent verbatim into the editor', () => {
     renderEditor()
-    expect(screen.getByLabelText('Config content')).toHaveValue(RAW)
+
+    expect(configContent()).toHaveValue(RAW)
   })
 
   it('renders a line number gutter', () => {
     renderEditor()
+
     const numbers = Array.from(document.body.querySelectorAll('[data-line-number]'))
     expect(numbers.map((n) => n.textContent?.trim())).toEqual(['1', '2', '3', '4', '5'])
   })
 
   it('does not autofocus the editor on a mobile viewport', () => {
     renderEditor()
-    expect(screen.getByLabelText('Config content')).not.toHaveFocus()
+
+    expect(configContent()).not.toHaveFocus()
   })
 
   it('does not autofocus the find input on a mobile viewport', () => {
     renderEditor()
+
     expect(screen.getByLabelText('Find in content')).not.toHaveFocus()
   })
 
   it('autofocuses the editor on a desktop viewport', () => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1280 })
+    installWindowSize(1280)
     renderEditor()
-    expect(screen.getByLabelText('Config content')).toHaveFocus()
+
+    expect(configContent()).toHaveFocus()
     expect(screen.getByLabelText('Find in content')).not.toHaveFocus()
   })
 
   it('keeps the footer actions inside the layout flow', () => {
     renderEditor()
+
     const updateBtn = screen.getByRole('button', { name: 'Update' })
     const footer = updateBtn.closest('[data-editor-footer]')
     expect(footer).toBeInTheDocument()
@@ -112,9 +114,10 @@ describe('OpenCodeConfigEditor', () => {
   it('surfaces a JSONC syntax error with the offending line', async () => {
     const user = userEvent.setup()
     renderEditor()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, '{\n  "a" 1\n}')
+    setContent(configContent(), '{\n  "a" 1\n}')
+
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(screen.getByText(/Invalid JSON\/JSONC/)).toBeInTheDocument()
     })
@@ -124,21 +127,20 @@ describe('OpenCodeConfigEditor', () => {
   it('jumps to the syntax error line when the error line button is pressed', async () => {
     const { onUpdate } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, '{\n  "a" 1\n}')
+    setContent(configContent(), '{\n  "a" 1\n}')
     await user.click(screen.getByRole('button', { name: 'Update' }))
-    const goButton = await screen.findByRole('button', { name: /Go to line 2/ })
-    await user.click(goButton)
+
+    await user.click(await screen.findByRole('button', { name: /Go to line 2/ }))
+
     const activeLine = document.body.querySelector('[data-active-line]')
-    const row = activeLine?.closest('[data-line]')
-    expect(row).toHaveAttribute('data-line', '2')
+    expect(activeLine?.closest('[data-line]')).toHaveAttribute('data-line', '2')
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
   it('recenters the syntax error line on repeated clicks', async () => {
     const user = userEvent.setup()
     renderEditor()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
+    const textarea = configContent()
     setContent(textarea, '{\n  "a" 1\n}')
     await user.click(screen.getByRole('button', { name: 'Update' }))
     const goButton = await screen.findByRole('button', { name: /Go to line 2/ })
@@ -150,8 +152,10 @@ describe('OpenCodeConfigEditor', () => {
         scrollTopSets += 1
       },
     })
+
     await user.click(goButton)
     await user.click(goButton)
+
     expect(scrollTopSets).toBeGreaterThanOrEqual(2)
   })
 
@@ -163,15 +167,14 @@ describe('OpenCodeConfigEditor', () => {
     )
     renderEditor({ onUpdate })
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, '{\n  "theme": 42\n}')
+    setContent(configContent(), '{\n  "theme": 42\n}')
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     const issueButton = await screen.findByRole('button', { name: /theme/i })
-    expect(issueButton).toBeInTheDocument()
     await user.click(issueButton)
+
     const activeLine = document.body.querySelector('[data-active-line]')
-    const row = activeLine?.closest('[data-line]')
-    expect(row).toHaveAttribute('data-line', '2')
+    expect(activeLine?.closest('[data-line]')).toHaveAttribute('data-line', '2')
   })
 
   it('sends content the browser cannot validate to the backend instead of rejecting it locally', async () => {
@@ -182,10 +185,11 @@ describe('OpenCodeConfigEditor', () => {
     )
     renderEditor({ onUpdate })
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
     const invalid = '{\n  "theme": 42\n}'
-    setContent(textarea, invalid)
+    setContent(configContent(), invalid)
+
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ content: invalid, source: 'opencode.json', expectedRevision: 'rev-1' })
     })
@@ -195,10 +199,11 @@ describe('OpenCodeConfigEditor', () => {
   it('saves the raw text including comments', async () => {
     const { onUpdate, onClose } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
     const next = '{\n  // keep me\n  "theme": "system"\n}'
-    setContent(textarea, next)
+    setContent(configContent(), next)
+
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ content: next, source: 'opencode.json', expectedRevision: 'rev-1' })
     })
@@ -208,30 +213,34 @@ describe('OpenCodeConfigEditor', () => {
   it('clears errors as soon as the content changes', async () => {
     const user = userEvent.setup()
     renderEditor()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
+    const textarea = configContent()
     setContent(textarea, '{\n  "a" 1\n}')
     await user.click(screen.getByRole('button', { name: 'Update' }))
     await waitFor(() => {
       expect(screen.getByText(/Invalid JSON\/JSONC/)).toBeInTheDocument()
     })
+
     setContent(textarea, '{\n  "a" 1\n} ')
+
     expect(screen.queryByText(/Invalid JSON\/JSONC/)).not.toBeInTheDocument()
   })
 
   it('renders find matches and reports the counter', async () => {
     const user = userEvent.setup()
     renderEditor()
-    const findInput = screen.getByLabelText('Find in content')
-    await user.type(findInput, 'theme')
-    const counter = await screen.findByTestId('find-match-count')
-    expect(counter).toHaveTextContent('1 of 1')
+
+    await user.type(screen.getByLabelText('Find in content'), 'theme')
+
+    expect(await screen.findByTestId('find-match-count')).toHaveTextContent('1 of 1')
     expect(document.body.querySelectorAll('mark').length).toBeGreaterThan(0)
   })
 
   it('does not prompt when closing without edits', async () => {
     const { onClose } = renderEditor()
     const user = userEvent.setup()
+
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument()
   })
@@ -239,9 +248,10 @@ describe('OpenCodeConfigEditor', () => {
   it('prompts before discarding edits', async () => {
     const { onClose } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, RAW + ' ')
+    setContent(configContent(), `${RAW} `)
+
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
     expect(screen.getByText('Unsaved Changes')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
   })
@@ -249,32 +259,37 @@ describe('OpenCodeConfigEditor', () => {
   it('keeps editing when the prompt is dismissed', async () => {
     const { onClose } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, RAW + ' ')
+    const textarea = configContent()
+    setContent(textarea, `${RAW} `)
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
     await user.click(screen.getByRole('button', { name: 'Keep Editing' }))
+
     expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
-    expect(textarea).toHaveValue(RAW + ' ')
+    expect(textarea).toHaveValue(`${RAW} `)
   })
 
   it('discards edits when confirmed', async () => {
     const { onClose } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, RAW + ' ')
+    setContent(configContent(), `${RAW} `)
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
     await user.click(screen.getByRole('button', { name: 'Discard' }))
+
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('prompts on Escape when there are edits', async () => {
     const { onClose } = renderEditor()
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
+    const textarea = configContent()
     await user.click(textarea)
-    setContent(textarea, RAW + ' ')
+    setContent(textarea, `${RAW} `)
+
     await user.keyboard('{Escape}')
+
     await waitFor(() => {
       expect(screen.getByText('Unsaved Changes')).toBeInTheDocument()
     })
@@ -290,19 +305,16 @@ describe('OpenCodeConfigEditor', () => {
     )
     const onClose = vi.fn()
     render(
-      <OpenCodeConfigEditor
-        config={config}
-        isOpen
-        onClose={onClose}
-        onUpdate={onUpdate}
-      />,
+      <OpenCodeConfigEditor config={config} isOpen onClose={onClose} onUpdate={onUpdate} />,
     )
     const user = userEvent.setup()
     const updateBtn = screen.getByRole('button', { name: 'Update' })
+
     await user.click(updateBtn)
     await waitFor(() => expect(updateBtn).toBeDisabled())
     await user.click(updateBtn)
     resolveSave()
+
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     expect(onUpdate).toHaveBeenCalledTimes(1)
   })
@@ -311,16 +323,13 @@ describe('OpenCodeConfigEditor', () => {
     const onUpdate = vi.fn().mockRejectedValue(new Error('boom'))
     const onClose = vi.fn()
     render(
-      <OpenCodeConfigEditor
-        config={config}
-        isOpen
-        onClose={onClose}
-        onUpdate={onUpdate}
-      />,
+      <OpenCodeConfigEditor config={config} isOpen onClose={onClose} onUpdate={onUpdate} />,
     )
     const user = userEvent.setup()
     const updateBtn = screen.getByRole('button', { name: 'Update' })
+
     await user.click(updateBtn)
+
     await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument())
     await waitFor(() => expect(updateBtn).not.toBeDisabled())
     expect(onClose).not.toHaveBeenCalled()
@@ -335,25 +344,19 @@ describe('OpenCodeConfigEditor', () => {
     )
     const onClose = vi.fn()
     render(
-      <OpenCodeConfigEditor
-        config={config}
-        isOpen
-        onClose={onClose}
-        onUpdate={onUpdate}
-      />,
+      <OpenCodeConfigEditor config={config} isOpen onClose={onClose} onUpdate={onUpdate} />,
     )
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
+    const textarea = configContent()
     expect(textarea).not.toBeDisabled()
+
     await user.click(screen.getByRole('button', { name: 'Update' }))
     await waitFor(() => expect(textarea).toBeDisabled())
-    try {
-      await user.type(textarea, ' extra')
-    } catch {
-      // user-event refuses to type into a disabled element; expected
-    }
+    await user.type(textarea, ' extra').catch(() => undefined)
     expect(textarea).toHaveValue(RAW)
+
     resolveSave()
+
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     expect(onUpdate).toHaveBeenCalledTimes(1)
     expect(onUpdate).toHaveBeenCalledWith({ content: RAW, source: 'opencode.json', expectedRevision: 'rev-1' })
@@ -367,25 +370,23 @@ describe('OpenCodeConfigEditor', () => {
     )
     renderEditor({ onUpdate })
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
     const nested = '{\n  "agents": {\n    "assistant": {\n      "mode": 42\n    }\n  }\n}'
-    setContent(textarea, nested)
+    setContent(configContent(), nested)
     await user.click(screen.getByRole('button', { name: 'Update' }))
-    const issueButton = await screen.findByRole('button', { name: /agents\.assistant\.mode/i })
-    expect(issueButton).toBeInTheDocument()
-    await user.click(issueButton)
+
+    await user.click(await screen.findByRole('button', { name: /agents\.assistant\.mode/i }))
+
     const activeLine = document.body.querySelector('[data-active-line]')
-    const row = activeLine?.closest('[data-line]')
-    expect(row).toHaveAttribute('data-line', '4')
+    expect(activeLine?.closest('[data-line]')).toHaveAttribute('data-line', '4')
   })
 
   it('loads the preferred source and lists every source file', () => {
     renderEditor({ config: multiSourceConfig })
+
     expect(screen.getByText('Edit opencode.jsonc')).toBeInTheDocument()
-    expect(screen.getByLabelText('Config content')).toHaveValue(JSONC_RAW)
+    expect(configContent()).toHaveValue(JSONC_RAW)
     expect(screen.getByText('/workspace/.config/opencode/opencode.jsonc')).toBeInTheDocument()
-    const selector = screen.getByRole('combobox', { name: 'Source file' })
-    expect(selector).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Source file' })).toBeInTheDocument()
   })
 
   it('switches sources without discarding and saves the selected source', async () => {
@@ -397,12 +398,13 @@ describe('OpenCodeConfigEditor', () => {
 
     expect(screen.getByText('Edit opencode.json')).toBeInTheDocument()
     expect(screen.getByText('/workspace/.config/opencode/opencode.json')).toBeInTheDocument()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
+    const textarea = configContent()
     expect(textarea).toHaveValue(RAW)
 
     const next = '{\n  "theme": "light"\n}'
     setContent(textarea, next)
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ content: next, source: 'opencode.json', expectedRevision: 'rev-2' })
     })
@@ -411,15 +413,21 @@ describe('OpenCodeConfigEditor', () => {
   it('disables the source selector while there are unsaved edits', async () => {
     const { onClose } = renderEditor({ config: multiSourceConfig })
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, JSONC_RAW + ' ')
+    setContent(configContent(), `${JSONC_RAW} `)
+
     expect(screen.getByRole('combobox', { name: 'Source file' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     await user.click(screen.getByRole('button', { name: 'Discard' }))
+
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('downloads the exact selected source file', async () => {
+    const { createObjectURL } = installObjectUrl()
+    const downloads: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function method(this: HTMLAnchorElement) {
+      downloads.push(this.download)
+    })
     renderEditor({ config: multiSourceConfig })
     const user = userEvent.setup()
 
@@ -427,7 +435,8 @@ describe('OpenCodeConfigEditor', () => {
     await user.click(screen.getByRole('option', { name: 'opencode.json' }))
     await user.click(screen.getByRole('button', { name: 'Download' }))
 
-    expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), 'opencode.json')
+    expect(downloads).toEqual(['opencode.json'])
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
   })
 
   it('surfaces a conflict error without discarding the raw text', async () => {
@@ -436,9 +445,10 @@ describe('OpenCodeConfigEditor', () => {
     )
     renderEditor({ onUpdate })
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    const next = RAW + ' '
+    const textarea = configContent()
+    const next = `${RAW} `
     setContent(textarea, next)
+
     await user.click(screen.getByRole('button', { name: 'Update' }))
 
     expect(await screen.findByText('This configuration changed since you opened it.')).toBeInTheDocument()
@@ -451,18 +461,19 @@ describe('OpenCodeConfigEditor', () => {
       new FetchError('Conflict', 409, 'CONFIG_CONFLICT', 'This configuration changed since you opened it.'),
     )
     const onClose = vi.fn()
-    const { rerender } = render(
-      <OpenCodeConfigEditor config={config} isOpen onClose={onClose} onUpdate={onUpdate} />,
-    )
+    function Harness({ currentConfig }: { currentConfig: ReturnType<typeof makeOpenCodeConfigFile> }) {
+      return <OpenCodeConfigEditor config={currentConfig} isOpen onClose={onClose} onUpdate={onUpdate} />
+    }
+    const { rerender } = render(<Harness currentConfig={config} />)
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    const draft = RAW + ' '
+    const textarea = configContent()
+    const draft = `${RAW} `
     setContent(textarea, draft)
 
-    const newerConfig = makeOpenCodeConfigFile({ rawContent: RAW, revision: 'rev-2', updatedAt: 2 })
-    rerender(<OpenCodeConfigEditor config={newerConfig} isOpen onClose={onClose} onUpdate={onUpdate} />)
+    rerender(<Harness currentConfig={makeOpenCodeConfigFile({ rawContent: RAW, revision: 'rev-2', updatedAt: 2 })} />)
 
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ content: draft, source: 'opencode.json', expectedRevision: 'rev-1' })
     })
@@ -476,26 +487,31 @@ describe('OpenCodeConfigEditor', () => {
       new FetchError('Conflict', 409, 'CONFIG_CONFLICT', 'This configuration changed since you opened it.'),
     )
     const onClose = vi.fn()
-    const { rerender } = render(
-      <OpenCodeConfigEditor config={multiSourceConfig} isOpen onClose={onClose} onUpdate={onUpdate} />,
-    )
+    function Harness({ currentConfig }: { currentConfig: ReturnType<typeof makeOpenCodeConfigFile> }) {
+      return <OpenCodeConfigEditor config={currentConfig} isOpen onClose={onClose} onUpdate={onUpdate} />
+    }
+    const { rerender } = render(<Harness currentConfig={multiSourceConfig} />)
     const user = userEvent.setup()
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    const draft = JSONC_RAW + '\n// draft\n'
+    const textarea = configContent()
+    const draft = `${JSONC_RAW}\n// draft\n`
     setContent(textarea, draft)
 
-    const sourceRemovedConfig = makeOpenCodeConfigFile({
-      path: '/workspace/.config/opencode/opencode.json',
-      rawContent: RAW,
-      revision: 'rev-3',
-      updatedAt: 3,
-      sources: [
-        makeOpenCodeConfigSource({ name: 'opencode.json', path: '/workspace/.config/opencode/opencode.json', rawContent: RAW }),
-      ],
-    })
-    rerender(<OpenCodeConfigEditor config={sourceRemovedConfig} isOpen onClose={onClose} onUpdate={onUpdate} />)
+    rerender(
+      <Harness
+        currentConfig={makeOpenCodeConfigFile({
+          path: '/workspace/.config/opencode/opencode.json',
+          rawContent: RAW,
+          revision: 'rev-3',
+          updatedAt: 3,
+          sources: [
+            makeOpenCodeConfigSource({ name: 'opencode.json', path: '/workspace/.config/opencode/opencode.json', rawContent: RAW }),
+          ],
+        })}
+      />,
+    )
 
     await user.click(screen.getByRole('button', { name: 'Update' }))
+
     await waitFor(() => {
       expect(onUpdate).toHaveBeenCalledWith({ content: draft, source: 'opencode.jsonc', expectedRevision: 'rev-2' })
     })
@@ -506,13 +522,14 @@ describe('OpenCodeConfigEditor', () => {
 
   it('hides the multi-source notice for a single config source', () => {
     renderEditor()
+
     expect(screen.queryByText('Multiple configuration files are merged')).not.toBeInTheDocument()
   })
 
   it('renders the merged notice expanded with its body visible', () => {
     renderEditor({ config: multiSourceConfig })
 
-    const details = screen.getByText('Multiple configuration files are merged').closest('details') as HTMLDetailsElement
+    const details = detailsFor('Multiple configuration files are merged')
     expect(details).toHaveAttribute('open')
     const paragraphs = Array.from(details.querySelectorAll('p'))
     expect(paragraphs).toHaveLength(3)
@@ -526,7 +543,7 @@ describe('OpenCodeConfigEditor', () => {
     renderEditor({ config: multiSourceConfig })
 
     const title = screen.getByText('Multiple configuration files are merged')
-    const details = title.closest('details') as HTMLDetailsElement
+    const details = detailsFor('Multiple configuration files are merged')
     expect(title).toBeVisible()
     const paragraphs = Array.from(details.querySelectorAll('p'))
     expect(paragraphs).toHaveLength(3)
@@ -547,23 +564,20 @@ describe('OpenCodeConfigEditor', () => {
 
   it('keeps the merged notice collapsed when the config refreshes', async () => {
     const user = userEvent.setup()
-    const { rerender, onClose, onUpdate } = renderEditor({ config: multiSourceConfig })
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    function Harness({ currentConfig }: { currentConfig: ReturnType<typeof makeOpenCodeConfigFile> }) {
+      return <OpenCodeConfigEditor config={currentConfig} isOpen onClose={onClose} onUpdate={onUpdate} />
+    }
+    const { rerender } = render(<Harness currentConfig={multiSourceConfig} />)
 
     const title = screen.getByText('Multiple configuration files are merged')
     await user.click(title)
     expect(title.closest('details')).not.toHaveAttribute('open')
 
-    const refreshedConfig = makeOpenCodeConfigFile({
-      ...multiSourceConfig,
-      revision: 'rev-3',
-      updatedAt: 2,
-    })
-    rerender(
-      <OpenCodeConfigEditor config={refreshedConfig} isOpen onClose={onClose} onUpdate={onUpdate} />,
-    )
+    rerender(<Harness currentConfig={makeOpenCodeConfigFile({ ...multiSourceConfig, revision: 'rev-3', updatedAt: 2 })} />)
 
-    const refreshedTitle = screen.getByText('Multiple configuration files are merged')
-    const refreshedDetails = refreshedTitle.closest('details') as HTMLDetailsElement
+    const refreshedDetails = detailsFor('Multiple configuration files are merged')
     expect(refreshedDetails).not.toHaveAttribute('open')
     const refreshedParagraphs = Array.from(refreshedDetails.querySelectorAll('p'))
     expect(refreshedParagraphs).toHaveLength(3)
@@ -575,35 +589,32 @@ describe('OpenCodeConfigEditor', () => {
   it('lists merged config files and names the selected source as the write target', () => {
     renderEditor({ config: multiSourceConfig })
 
-    const notice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]') as HTMLElement
-    expect(notice).toBeInTheDocument()
+    const notice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]')
+    if (!(notice instanceof HTMLElement)) throw new Error('notice not found')
     expect(notice).toHaveTextContent('opencode.json, opencode.jsonc')
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
     expect(notice).toHaveTextContent('For simpler configuration, consolidate the settings you need into one file, then remove redundant files after verifying the result.')
-
-    const scrollContainer = notice.closest('.overflow-y-auto')
-    expect(scrollContainer).toHaveClass('max-h-[45dvh]')
+    expect(notice.closest('.overflow-y-auto')).toHaveClass('max-h-[45dvh]')
   })
 
   it('updates the write target when the source selection changes', async () => {
     renderEditor({ config: multiSourceConfig })
     const user = userEvent.setup()
 
-    const notice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]') as HTMLElement
+    const notice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]')
     expect(notice).toHaveTextContent('Saves apply only to opencode.jsonc')
 
     await user.click(screen.getByRole('combobox', { name: 'Source file' }))
     await user.click(screen.getByRole('option', { name: 'opencode.json' }))
 
-    const updatedNotice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]') as HTMLElement
+    const updatedNotice = screen.getByText('Multiple configuration files are merged').closest('[role="alert"]')
     expect(updatedNotice).toHaveTextContent('Saves apply only to opencode.json')
   })
 
   it('shows the file details disclosure expanded for a single source', () => {
     renderEditor()
 
-    const details = screen.getByText('File details').closest('details') as HTMLDetailsElement
-    expect(details).toHaveAttribute('open')
+    expect(detailsFor('File details')).toHaveAttribute('open')
     expect(screen.getByText('/workspace/.config/opencode/opencode.json')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Download' })).toBeVisible()
     expect(screen.getByText(/Editing this file directly/)).toBeVisible()
@@ -614,7 +625,7 @@ describe('OpenCodeConfigEditor', () => {
     renderEditor()
 
     const summary = screen.getByText('File details')
-    const details = summary.closest('details') as HTMLDetailsElement
+    const details = detailsFor('File details')
 
     await user.click(summary)
 
@@ -622,7 +633,7 @@ describe('OpenCodeConfigEditor', () => {
     expect(screen.getByText('/workspace/.config/opencode/opencode.json')).not.toBeVisible()
     expect(screen.getByText(/Editing this file directly/)).not.toBeVisible()
     expect(screen.getByRole('button', { name: 'Download' })).not.toBeVisible()
-    expect(screen.getByLabelText('Config content')).toBeVisible()
+    expect(configContent()).toBeVisible()
     expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled()
   })
 
@@ -631,7 +642,7 @@ describe('OpenCodeConfigEditor', () => {
     renderEditor()
 
     const summary = screen.getByText('File details')
-    const details = summary.closest('details') as HTMLDetailsElement
+    const details = detailsFor('File details')
 
     await user.click(summary)
     expect(details).not.toHaveAttribute('open')
@@ -646,8 +657,9 @@ describe('OpenCodeConfigEditor', () => {
     renderEditor()
 
     const label = screen.getByText('File details')
-    const details = label.closest('details') as HTMLDetailsElement
-    const summary = label.closest('summary') as HTMLElement
+    const details = detailsFor('File details')
+    const summary = label.closest('summary')
+    if (!(summary instanceof HTMLElement)) throw new Error('summary not found')
     expect(summary).toBeInTheDocument()
 
     summary.focus()
@@ -662,33 +674,34 @@ describe('OpenCodeConfigEditor', () => {
 
   it('keeps the file details collapsed while editing and when the config refreshes', async () => {
     const user = userEvent.setup()
-    const { rerender, onClose, onUpdate } = renderEditor()
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    function Harness({ currentConfig }: { currentConfig: ReturnType<typeof makeOpenCodeConfigFile> }) {
+      return <OpenCodeConfigEditor config={currentConfig} isOpen onClose={onClose} onUpdate={onUpdate} />
+    }
+    const { rerender } = render(<Harness currentConfig={config} />)
 
     const summary = screen.getByText('File details')
     await user.click(summary)
     expect(summary.closest('details')).not.toHaveAttribute('open')
 
-    const textarea = screen.getByLabelText('Config content') as HTMLTextAreaElement
-    setContent(textarea, RAW + ' ')
+    setContent(configContent(), `${RAW} `)
+    rerender(<Harness currentConfig={makeOpenCodeConfigFile({ rawContent: RAW, revision: 'rev-2', updatedAt: 2 })} />)
 
-    const refreshedConfig = makeOpenCodeConfigFile({ rawContent: RAW, revision: 'rev-2', updatedAt: 2 })
-    rerender(<OpenCodeConfigEditor config={refreshedConfig} isOpen onClose={onClose} onUpdate={onUpdate} />)
-
-    const refreshedDetails = screen.getByText('File details').closest('details') as HTMLDetailsElement
-    expect(refreshedDetails).not.toHaveAttribute('open')
+    expect(detailsFor('File details')).not.toHaveAttribute('open')
     expect(screen.getByText('/workspace/.config/opencode/opencode.json')).not.toBeVisible()
-    expect(screen.getByLabelText('Config content')).toBeVisible()
+    expect(configContent()).toBeVisible()
   })
 
   it('keeps the merged notice chevron tied to its own disclosure', () => {
     renderEditor({ config: multiSourceConfig })
 
-    const noticeDetails = screen.getByText('Multiple configuration files are merged').closest('details') as HTMLDetailsElement
-    const chevron = noticeDetails.querySelector('svg') as SVGElement
+    const noticeDetails = detailsFor('Multiple configuration files are merged')
+    const chevron = noticeDetails.querySelector('svg')
     expect(chevron).toHaveClass('group-open:rotate-180')
     expect(chevron).not.toHaveClass('group-open/file-details:rotate-180')
 
-    const fileDetails = screen.getByText('File details').closest('details') as HTMLDetailsElement
+    const fileDetails = detailsFor('File details')
     expect(fileDetails).toHaveClass('group/file-details')
     expect(fileDetails).not.toHaveClass('group')
   })

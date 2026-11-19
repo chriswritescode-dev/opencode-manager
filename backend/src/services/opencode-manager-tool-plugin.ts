@@ -12,6 +12,7 @@ import {
   WalkthroughSourceSchema,
   walkthroughSourceKey,
 } from '@opencode-manager/shared/schemas'
+import { JsonObjectSchema } from '@opencode-manager/shared/utils'
 
 const MANAGER_TOOL_REQUEST_TIMEOUT_MS = 60000
 
@@ -72,7 +73,7 @@ const ManagerToolRequestParamsSchema = z
   .object({
     method: z.enum(MANAGER_TOOL_ALLOWED_METHODS).describe('The HTTP method for the internal API route.'),
     path: z.string().min(1).max(500).describe('The internal API route path, such as /settings or /repos/0/schedules. Query strings are allowed.'),
-    body: z.record(z.string(), z.unknown()).optional().describe('The JSON request body, for POST and PATCH routes.'),
+    body: JsonObjectSchema.optional().describe('The JSON request body, for POST and PATCH routes.'),
   })
   .strict()
   .describe('Call an allow-listed OpenCode Manager internal API route.')
@@ -84,7 +85,20 @@ const ManagerToolWalkthroughParamsSchema = z
   .strict()
   .describe("Start a separate walkthrough session that builds an interactive walkthrough UI for this session's changes and waits until it is ready, which can take several minutes. It opens in the user's Manager walkthrough panel when this session is open on desktop; otherwise the user can open it from this tool call.")
 
-const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[number], z.ZodType> = {
+interface ManagerToolActionRequiredKeys {
+  [action: string]: string[]
+}
+
+interface ManagerToolActionParamSchemas {
+  send_notification: z.ZodType
+  request: z.ZodType
+  open_walkthrough: z.ZodType
+  show_artifact: z.ZodType
+  walkthrough_changes: z.ZodType
+  publish_walkthrough: z.ZodType
+}
+
+const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: ManagerToolActionParamSchemas = {
   send_notification: ManagerToolNotificationParamsSchema,
   request: ManagerToolRequestParamsSchema,
   open_walkthrough: ManagerToolWalkthroughParamsSchema,
@@ -93,7 +107,12 @@ const MANAGER_TOOL_ACTION_PARAMS_SCHEMAS: Record<(typeof MANAGER_TOOL_ACTIONS)[n
   publish_walkthrough: PublishWalkthroughParamsSchema.describe('Publish the walkthrough HTML file you wrote so the Manager walkthrough panel renders it.'),
 }
 
-export function parseAllowedRoute(route: string): { method: string; path: string } {
+interface AllowedRoute {
+  method: string
+  path: string
+}
+
+export function parseAllowedRoute(route: string): AllowedRoute {
   const separator = route.indexOf(' ')
   return { method: route.slice(0, separator), path: route.slice(separator + 1) }
 }
@@ -109,13 +128,15 @@ function buildRouteMatchers(): { method: string; source: string }[] {
   })
 }
 
+const jsonSchemaRequiredKeysSchema = z.object({ required: z.array(z.string()).optional() })
+
 function requiredKeysOf(schema: z.ZodType): string[] {
-  const jsonSchema = z.toJSONSchema(schema) as { required?: string[] }
-  return jsonSchema.required ?? []
+  const jsonSchema = jsonSchemaRequiredKeysSchema.safeParse(z.toJSONSchema(schema))
+  return jsonSchema.success ? jsonSchema.data.required ?? [] : []
 }
 
-function buildManagerToolInputJsonSchema(): Record<string, unknown> {
-  const jsonSchema: Record<string, unknown> = z.toJSONSchema(
+function buildManagerToolInputJsonSchema() {
+  const jsonSchema = z.toJSONSchema(
     z
       .object({
         action: z.enum(MANAGER_TOOL_ACTIONS).describe('The OpenCode Manager action to perform.'),
@@ -136,8 +157,12 @@ function buildManagerToolInputJsonSchema(): Record<string, unknown> {
   return jsonSchema
 }
 
-function buildManagerToolActionRequiredKeys(): Record<string, string[]> {
-  return Object.fromEntries(MANAGER_TOOL_ACTIONS.map((name) => [name, requiredKeysOf(MANAGER_TOOL_ACTION_PARAMS_SCHEMAS[name])]))
+function buildManagerToolActionRequiredKeys(): ManagerToolActionRequiredKeys {
+  const requiredKeys: ManagerToolActionRequiredKeys = {}
+  for (const action of MANAGER_TOOL_ACTIONS) {
+    requiredKeys[action] = requiredKeysOf(MANAGER_TOOL_ACTION_PARAMS_SCHEMAS[action])
+  }
+  return requiredKeys
 }
 
 function buildManagerToolDescription(): string {
@@ -157,7 +182,6 @@ function buildManagerToolDescription(): string {
     .join('\n')
 }
 
-/** Builds the standalone manager plugin with API actions and mobile session hooks. */
 export function buildManagerToolPluginSource(id: string): string {
   return `var REQUEST_TIMEOUT_MS = ${MANAGER_TOOL_REQUEST_TIMEOUT_MS}
 

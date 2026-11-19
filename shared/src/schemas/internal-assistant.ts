@@ -83,10 +83,6 @@ export const AssistantNotificationResponseSchema = z.object({
   noSubscriptions: z.boolean(),
 })
 
-// NOTE: These are defined as plain z.object (not .pick() from the full schemas)
-// so that .default() values from the source schemas are NOT inherited. A patch
-// like { voice: 'nova' } must produce only { voice: 'nova' } in the parsed output,
-// not { voice: 'nova', provider: 'external', autoPlay: false }.
 export const AssistantTTSPatchSchema = z.object({
   enabled: z.boolean(),
   provider: z.enum(['external', 'builtin']),

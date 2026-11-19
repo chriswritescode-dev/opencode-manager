@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { runCommand } from '@/api/opencode'
 import type { PromptAgentInput, PromptFileInput, PromptSkillInput } from '@/api/opencode'
-import { useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { useSyncSessionSelection } from '@/hooks/useOpenCode'
 import { showToast } from '@/lib/toast'
 import type { CommandInfo, ModelRef } from '@opencode-manager/shared/opencode'
@@ -52,9 +52,9 @@ export function useCommandHandler({
           sessionID,
           name: command.name,
           text: submission.text,
-          ...(submission.files ? { files: submission.files } : {}),
-          ...(submission.agents ? { agents: submission.agents } : {}),
-          ...(submission.skills ? { skills: submission.skills } : {}),
+          files: submission.files,
+          agents: submission.agents,
+          skills: submission.skills,
         },
         serverId,
       )

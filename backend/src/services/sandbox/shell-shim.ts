@@ -15,39 +15,25 @@ export const SANDBOX_SHELL_ENV_WORKDIR = 'OCM_SANDBOX_WORKDIR'
 
 export const SANDBOX_SHELL_ENV_NAME = 'OCM_SANDBOX_NAME'
 
-/**
- * Space-separated allow-list of variable names the shim forwards from its own
- * environment into the microVM with `msb exec -e`. The plugin pins it from the
- * sandbox plan, so only names the plan approved reach a sandboxed command; the
- * guest environment is otherwise empty.
- */
 export const SANDBOX_SHELL_ENV_FORWARD = 'OCM_SANDBOX_FORWARD_ENV'
 
-/**
- * Upper bound on `http.<host>.extraheader` pairs the planner forwards into the
- * microVM. Credentials are configured per host, so this bounds the number of
- * distinct git hosts a sandboxed command can authenticate against.
- */
 export const SANDBOX_MAX_FORWARDED_GIT_CONFIGS = 16
 
 const SANDBOX_CONTROL_ENV_CASE_PATTERN = SANDBOX_CONTROL_ENV_PREFIXES.map((prefix) => `${prefix}*`).join('|')
 
-/**
- * Drops `http.<host>.extraheader` pairs beyond the forwarding cap, so the
- * guest never sees a `GIT_CONFIG_COUNT` that overstates the pairs actually
- * present. A count larger than the pairs in the environment makes git fail
- * outright.
- */
-export function limitForwardedGitConfigs(env: Record<string, string>): {
+interface ForwardedGitConfigLimit {
   env: Record<string, string>
   dropped: number
-} {
+}
+
+export function limitForwardedGitConfigs(env: Record<string, string>): ForwardedGitConfigLimit {
   const count = Number(env.GIT_CONFIG_COUNT ?? '0')
   if (!Number.isFinite(count) || count <= SANDBOX_MAX_FORWARDED_GIT_CONFIGS) {
     return { env, dropped: 0 }
   }
 
-  const limited: Record<string, string> = { ...env, GIT_CONFIG_COUNT: String(SANDBOX_MAX_FORWARDED_GIT_CONFIGS) }
+  const limited = Object.fromEntries(Object.entries(env))
+  limited.GIT_CONFIG_COUNT = String(SANDBOX_MAX_FORWARDED_GIT_CONFIGS)
   for (let index = SANDBOX_MAX_FORWARDED_GIT_CONFIGS; index < count; index++) {
     delete limited[`GIT_CONFIG_KEY_${index}`]
     delete limited[`GIT_CONFIG_VALUE_${index}`]

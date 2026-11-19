@@ -1,25 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { ClientError, openCodeLocation, type OpenCodeApi } from '@opencode-manager/shared/opencode'
+import {
+  ClientError,
+  openCodeLocation,
+  type ConfigEntry,
+  type OpenCodeApi,
+} from '@opencode-manager/shared/opencode'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 import { readManagedOpenCodeConfig, readOpenCodeConfigDocuments } from '../../src/services/opencode-config-effective'
 
-function stubApi(entries: unknown[]) {
-  const get = vi.fn(async () => entries)
-  return { api: { config: { get } } as unknown as OpenCodeApi, get }
+function stubApi(entries: ConfigEntry[]) {
+  const get = vi.fn<OpenCodeApi['config']['get']>(async () => entries)
+  const client = createStubOpenCodeClient({ api: { config: { get } } })
+  return { api: client.api, get }
 }
 
 describe('readOpenCodeConfigDocuments', () => {
   it('keys document entries by resolved path for the requested directory', async () => {
     const { api, get } = stubApi([
-      { type: 'document', path: '/directory/./opencode.json', info: { theme: 'dark' } },
-      { type: 'document', info: { theme: 'pathless' } },
-      { type: 'directory', path: '/directory' },
+      { type: 'document', path: '/directory/./opencode.json', info: { shell: 'bash' } },
+      { type: 'document', info: { shell: 'pathless' } },
     ])
 
     const documents = await readOpenCodeConfigDocuments(api, '/directory')
 
     expect([...documents.keys()]).toEqual(['/directory/opencode.json'])
-    expect(documents.get('/directory/opencode.json')).toEqual({ theme: 'dark' })
+    expect(documents.get('/directory/opencode.json')).toEqual({ shell: 'bash' })
     expect(get).toHaveBeenCalledWith(openCodeLocation('/directory'))
   })
 })
@@ -30,16 +36,15 @@ describe('readManagedOpenCodeConfig', () => {
       {
         type: 'document',
         path: '/workspace/config/opencode.json',
-        info: { theme: 'light', mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } },
+        info: { shell: 'bash', mcp: { servers: { local: { type: 'local', command: ['npx', 'local'] } } } },
       },
       {
         type: 'document',
         path: '/workspace/config/opencode.jsonc',
-        info: { theme: 'dark', mcp: { servers: { remote: { type: 'remote', url: 'https://remote.example.com' } } } },
+        info: { update: 'auto', mcp: { servers: { remote: { type: 'remote', url: 'https://remote.example.com' } } } },
       },
-      { type: 'document', path: '/workspace/unmanaged/opencode.json', info: { theme: 'ignored' } },
-      { type: 'document', info: { theme: 'pathless' } },
-      { type: 'directory', path: '/workspace/config' },
+      { type: 'document', path: '/workspace/unmanaged/opencode.json', info: { shell: 'ignored' } },
+      { type: 'document', info: { shell: 'pathless' } },
     ])
 
     const info = await readManagedOpenCodeConfig(api, [
@@ -48,7 +53,8 @@ describe('readManagedOpenCodeConfig', () => {
     ])
 
     expect(info).toEqual({
-      theme: 'dark',
+      shell: 'bash',
+      update: 'auto',
       mcp: {
         servers: {
           local: { type: 'local', command: ['npx', 'local'] },
@@ -64,13 +70,13 @@ describe('readManagedOpenCodeConfig', () => {
       {
         type: 'document',
         path: '/workspace/config/./opencode.json',
-        info: { theme: 'dark' },
+        info: { shell: 'bash' },
       },
     ])
 
     await expect(
       readManagedOpenCodeConfig(api, [{ path: '/workspace/config/opencode.json' }]),
-    ).resolves.toEqual({ theme: 'dark' })
+    ).resolves.toEqual({ shell: 'bash' })
   })
 
   it('returns the converted v1 entries the server reports for a Manager file', async () => {
@@ -89,7 +95,7 @@ describe('readManagedOpenCodeConfig', () => {
 
   it('returns an empty config when no reported document matches a Manager source', async () => {
     const { api } = stubApi([
-      { type: 'document', path: '/workspace/other/opencode.json', info: { theme: 'dark' } },
+      { type: 'document', path: '/workspace/other/opencode.json', info: { shell: 'bash' } },
     ])
 
     await expect(
@@ -98,13 +104,13 @@ describe('readManagedOpenCodeConfig', () => {
   })
 
   it('propagates client errors', async () => {
-    const get = vi.fn(async () => {
+    const get = vi.fn<OpenCodeApi['config']['get']>(async () => {
       throw new ClientError('Transport')
     })
-    const api = { config: { get } } as unknown as OpenCodeApi
+    const client = createStubOpenCodeClient({ api: { config: { get } } })
 
     await expect(
-      readManagedOpenCodeConfig(api, [{ path: '/workspace/config/opencode.json' }]),
+      readManagedOpenCodeConfig(client.api, [{ path: '/workspace/config/opencode.json' }]),
     ).rejects.toBeInstanceOf(ClientError)
   })
 })

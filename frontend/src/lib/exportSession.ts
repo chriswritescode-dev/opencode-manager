@@ -147,10 +147,15 @@ export async function downloadMarkdown(content: string, filename: string): Promi
   return saveFile(new Blob([content], { type: 'text/markdown' }), filename)
 }
 
+export interface ExportedSession {
+  filename: string
+  content: string
+}
+
 export function exportSession(
   messages: SessionMessageInfo[],
   session: Session
-): { filename: string; content: string } {
+): ExportedSession {
   const markdown = generateSessionMarkdown(messages, session)
   const titlePart = session.title ? sanitizeFilename(session.title) : 'session'
   const filename = `${titlePart}-${session.id}.md`

@@ -1,15 +1,33 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { JsonValueSchema } from '@opencode-manager/shared/utils'
+import { OAuthAuthorizeResponseSchema, OAuthAttemptStatusSchema } from '@opencode-manager/shared/schemas'
+import type { JsonValue } from '@opencode-manager/shared/utils'
+import { readJson } from '../../test/helpers/read-json'
 import { createOAuthRoutes } from './oauth'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import { FetchOpenCodeClient } from '../services/opencode/client'
 import { resolveOpenCode2Binary, startOpenCodeServe } from '../../test/helpers/opencode-binary'
 import { buildOpenCodeBasicAuth, ClientError } from '@opencode-manager/shared/opencode'
-import type { IntegrationInfo, IntegrationKeyMethod, IntegrationMethod, IntegrationOAuthMethod } from '@opencode-manager/shared/opencode'
-import type { OAuthAttemptStatus, OAuthAuthorizeResponse } from '@opencode-manager/shared/schemas'
+import type { IntegrationInfo, IntegrationMethod } from '@opencode-manager/shared/opencode'
 import type { OpenCodeClient } from '../services/opencode/client'
 
 const LOCATION = { directory: '/tmp/repo' }
+
+const AuthMethodsResponseSchema = z.object({
+  providers: z.record(z.string(), z.array(JsonValueSchema)),
+})
+
+const StubMethodBodySchema = z.object({
+  id: z.string().optional(),
+  type: z.string(),
+  form: z.array(z.object({ key: z.string() })).optional(),
+})
+
+const IntegrationCatalogueSchema = z.object({
+  providers: z.record(z.string(), z.array(StubMethodBodySchema)),
+})
 
 function taggedError(tag: string, message: string): Error {
   return Object.assign(new Error(message), { _tag: tag })
@@ -31,7 +49,7 @@ function integrationFixture(overrides: Partial<IntegrationInfo> = {}): Integrati
   }
 }
 
-function authorizeRequest(app: Hono, providerId = 'github-copilot', body: unknown = { methodID: 'device' }) {
+function authorizeRequest(app: Hono, providerId: string = 'github-copilot', body: JsonValue = { methodID: 'device' }) {
   return app.request(`/oauth/${providerId}/oauth/authorize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -39,7 +57,7 @@ function authorizeRequest(app: Hono, providerId = 'github-copilot', body: unknow
   })
 }
 
-function callbackRequest(app: Hono, providerId = 'github-copilot', body: unknown = { attemptID: 'con_stub' }) {
+function callbackRequest(app: Hono, providerId: string = 'github-copilot', body: JsonValue = { attemptID: 'con_stub' }) {
   return app.request(`/oauth/${providerId}/oauth/callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -106,7 +124,7 @@ describe('oauth routes /auth-methods', () => {
     const res = await createOAuthApp(client).request('/oauth/auth-methods')
 
     expect(res.status).toBe(200)
-    const data = (await res.json()) as { providers: Record<string, unknown> }
+    const data = await readJson(res, AuthMethodsResponseSchema)
     expect(data.providers).toEqual({
       'github-copilot': [oauthMethod, envMethod],
       azure: [keyMethod],
@@ -182,7 +200,7 @@ describe('oauth routes /:id/oauth/authorize', () => {
     const res = await authorizeRequest(createOAuthApp(client))
 
     expect(res.status).toBe(200)
-    expect(((await res.json()) as OAuthAuthorizeResponse).attemptID).toBe('con_stub')
+    expect((await readJson(res, OAuthAuthorizeResponseSchema)).attemptID).toBe('con_stub')
     expect(connect).toHaveBeenCalledTimes(2)
     expect(vi.mocked(client.api.integration.get)).toHaveBeenCalledWith({ integrationID: 'github-copilot' })
   })
@@ -355,11 +373,9 @@ describe.skipIf(!openCodeBinary)('oauth routes against a real OpenCode 2 server'
 
       const methodsResponse = await app.request('/oauth/auth-methods')
       expect(methodsResponse.status).toBe(200)
-      const { providers } = (await methodsResponse.json()) as {
-        providers: Record<string, IntegrationMethod[]>
-      }
+      const { providers } = await readJson(methodsResponse, IntegrationCatalogueSchema)
       const device = providers['github-copilot']?.find(
-        (method): method is IntegrationOAuthMethod => method.type === 'oauth' && method.id === 'device',
+        (method) => method.type === 'oauth' && method.id === 'device',
       )
       expect(device?.form?.map((field) => field.key)).toEqual(['deploymentType', 'enterpriseUrl'])
       expect(
@@ -367,9 +383,7 @@ describe.skipIf(!openCodeBinary)('oauth routes against a real OpenCode 2 server'
           method.type === 'oauth' || method.type === 'command' ? method.id : method.type,
         ),
       ).toEqual(['key', 'env', 'device'])
-      const azureKey = providers.azure?.find(
-        (method): method is IntegrationKeyMethod => method.type === 'key',
-      )
+      const azureKey = providers.azure?.find((method) => method.type === 'key')
       expect(azureKey?.form?.map((field) => field.key)).toEqual(['resourceName'])
 
       const authorizeResponse = await app.request('/oauth/github-copilot/oauth/authorize', {
@@ -378,13 +392,13 @@ describe.skipIf(!openCodeBinary)('oauth routes against a real OpenCode 2 server'
         body: JSON.stringify({ methodID: 'device', answer: { deploymentType: 'github.com' } }),
       })
       expect(authorizeResponse.status).toBe(200)
-      const attempt = (await authorizeResponse.json()) as OAuthAuthorizeResponse
+      const attempt = await readJson(authorizeResponse, OAuthAuthorizeResponseSchema)
       expect(attempt.mode).toBe('auto')
       expect(attempt.url).toContain('github.com/login/device')
 
       const statusResponse = await app.request(`/oauth/github-copilot/oauth/${attempt.attemptID}`)
       expect(statusResponse.status).toBe(200)
-      expect((await statusResponse.json()) as OAuthAttemptStatus).toEqual({ status: 'pending' })
+      expect(await readJson(statusResponse, OAuthAttemptStatusSchema)).toEqual({ status: 'pending' })
 
       const cancelResponse = await app.request(`/oauth/github-copilot/oauth/${attempt.attemptID}`, {
         method: 'DELETE',

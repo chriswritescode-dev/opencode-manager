@@ -17,7 +17,6 @@ export interface SessionDetailsSheetProps {
   branch?: string | null
   directory?: string
   onRename: (title: string) => Promise<void>
-  /** Deletes the open session, when the caller supports it. */
   onDeleteSession?: () => Promise<void>
 }
 

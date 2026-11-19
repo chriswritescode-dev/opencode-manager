@@ -3,9 +3,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
+import { z } from 'zod'
 import { CopyButton } from '@/components/ui/copy-button'
 import { MarkdownLink } from '@/components/ui/markdown-link'
 import { MarkdownImage } from '@/components/ui/markdown-image'
+import { readFailureMessage } from '@/components/jsonValue'
 import { useTheme } from '@/hooks/useTheme'
 import { getWorkspaceFilePath } from '@/lib/markdownLinks'
 import { markdownRehypePlugins, markdownUrlTransform } from '@/lib/markdownRehypePlugins'
@@ -51,16 +53,9 @@ function MermaidBlock({ code }: MermaidBlockProps) {
       if (currentAttempt === renderAttempt.current && result?.svg) {
         setSvg(result.svg)
       }
-    } catch (err: unknown) {
+    } catch (caught) {
       if (currentAttempt === renderAttempt.current) {
-        let message = 'Failed to render diagram'
-        if (err instanceof Error) {
-          message = err.message
-        } else if (typeof err === 'string') {
-          message = err
-        } else if (err && typeof err === 'object' && 'message' in err) {
-          message = String((err as { message: unknown }).message)
-        }
+        const message = readFailureMessage(caught) ?? 'Failed to render diagram'
         setError(message)
         setSvg(null)
       }
@@ -145,29 +140,26 @@ function MermaidBlock({ code }: MermaidBlockProps) {
 
 interface CodeBlockProps {
   children?: React.ReactNode
-  className?: string
-  [key: string]: unknown
 }
 
-function CodeBlock({ children, className, ...props }: CodeBlockProps) {
-  const extractTextContent = (node: React.ReactNode): string => {
-    if (typeof node === 'string') return node
-    if (typeof node === 'number') return node.toString()
-    if (Array.isArray(node)) return node.map(extractTextContent).join('')
-    if (React.isValidElement(node)) {
-      const element = node as React.ReactElement<Record<string, unknown>>
-      if (element.props.children) {
-        return extractTextContent(element.props.children as React.ReactNode)
-      }
+function extractTextContent(node: React.ReactNode): string {
+  const primitive = z.union([z.string(), z.number()]).safeParse(node)
+  if (primitive.success) return String(primitive.data)
+  if (Array.isArray(node)) return node.map(extractTextContent).join('')
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    if (node.props.children) {
+      return extractTextContent(node.props.children)
     }
-    return ''
   }
-  
+  return ''
+}
+
+function CodeBlock({ children }: CodeBlockProps) {
   const codeContent = extractTextContent(children)
 
   return (
     <div className="relative">
-      <pre className={`bg-accent py-1 pl-1 pr-10 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4 ${className || ''}`} {...props}>
+      <pre className="bg-accent py-1 pl-1 pr-10 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4">
         {children}
       </pre>
       <CopyButton content={codeContent} title="Copy code" className="absolute top-2 right-2" />
@@ -209,19 +201,7 @@ export function TextPart({ text, onFileClick, directory }: TextPartProps) {
             const isInline = !className || !className.includes('language-')
             
             if (className?.includes('language-mermaid') && mermaidComplete) {
-              const extractText = (n: React.ReactNode): string => {
-                if (typeof n === 'string') return n
-                if (typeof n === 'number') return n.toString()
-                if (Array.isArray(n)) return n.map(extractText).join('')
-                if (React.isValidElement(n)) {
-                  const el = n as React.ReactElement<{ children?: React.ReactNode }>
-                  if (el.props.children) {
-                    return extractText(el.props.children)
-                  }
-                }
-                return ''
-              }
-              const mermaidCode = extractText(children)
+              const mermaidCode = extractTextContent(children)
               return <MermaidBlock code={mermaidCode} />
             }
             

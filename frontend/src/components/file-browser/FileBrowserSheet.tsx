@@ -1,4 +1,5 @@
 import { useEffect, useState, memo, useCallback, useRef } from 'react'
+import { z } from 'zod'
 import { createPortal } from 'react-dom'
 import { FileBrowser, type FileBrowserHandle } from './FileBrowser'
 import { getRepoRelativeDisplayPath } from './display-path'
@@ -18,6 +19,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+
+const editModeChangeSchema = z.object({ isEditing: z.boolean() })
 
 interface FileBrowserSheetProps {
   isOpen: boolean
@@ -98,19 +101,21 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
       }
     }
 
-    const handleEditModeChange = (event: CustomEvent<{ isEditing: boolean }>) => {
-      setIsEditing(event.detail.isEditing)
+    const handleEditModeChange = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return
+      const parsedEditMode = editModeChangeSchema.safeParse(event.detail)
+      if (parsedEditMode.success) setIsEditing(parsedEditMode.data.isEditing)
     }
 
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
-      document.addEventListener('editModeChange', handleEditModeChange as EventListener)
+      document.addEventListener('editModeChange', handleEditModeChange)
       document.body.style.overflow = 'hidden'
     }
 
     return () => {
       document.removeEventListener('keydown', handleEscape)
-      document.removeEventListener('editModeChange', handleEditModeChange as EventListener)
+      document.removeEventListener('editModeChange', handleEditModeChange)
       document.body.style.overflow = 'unset'
     }
   }, [isOpen, onClose, isPreviewOpen])
@@ -120,6 +125,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
   return createPortal(
     <div
       ref={containerRef}
+      data-testid="file-browser-sheet"
       className="fixed inset-0 z-50"
       style={{
         opacity: isOpen ? 1 : 0,
@@ -166,6 +172,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
                 <Button
                   variant="ghost"
                   size="icon"
+                  aria-label="Close file browser"
                   onClick={onClose}
                   className="text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
                 >

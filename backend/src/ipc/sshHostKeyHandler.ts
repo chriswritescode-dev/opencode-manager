@@ -1,14 +1,34 @@
 import * as path from 'path'
+import { z } from 'zod'
+import { type JsonValue } from '@opencode-manager/shared/utils'
 import * as fs from 'fs/promises'
 import * as crypto from 'crypto'
-import type { IPCHandler } from './ipcServer'
+import type { IPCHandler, IpcEnvironment } from './ipcServer'
 import type { Database } from 'bun:sqlite'
 import { logger } from '../utils/logger'
+import { getErrorMessage } from '../utils/error-utils'
+import { selectRow, selectRows } from '../db/rows'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { broadcastSSHHostKeyRequest } from '../services/sse-aggregator'
 import { executeCommand } from '../utils/process'
 import { parseSSHHost, normalizeHostPort } from '../utils/ssh-key-manager'
 import { mkdirSafe } from '../utils/fs-safe'
+
+const SSHHostKeyResponseSchema = z.object({
+  requestId: z.string(),
+  response: z.enum(['accept', 'reject']),
+})
+
+const TrustedHostPublicKeyRowSchema = z.object({
+  public_key: z.string(),
+})
+
+const TrustedHostKeySchema = z.object({
+  key_type: z.string(),
+  public_key: z.string(),
+})
+
+type TrustedHostKey = z.infer<typeof TrustedHostKeySchema>
 
 interface SSHHostKeyRequest {
   id: string
@@ -92,8 +112,8 @@ export class SSHHostKeyHandler implements IPCHandler {
 
         this.pendingRequests.set(requestId, { request: hostKeyRequest, resolve, timeout })
       })
-    } catch (error) {
-      logger.warn(`Failed to fetch host key for ${hostPort}, rejecting connection:`, (error as Error).message)
+    } catch (cause) {
+      logger.warn(`Failed to fetch host key for ${hostPort}, rejecting connection:`, getErrorMessage(cause))
       return false
     }
   }
@@ -119,8 +139,8 @@ export class SSHHostKeyHandler implements IPCHandler {
     const result = await executeCommand(
       ['ssh-keyscan', '-t', 'ed25519,rsa,ecdsa', ...portArgs, host],
       { silent: true, ignoreExitCode: true }
-    ) as string | { exitCode: number; stdout: string; stderr: string }
-    const output = typeof result === 'string' ? result : result.stdout
+    )
+    const output = result.stdout
     const bracketedHost = port && port !== '22' ? `[${host}]:${port}` : host
     const lines = output.trim().split('\n')
     for (const line of lines) {
@@ -132,9 +152,8 @@ export class SSHHostKeyHandler implements IPCHandler {
     throw new Error('No valid host keys found')
   }
 
-  async handle(request: unknown): Promise<unknown> {
-    const response = request as { requestId: string; response: 'accept' | 'reject' }
-    return await this.respond(response)
+  async handle(payload: JsonValue): Promise<JsonValue> {
+    return await this.respond(SSHHostKeyResponseSchema.parse(payload))
   }
 
   async respond(response: { requestId: string; response: 'accept' | 'reject' }): Promise<{ success: boolean; error?: string }> {
@@ -169,14 +188,7 @@ export class SSHHostKeyHandler implements IPCHandler {
 
   private async loadFromDatabaseToKnownHosts(): Promise<void> {
     try {
-      const hosts = this.database.prepare('SELECT * FROM trusted_ssh_hosts').all() as Array<{
-        id: number
-        host: string
-        key_type: string
-        public_key: string
-        created_at: number
-        updated_at: number
-      }>
+      const hosts = selectRows(this.database, TrustedHostPublicKeyRowSchema, 'SELECT * FROM trusted_ssh_hosts')
 
       const entries = hosts.map(h => h.public_key).join('\n')
       await fs.writeFile(this.knownHostsPath, entries + '\n', { mode: 0o600 })
@@ -186,13 +198,15 @@ export class SSHHostKeyHandler implements IPCHandler {
     }
   }
 
-  private getTrustedHost(host: string): { key_type: string; public_key: string } | null {
+  private getTrustedHost(host: string): TrustedHostKey | null {
     try {
-      const result = this.database.prepare('SELECT key_type, public_key FROM trusted_ssh_hosts WHERE host = ?').get(host) as {
-        key_type: string
-        public_key: string
-      } | undefined
-      return result || null
+      const result = selectRow(
+        this.database,
+        TrustedHostKeySchema,
+        'SELECT key_type, public_key FROM trusted_ssh_hosts WHERE host = ?',
+        host,
+      )
+      return result ?? null
     } catch (error) {
       logger.error(`Failed to get trusted host ${host}:`, error)
       return null
@@ -229,7 +243,7 @@ export class SSHHostKeyHandler implements IPCHandler {
     return this.knownHostsPath
   }
 
-  getEnv(): Record<string, string> {
+  getEnv(): IpcEnvironment {
     return {
       KNOWN_HOSTS_PATH: this.knownHostsPath
     }

@@ -1,25 +1,16 @@
-/* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
-import type { KeyboardShortcutAction } from '@/api/types/settings'
 import { findShortcutAction, formatShortcutEvent, hasCommandModifier, resolveShortcutBindings } from '@/lib/keyboardShortcuts'
 import { isPromptInput, isTextEntryElement } from '@/lib/domTargets'
 import { hasOpenOverlay } from '@/lib/overlayFocus'
+import {
+  KeyboardShortcutsRegistryContext,
+  type ShortcutRegistry,
+} from './keyboard-shortcuts-context'
+
+export type { ShortcutActions } from './keyboard-shortcuts-context'
 
 const LEADER_TIMEOUT = 2000
-
-export type ShortcutActions = Partial<Record<KeyboardShortcutAction, () => void>>
-
-interface ShortcutLayer {
-  actionsRef: { current: ShortcutActions }
-}
-
-interface ShortcutRegistry {
-  global: ShortcutLayer[]
-  page: ShortcutLayer[]
-}
-
-const KeyboardShortcutsRegistryContext = createContext<ShortcutRegistry | null>(null)
 
 const PROMPT_ONLY_DIRECT_ACTIONS: ReadonlySet<string> = new Set(['toggleMode', 'clearPrompt'])
 
@@ -29,14 +20,7 @@ function typesCharacter(shortcut: string): boolean {
   return !hasCommandModifier(shortcut) && /(^|\+).$/.test(shortcut)
 }
 
-/**
- * Whether a direct shortcut may run for this focus target. Prompt-only actions (agent cycling, prompt clearing) run only
- * from the prompt and never on a key that types a character. `submit` runs only from the prompt, so a submit bound to
- * plain Enter sends the prompt without hijacking Enter on buttons or other fields. Half-page scrolling runs only from the
- * prompt or a non-text target, so it never hijacks Ctrl+U/Ctrl+D inside another text field. `abort` runs from the prompt
- * or with no text field focused; other text inputs only accept modified shortcuts.
- */
-function isDirectActionAllowed(action: string, shortcut: string, target: HTMLElement): boolean {
+function isDirectActionAllowed(action: string, shortcut: string, target: Element): boolean {
   if (PROMPT_ONLY_DIRECT_ACTIONS.has(action)) return isPromptInput(target) && !typesCharacter(shortcut)
   if (action === 'submit') return isPromptInput(target)
   if (HALF_PAGE_DIRECT_ACTIONS.has(action)) return isPromptInput(target) || !isTextEntryElement(target)
@@ -49,9 +33,12 @@ function isTerminalTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-terminal-id]') !== null
 }
 
-function findLayerHandler(layers: ShortcutLayer[], action: string): (() => void) | undefined {
+function findLayerHandler(
+  layers: ShortcutRegistry['page'],
+  action: string,
+): (() => void) | undefined {
   for (let index = layers.length - 1; index >= 0; index -= 1) {
-    const handler = layers[index].actionsRef.current[action as KeyboardShortcutAction]
+    const handler = layers[index].actionsRef.current[action]
     if (handler) return handler
   }
   return undefined
@@ -101,8 +88,9 @@ export function KeyboardShortcutsProvider({ children }: { children: ReactNode })
       const shortcut = formatShortcutEvent(e)
       if (!shortcut) return false
 
-      const target = e.target as HTMLElement
-      if (target.closest?.('[data-file-editor="true"]')) return false
+      const target = e.target
+      if (!(target instanceof Element)) return false
+      if (target.closest('[data-file-editor="true"]')) return false
 
       const bindings = resolveShortcutBindings(preferencesRef.current)
 
@@ -153,25 +141,4 @@ export function KeyboardShortcutsProvider({ children }: { children: ReactNode })
       )}
     </KeyboardShortcutsRegistryContext.Provider>
   )
-}
-
-/**
- * Registers a layer of shortcut handlers for the lifetime of the calling component. Page layers take precedence over global
- * layers, and within a scope the newest layer wins; an action left `undefined` in a layer falls through to lower layers.
- */
-export function useShortcutActions(actions: ShortcutActions, scope: 'global' | 'page' = 'page'): void {
-  const registry = useContext(KeyboardShortcutsRegistryContext)
-  if (!registry) throw new Error('useShortcutActions must be used within a KeyboardShortcutsProvider')
-  const layerRef = useRef<ShortcutLayer>({ actionsRef: { current: actions } })
-  layerRef.current.actionsRef.current = actions
-
-  useEffect(() => {
-    const layers = scope === 'global' ? registry.global : registry.page
-    const layer = layerRef.current
-    layers.push(layer)
-    return () => {
-      const index = layers.indexOf(layer)
-      if (index >= 0) layers.splice(index, 1)
-    }
-  }, [registry, scope])
 }

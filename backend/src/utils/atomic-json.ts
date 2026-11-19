@@ -1,24 +1,34 @@
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { z, type ZodType } from 'zod'
+import type { JsonValue } from '@opencode-manager/shared/utils'
 import { logger } from './logger'
+import { getErrorMessage } from './error-utils'
 import { mkdirSafe } from './fs-safe'
 
 const fileLockPromises = new Map<string, Promise<unknown>>()
 
-export async function readJsonSafe<T>(filePath: string, fallback: T): Promise<T> {
+type JsonLike = JsonValue | undefined | { readonly [key: string]: JsonLike } | readonly JsonLike[]
+
+export async function readJsonSafe<Schema extends ZodType>(
+  filePath: string,
+  schema: Schema,
+  fallback: z.infer<Schema>,
+): Promise<z.infer<Schema>> {
   try {
     const content = await fs.readFile(filePath, 'utf8')
-    return JSON.parse(content) as T
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    const parsed = schema.safeParse(JSON.parse(content))
+    return parsed.success ? parsed.data : fallback
+  } catch (cause) {
+    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') {
       return fallback
     }
-    logger.warn(`Failed to read or parse JSON from ${filePath}: ${error instanceof Error ? error.message : String(error)}`)
+    logger.warn(`Failed to read or parse JSON from ${filePath}: ${getErrorMessage(cause)}`)
     return fallback
   }
 }
 
-export async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+export async function writeJsonAtomic(filePath: string, data: JsonLike): Promise<void> {
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}`
   try {
     await mkdirSafe(filePath.substring(0, filePath.lastIndexOf('/')))
@@ -47,5 +57,5 @@ export async function withFileLock<T>(filePath: string, fn: () => Promise<T>): P
   const newLock = previousLock ? previousLock.then(executeWithLock, executeWithLock) : executeWithLock()
   fileLockPromises.set(absolutePath, newLock)
 
-  return newLock as Promise<T>
+  return newLock
 }

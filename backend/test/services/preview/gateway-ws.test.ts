@@ -4,11 +4,15 @@ import { request as httpRequest } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { Hono } from 'hono'
 import { createNodeWebSocket } from '@hono/node-ws'
+import { z } from 'zod'
 import {
   createPreviewGatewayApp,
   PreviewSessionStore,
 } from '../../../src/services/preview/gateway'
+import { readJson } from '../../helpers/read-json'
 import { startWebSocketServer, type WebSocketTestServer } from '../../helpers/websocket-server'
+
+const ProxiedPathSchema = z.object({ path: z.string(), search: z.string() })
 
 class HandshakeError extends Error {
   constructor(readonly statusCode: number) {
@@ -56,21 +60,21 @@ class RawWebSocketClient {
 
   static connect(options: { port: number; path: string; protocol?: string; cookie?: string }): Promise<RawWebSocketClient> {
     return new Promise((resolve, reject) => {
-      const headers: Record<string, string> = {
+      const headers = new Headers({
         Connection: 'Upgrade',
         Upgrade: 'websocket',
         'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
         'Sec-WebSocket-Version': '13',
-      }
-      if (options.protocol) headers['Sec-WebSocket-Protocol'] = options.protocol
-      if (options.cookie) headers.Cookie = options.cookie
+      })
+      if (options.protocol) headers.set('Sec-WebSocket-Protocol', options.protocol)
+      if (options.cookie) headers.set('Cookie', options.cookie)
 
       const request = httpRequest({
         host: '127.0.0.1',
         port: options.port,
         path: options.path,
         method: 'GET',
-        headers,
+        headers: Object.fromEntries(headers),
       })
 
       let settled = false
@@ -174,7 +178,8 @@ upstreamApp.get(
     capturedProtocol = c.req.header('sec-websocket-protocol')
     return {
       onMessage(event, ws) {
-        if (typeof event.data === 'string') ws.send(event.data)
+        const text = z.string().safeParse(event.data)
+        if (text.success) ws.send(text.data)
       },
     }
   }),
@@ -235,7 +240,8 @@ describe('Preview Gateway WebSocket', () => {
     try {
       await RawWebSocketClient.connect({ port: gatewayPort, path: '/hmr', protocol: 'vite-hmr' })
     } catch (error) {
-      failure = error as HandshakeError
+      if (!(error instanceof HandshakeError)) throw error
+      failure = error
     }
 
     expect(failure).toBeInstanceOf(HandshakeError)
@@ -248,7 +254,7 @@ describe('Preview Gateway WebSocket', () => {
     const res = await fetch(`http://127.0.0.1:${gatewayPort}/echo?q=2`, { headers: { cookie } })
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { path: string; search: string }
+    const body = await readJson(res, ProxiedPathSchema)
     expect(body.path).toBe('/echo')
     expect(body.search).toBe('?q=2')
   })

@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
-import type { ReadableStream as WebReadableStream } from 'stream/web'
+import { z } from 'zod'
 import {
   buildOpenCodeReleaseAsset,
   compareOpenCodeVersions,
@@ -15,6 +15,7 @@ import {
   parseOpenCodeVersionOutput,
 } from '@opencode-manager/shared/opencode'
 import { mkdirSafe } from '../utils/fs-safe'
+import { JsonValueSchema, parseJsonObject, parseJsonString } from '@opencode-manager/shared/utils'
 import { getOpenCodeHome } from './opencode-home'
 
 const OPENCODE_REGISTRY_URL = 'https://registry.npmjs.org/@opencode/cli'
@@ -53,10 +54,12 @@ export interface OpenCodeRegistryOptions {
   now?: () => number
 }
 
-interface OpenCodeRegistry {
-  versions?: Record<string, unknown>
-  time?: Record<string, unknown>
-}
+const openCodeRegistrySchema = z.object({
+  versions: z.record(z.string(), JsonValueSchema).optional(),
+  time: z.record(z.string(), JsonValueSchema).optional(),
+})
+
+type OpenCodeRegistry = z.infer<typeof openCodeRegistrySchema>
 
 interface CachedOpenCodeReleases {
   releases: OpenCodeRelease[]
@@ -89,12 +92,16 @@ function isInstallableOpenCodeVersion(version: string): boolean {
   return isStableOpenCodeVersion(version) && isSupportedOpenCodeVersion(version)
 }
 
-async function fetchOpenCodeRegistryJson<T>(fetchFn: typeof fetch, url: string): Promise<T> {
+async function fetchOpenCodeRegistry(fetchFn: typeof fetch, url: string): Promise<OpenCodeRegistry> {
   const response = await fetchFn(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch OpenCode releases: registry responded with HTTP ${response.status}`)
   }
-  return await response.json() as T
+  const registry = openCodeRegistrySchema.safeParse(await response.json())
+  if (!registry.success) {
+    throw new Error('Failed to fetch OpenCode releases: registry responded with an unexpected body')
+  }
+  return registry.data
 }
 
 export function clearOpenCodeVersionCache(): void {
@@ -107,13 +114,13 @@ export async function listOpenCodeVersions(options: OpenCodeRegistryOptions = {}
     return cachedOpenCodeReleases.releases
   }
 
-  const registry = await fetchOpenCodeRegistryJson<OpenCodeRegistry>(options.fetch ?? fetch, OPENCODE_REGISTRY_URL)
-  const publishedTimes = registry.time ?? {}
+  const registry = await fetchOpenCodeRegistry(options.fetch ?? fetch, OPENCODE_REGISTRY_URL)
+  const publishedTimes = parseJsonObject(registry.time) ?? {}
   const releases = Object.keys(registry.versions ?? {})
     .filter(isInstallableOpenCodeVersion)
     .map((version) => ({
       version,
-      publishedAt: typeof publishedTimes[version] === 'string' ? publishedTimes[version] as string : null,
+      publishedAt: parseJsonString(publishedTimes[version]),
     }))
     .sort((left, right) => compareOpenCodeVersions(right.version, left.version))
 
@@ -123,7 +130,7 @@ export async function listOpenCodeVersions(options: OpenCodeRegistryOptions = {}
 
 async function downloadToFile(response: Response, filePath: string): Promise<void> {
   if (!response.body) throw new Error('OpenCode download returned an empty body')
-  await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), createWriteStream(filePath))
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(filePath))
 }
 
 export async function installOpenCodeVersion(

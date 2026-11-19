@@ -1,403 +1,262 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { useLocation, useNavigate } from 'react-router-dom'
+import type { ManagerLogEntry } from '@opencode-manager/shared/schemas'
 import { SettingsDialog } from './SettingsDialog'
-import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { stubMatchMedia } from '@/test/test-utils'
+import { renderWithProviders } from '@/test/render'
+import { LocationCatcher } from '@/test/test-components'
+import { makeHealthResponse } from '@/test/fixtures/api'
+import { installMatchMedia, installPointerCapture } from '@/test/browserFakes'
+import type { FetchRoute } from '@/test/fetchFake'
 
-vi.mock('@/components/settings/GeneralSettings', () => ({
-  GeneralSettings: () => (
-    <div data-testid="general-settings">
-      General Settings Content
-      <label htmlFor="settings-general-field">Appearance</label>
-      <input id="settings-general-field" data-testid="general-field" />
-    </div>
-  ),
-}))
+const logs: ManagerLogEntry[] = [
+  {
+    seq: 1,
+    timestamp: '2026-01-01T00:00:00.000Z',
+    level: 'info',
+    source: 'manager',
+    message: 'Server started on port 5003',
+  },
+]
 
-vi.mock('@/components/settings/GitSettings', () => ({
-  GitSettings: () => <div data-testid="git-settings">Git Settings Content</div>,
-}))
+const fetchRoutes: FetchRoute[] = [
+  { method: 'GET', path: '/api/auth/passkey/list-user-passkeys', respond: () => ({ json: [] }) },
+  { method: 'GET', path: '/api/auth/device-pairing/devices', respond: () => ({ json: { devices: [] } }) },
+  {
+    method: 'GET',
+    path: '/api/health/version',
+    respond: () => ({
+      json: { currentVersion: 'v1.2.3', latestVersion: null, updateAvailable: false, releaseUrl: null, releaseName: null },
+    }),
+  },
+  { method: 'GET', path: '/api/health', respond: () => ({ json: makeHealthResponse({ opencode: 'healthy' }) }) },
+  {
+    method: 'GET',
+    path: '/api/logs',
+    respond: () => ({
+      json: { entries: logs, instanceId: 'instance-1', latestSeq: 1, oldestSeq: 1, dropped: 0, capacity: 1000 },
+    }),
+  },
+  { method: 'GET', path: '/api/repos', respond: () => ({ json: [] }) },
+  { method: 'GET', path: '/api/providers/model-state', respond: () => ({ json: { recent: [], favorite: [], variant: {} } }) },
+  { method: 'GET', path: '/api/opencode/api/provider', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/model', respond: () => ({ json: { data: [] } }) },
+  { method: 'GET', path: '/api/opencode/api/config', respond: () => ({ json: {} }) },
+  { method: 'GET', path: '/api/opencode/api/model/default', respond: () => ({ json: { data: null } }) },
+]
 
-vi.mock('@/components/settings/KeyboardShortcuts', () => ({
-  KeyboardShortcuts: () => <div data-testid="shortcuts-settings">Keyboard Shortcuts Content</div>,
-}))
+interface DialogRenderOptions {
+  desktop?: boolean
+  initialEntries?: string[]
+}
 
-vi.mock('@/components/settings/OpenCodeConfigManager', () => ({
-  OpenCodeConfigManager: () => <div data-testid="opencode-settings">OpenCode Config Content</div>,
-}))
+function renderSettingsDialog({ desktop = false, initialEntries = ['/?settings=open'] }: DialogRenderOptions = {}) {
+  installMatchMedia(desktop)
+  installPointerCapture()
+  return renderWithProviders(<SettingsDialog />, { initialEntries, fetchRoutes })
+}
 
-vi.mock('@/components/settings/ProviderSettings', () => ({
-  ProviderSettings: () => <div data-testid="providers-settings">Provider Settings Content</div>,
-}))
+function mobileContainer(): HTMLElement {
+  const container = document.querySelector('.sm\\:hidden')
+  if (!(container instanceof HTMLElement)) throw new Error('No mobile settings container')
+  return container
+}
 
-vi.mock('@/components/settings/AccountSettings', () => ({
-  AccountSettings: () => <div data-testid="account-settings">Account Settings Content</div>,
-}))
-
-vi.mock('@/components/settings/VoiceSettings', () => ({
-  VoiceSettings: () => <div data-testid="voice-settings">Voice Settings Content</div>,
-}))
-
-vi.mock('@/components/settings/NotificationSettings', () => ({
-  NotificationSettings: () => <div data-testid="notification-settings">Notification Settings Content</div>,
-}))
-
-vi.mock('@/components/settings/VersionSelectDialog', () => ({
-  VersionSelectDialog: () => <div data-testid="version-select-dialog">Version Select Dialog</div>,
-}))
-
-vi.mock('@/components/settings/LogsViewer', () => ({
-  LogsViewer: () => <div data-testid="logs-settings">Logs Content</div>,
-}))
-
-vi.mock('@/hooks/useMobile', () => ({
-  useSwipeBack: vi.fn(() => ({
-    bind: vi.fn(),
-    swipeProgress: 0,
-    swipeStyles: {},
-  })),
-}))
+function SettingsNavigation() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button onClick={() => navigate('?settings=open&settingsTab=general')}>Open General</button>
+      <button onClick={() => navigate('?settings=open&settingsTab=git')}>Open Git</button>
+      <button onClick={() => navigate('?settings=open&settingsTab=logs')}>Open Logs</button>
+      <button onClick={() => navigate('?settings=open')}>Open Settings</button>
+      <button onClick={() => navigate('/')}>Close Settings</button>
+    </>
+  )
+}
 
 describe('SettingsDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    Reflect.deleteProperty(window, 'matchMedia')
-  })
-
-  it('resets to menu state when dialog closes and reopens', () => {
-    function TestWrapper() {
-      const location = useLocation()
-      const navigate = useNavigate()
-
-      const searchParams = new URLSearchParams(location.search)
-      const isOpen = searchParams.get('settings') === 'open'
-
-      return (
-        <>
-          <button onClick={() => navigate('?settings=open&settingsTab=general')}>Open Settings</button>
-          <button onClick={() => navigate('/')}>Close Settings</button>
-          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>
+  it('resets to the menu when the dialog closes and reopens', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <>
+        <SettingsNavigation />
+        <SettingsDialog />
+      </>,
+      { initialEntries: ['/'], fetchRoutes },
     )
 
-    fireEvent.click(screen.getByText('Open Settings'))
-    expect(screen.getByTestId('dialog-open')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open General' }))
+    expect(await screen.findByRole('heading', { name: 'General Preferences' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Close Settings'))
-    expect(screen.queryByTestId('dialog-open')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close Settings' }))
+    expect(screen.queryByRole('heading', { name: 'General Preferences' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Open Settings'))
-    expect(screen.getByTestId('dialog-open')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open Settings' }))
+
+    const mobile = within(mobileContainer())
+    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(mobile.getByText('General Settings')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'General Preferences' })).not.toBeInTheDocument()
   })
 
-  it('displays menu items in mobile view', () => {
-    function TestWrapper() {
-      const location = useLocation()
+  it('lists every settings section in the mobile menu', async () => {
+    renderSettingsDialog({ initialEntries: ['/?settings=open'] })
+
+    const mobile = within(mobileContainer())
+    expect(await mobile.findByRole('heading', { name: 'Settings', level: 2 })).toBeInTheDocument()
+    ;['Account', 'General Settings', 'Notifications', 'Voice', 'Git', 'Keyboard Shortcuts', 'Servers', 'OpenCode Config', 'Logs', 'Providers'].forEach((label) => {
+      expect(mobile.getByText(label)).toBeInTheDocument()
+    })
+    expect(mobile.getByText('Live manager and OpenCode server logs')).toBeInTheDocument()
+    expect(mobile.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+  })
+
+  it('opens the menu without a section when opened through the settings action', async () => {
+    function SettingsAction() {
       const navigate = useNavigate()
-
-      const searchParams = new URLSearchParams(location.search)
-      const isOpen = searchParams.get('settings') === 'open'
-
+      const location = useLocation()
       return (
         <>
           <button onClick={() => navigate('?settings=open')}>Open Settings</button>
-          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByText('Open Settings'))
-    expect(screen.getByTestId('dialog-open')).toBeInTheDocument()
-
-    expect(screen.getAllByText('Account').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('General Settings').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Git').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Keyboard Shortcuts').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('OpenCode Config').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Providers').length).toBeGreaterThanOrEqual(1)
-
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
-    expect(mobile.queryByTestId('logs-settings')).not.toBeInTheDocument()
-  })
-
-  it('shows the mobile settings menu when opened through the settings action', () => {
-    function TestWrapper() {
-      const { open } = useSettingsDialog()
-      const location = useLocation()
-
-      return (
-        <>
-          <button onClick={open}>Open Settings</button>
           <span data-testid="location-search">{location.search}</span>
-          <SettingsDialog />
         </>
       )
     }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>,
+    renderWithProviders(
+      <>
+        <SettingsAction />
+        <SettingsDialog />
+      </>,
+      { initialEntries: ['/'], fetchRoutes },
     )
 
-    fireEvent.click(screen.getByText('Open Settings'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }))
 
+    expect(await within(mobileContainer()).findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByTestId('location-search')).toHaveTextContent('settings=open')
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('settingsTab')
-
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
-    expect(mobile.queryByTestId('account-settings')).not.toBeInTheDocument()
   })
 
-  it('navigates to the Logs section and reflects settingsTab=logs in the URL', () => {
-    function TestWrapper() {
-      const location = useLocation()
-      const navigate = useNavigate()
-
-      const searchParams = new URLSearchParams(location.search)
-      const isOpen = searchParams.get('settings') === 'open'
-
-      return (
-        <>
-          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
-          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
-          {isOpen && <span data-testid="location-search">{location.search}</span>}
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByText('Open Settings'))
-
-    const logsMenuButton = screen.getByText('Live manager and OpenCode server logs').closest('button')
-    expect(logsMenuButton).not.toBeNull()
-    fireEvent.click(logsMenuButton!)
-
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    expect(within(mobileContainer).getByTestId('logs-settings')).toBeInTheDocument()
-    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
-  })
-
-  it('opens the deep-linked settingsTab on mobile and returns to the menu from it', () => {
-    stubMatchMedia(false)
-    function TestWrapper() {
-      const location = useLocation()
-
-      return (
-        <>
-          <span data-testid="location-search">{location.search}</span>
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=logs']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
-
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-
-    expect(mobile.getByTestId('logs-settings')).toBeInTheDocument()
-    expect(mobile.getByRole('heading', { name: 'Logs' })).toBeInTheDocument()
-    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
-
-    const backButton = mobileContainer.querySelector('svg.lucide-chevron-left')?.closest('button')
-    expect(backButton).not.toBeNull()
-    fireEvent.click(backButton!)
-
-    expect(mobile.queryByTestId('logs-settings')).not.toBeInTheDocument()
-    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-    expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
-  })
-
-  it('switches the mobile section when the settingsTab param changes while open', () => {
-    stubMatchMedia(false)
-    function TestWrapper() {
-      const navigate = useNavigate()
-
-      return (
-        <>
-          <button onClick={() => navigate('?settings=open')}>Open Settings</button>
-          <button onClick={() => navigate('?settings=open&settingsTab=git')}>Open Git</button>
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByText('Open Settings'))
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('Open Git'))
-    expect(mobile.getByTestId('git-settings')).toBeInTheDocument()
-    expect(mobile.getByRole('heading', { name: 'Git' })).toBeInTheDocument()
-  })
-
-  it('mounts exactly one LogsViewer on desktop when the Logs tab is selected', () => {
-    stubMatchMedia(true)
-    function TestWrapper() {
-      const location = useLocation()
-      const navigate = useNavigate()
-
-      const searchParams = new URLSearchParams(location.search)
-      const isOpen = searchParams.get('settings') === 'open'
-
-      return (
-        <>
-          <button onClick={() => navigate('?settings=open&settingsTab=logs')}>Open Logs</button>
-          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByText('Open Logs'))
-
-    expect(screen.getAllByTestId('logs-settings')).toHaveLength(1)
-    expect(document.querySelector('.sm\\:hidden')).toBeNull()
-  })
-
-  it('mounts the deep-linked tab content once on desktop', () => {
-    stubMatchMedia(true)
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=general']}>
+  it('navigates to the Logs section and reflects settingsTab=logs in the URL', async () => {
+    const user = userEvent.setup()
+    const capturedSearch = { current: '' }
+    renderWithProviders(
+      <>
+        <LocationCatcher capturedSearch={capturedSearch} />
+        <SettingsNavigation />
         <SettingsDialog />
-      </MemoryRouter>
+      </>,
+      { initialEntries: ['/'], fetchRoutes },
     )
 
-    expect(screen.getAllByTestId('general-settings')).toHaveLength(1)
-    expect(document.querySelectorAll('#settings-general-field')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Open Settings' }))
+    await user.click(screen.getByRole('button', { name: /Live manager and OpenCode server logs/ }))
+
+    const mobile = within(mobileContainer())
+    expect(mobile.getByRole('heading', { name: 'Logs' })).toBeInTheDocument()
+    expect(await mobile.findByText('Server started on port 5003')).toBeInTheDocument()
+    await act(async () => {
+      expect(capturedSearch.current).toContain('settingsTab=logs')
+    })
+  })
+
+  it('opens the deep-linked settings tab on mobile and returns to the menu from it', async () => {
+    const user = userEvent.setup()
+    renderSettingsDialog({ initialEntries: ['/?settings=open&settingsTab=logs'] })
+
+    const mobile = within(mobileContainer())
+    expect(await mobile.findByText('Server started on port 5003')).toBeInTheDocument()
+    expect(mobile.getByRole('heading', { name: 'Logs' })).toBeInTheDocument()
+
+    await user.click(mobile.getByRole('button', { name: 'Back' }))
+
+    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(mobile.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
+  })
+
+  it('switches the mobile section when the settingsTab param changes while open', async () => {
+    const user = userEvent.setup()
+    const capturedSearch = { current: '' }
+    renderWithProviders(
+      <>
+        <LocationCatcher capturedSearch={capturedSearch} />
+        <SettingsNavigation />
+        <SettingsDialog />
+      </>,
+      { initialEntries: ['/?settings=open'], fetchRoutes },
+    )
+
+    const mobile = within(mobileContainer())
+    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Open Git' }))
+
+    expect(await mobile.findByRole('heading', { name: 'Git Configuration' })).toBeInTheDocument()
+    expect(capturedSearch.current).toContain('settingsTab=git')
+  })
+
+  it('mounts exactly one Logs viewer on desktop when the Logs tab is selected', async () => {
+    renderSettingsDialog({ desktop: true, initialEntries: ['/?settings=open&settingsTab=logs'] })
+
+    expect(await screen.findByText('Server started on port 5003')).toBeInTheDocument()
+    expect(screen.getAllByText('Server started on port 5003')).toHaveLength(1)
     expect(document.querySelector('.sm\\:hidden')).toBeNull()
   })
 
-  it('falls back to the menu for an unknown settingsTab value', () => {
-    function TestWrapper() {
-      const location = useLocation()
-      const isOpen = new URLSearchParams(location.search).get('settings') === 'open'
-      return (
-        <>
-          {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
-          <SettingsDialog />
-        </>
-      )
-    }
+  it('mounts the deep-linked tab content once on desktop', async () => {
+    renderSettingsDialog({ desktop: true, initialEntries: ['/?settings=open&settingsTab=general'] })
 
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=log']}>
-        <TestWrapper />
-      </MemoryRouter>
-    )
+    expect(await screen.findByRole('heading', { name: 'General Preferences' })).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'General Preferences' })).toHaveLength(1)
+    expect(document.querySelectorAll('#appearance')).toHaveLength(1)
+    expect(document.querySelector('.sm\\:hidden')).toBeNull()
+  })
 
-    expect(screen.getByTestId('dialog-open')).toBeInTheDocument()
+  it('falls back to the menu for an unknown settingsTab value on mobile', async () => {
+    renderSettingsDialog({ initialEntries: ['/?settings=open&settingsTab=log'] })
 
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-    expect(mobile.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    const mobile = within(mobileContainer())
+    expect(await mobile.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
     expect(mobile.getByText('Live manager and OpenCode server logs')).toBeInTheDocument()
-    expect(mobile.queryByTestId('logs-settings')).not.toBeInTheDocument()
-    expect(mobileContainer.querySelector('svg.lucide-chevron-left')).toBeNull()
-
+    expect(mobile.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 
-  it('selects the account tab on desktop for an unknown settingsTab value', () => {
-    stubMatchMedia(true)
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=log']}>
-        <SettingsDialog />
-      </MemoryRouter>
-    )
+  it('selects the account tab on desktop for an unknown settingsTab value', async () => {
+    renderSettingsDialog({ desktop: true, initialEntries: ['/?settings=open&settingsTab=log'] })
 
-    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('data-state', 'active')
+    expect(await screen.findByRole('tab', { name: 'Account' })).toHaveAttribute('data-state', 'active')
+    expect(await screen.findByText('Profile')).toBeInTheDocument()
     expect(document.querySelector('.sm\\:hidden')).toBeNull()
   })
 
-  it('mounts a deep-linked mobile section once and keeps label associations', () => {
-    stubMatchMedia(false)
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=general']}>
-        <SettingsDialog />
-      </MemoryRouter>
-    )
+  it('mounts a deep-linked mobile section once and keeps label associations', async () => {
+    renderSettingsDialog({ initialEntries: ['/?settings=open&settingsTab=general'] })
 
-    expect(screen.getAllByTestId('general-settings')).toHaveLength(1)
-    expect(document.querySelectorAll('#settings-general-field')).toHaveLength(1)
-
-    const mobileContainer = document.querySelector('.sm\\:hidden') as HTMLElement
-    const mobile = within(mobileContainer)
-    const mobileField = mobile.getByTestId('general-field')
-    const label = mobile.getByText('Appearance') as HTMLLabelElement
-    expect(label.control).toBe(mobileField)
-    expect(document.getElementById('settings-general-field')).toBe(mobileField)
+    const mobile = within(mobileContainer())
+    const appearance = await mobile.findByRole('combobox', { name: 'Appearance' })
+    expect(mobile.getAllByRole('combobox', { name: 'Appearance' })).toHaveLength(1)
+    expect(document.querySelectorAll('#appearance')).toHaveLength(1)
+    expect(document.getElementById('appearance')).toBe(appearance)
   })
 
   it('renders a vertical desktop sidebar driven by menu items with URL and keyboard navigation', async () => {
-    stubMatchMedia(true)
-    function TestWrapper() {
-      const location = useLocation()
-      return (
-        <>
-          <span data-testid="location-search">{location.search}</span>
-          <SettingsDialog />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter initialEntries={['/?settings=open']}>
-        <TestWrapper />
-      </MemoryRouter>
+    installMatchMedia(true)
+    installPointerCapture()
+    const capturedSearch = { current: '' }
+    renderWithProviders(
+      <>
+        <LocationCatcher capturedSearch={capturedSearch} />
+        <SettingsDialog />
+      </>,
+      { initialEntries: ['/?settings=open'], fetchRoutes },
     )
 
+    await screen.findByText('Profile')
     const tablist = screen.getByRole('tablist')
     expect(tablist).toHaveAttribute('aria-orientation', 'vertical')
 
@@ -408,7 +267,7 @@ describe('SettingsDialog', () => {
 
     const logsTrigger = screen.getByRole('tab', { name: 'Logs' })
     fireEvent.mouseDown(logsTrigger)
-    expect(screen.getByTestId('location-search')).toHaveTextContent('settingsTab=logs')
+    expect(capturedSearch.current).toContain('settingsTab=logs')
 
     const gitTrigger = screen.getByRole('tab', { name: 'Git' })
     act(() => {
@@ -421,8 +280,8 @@ describe('SettingsDialog', () => {
     expect(screen.getByRole('tab', { name: 'Keyboard Shortcuts' })).toHaveFocus()
   })
 
-  it('keeps Settings open when Escape fires inside a nested dialog', () => {
-    function TestWrapper() {
+  it('keeps Settings open when Escape fires inside a nested dialog', async () => {
+    function NestedDialog() {
       const location = useLocation()
       const settingsOpen = new URLSearchParams(location.search).get('settings') === 'open'
       return (
@@ -438,14 +297,9 @@ describe('SettingsDialog', () => {
         </>
       )
     }
+    renderWithProviders(<NestedDialog />, { initialEntries: ['/?settings=open'], fetchRoutes })
 
-    render(
-      <MemoryRouter initialEntries={['/?settings=open']}>
-        <TestWrapper />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByTestId('settings-open')).toBeInTheDocument()
+    expect(await screen.findByTestId('settings-open')).toBeInTheDocument()
 
     const nestedInput = screen.getByTestId('nested-input')
     nestedInput.focus()
@@ -455,7 +309,7 @@ describe('SettingsDialog', () => {
   })
 
   it('keeps Settings open when Escape closes an open Select', async () => {
-    function TestWrapper() {
+    function OpenSelect() {
       const location = useLocation()
       const settingsOpen = new URLSearchParams(location.search).get('settings') === 'open'
       return (
@@ -474,22 +328,17 @@ describe('SettingsDialog', () => {
         </>
       )
     }
-
-    render(
-      <MemoryRouter initialEntries={['/?settings=open&settingsTab=general']}>
-        <TestWrapper />
-      </MemoryRouter>,
-    )
+    renderWithProviders(<OpenSelect />, { initialEntries: ['/?settings=open&settingsTab=general'], fetchRoutes })
 
     const listbox = await screen.findByRole('listbox')
     fireEvent.keyDown(listbox, { key: 'Escape' })
 
-    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(screen.getByTestId('settings-open')).toBeInTheDocument()
   })
 
-  it('closes Settings on Escape when no dropdown or nested dialog is open', () => {
-    function TestWrapper() {
+  it('closes Settings on Escape when no dropdown or nested dialog is open', async () => {
+    function EscapeTarget() {
       const location = useLocation()
       const settingsOpen = new URLSearchParams(location.search).get('settings') === 'open'
       return (
@@ -499,14 +348,9 @@ describe('SettingsDialog', () => {
         </>
       )
     }
+    renderWithProviders(<EscapeTarget />, { initialEntries: ['/?settings=open'], fetchRoutes })
 
-    render(
-      <MemoryRouter initialEntries={['/?settings=open']}>
-        <TestWrapper />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByTestId('settings-open')).toBeInTheDocument()
+    expect(await screen.findByTestId('settings-open')).toBeInTheDocument()
 
     fireEvent.keyDown(document.body, { key: 'Escape' })
 

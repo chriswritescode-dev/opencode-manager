@@ -19,13 +19,19 @@ const SPEECH_PEAK_THRESHOLD = 0.02
 
 type AudioContextConstructor = new () => AudioContext
 
+declare global {
+  interface Window {
+    webkitAudioContext?: AudioContextConstructor
+  }
+}
+
 function selectMimeType(): string | undefined {
   return PREFERRED_MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type))
 }
 
 function getAudioContextConstructor(): AudioContextConstructor | null {
-  if (typeof window === 'undefined') return null
-  return window.AudioContext ?? (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext ?? null
+  if (!('window' in globalThis)) return null
+  return window.AudioContext ?? window.webkitAudioContext ?? null
 }
 
 async function blobHasSpeech(blob: Blob, AudioContextClass: AudioContextConstructor): Promise<boolean> {
@@ -73,12 +79,12 @@ export class AudioRecorder {
   private onNoSpeech?: () => void
 
   static isSupported(): boolean {
-    return !!(
-      typeof navigator !== 'undefined' &&
-      navigator.mediaDevices &&
-      typeof navigator.mediaDevices.getUserMedia === 'function' &&
-      typeof window !== 'undefined' &&
-      typeof window.MediaRecorder !== 'undefined'
+    return (
+      'navigator' in globalThis &&
+      globalThis.navigator.mediaDevices !== undefined &&
+      globalThis.navigator.mediaDevices.getUserMedia !== undefined &&
+      'window' in globalThis &&
+      window.MediaRecorder !== undefined
     )
   }
 

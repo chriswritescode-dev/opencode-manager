@@ -3,16 +3,15 @@ import { AssistantSettingsPatchSchema } from '@opencode-manager/shared/schemas'
 import type { SettingsService } from '../../services/settings'
 import type { SettingsResponse, UserPreferences } from '@opencode-manager/shared/types'
 import { OPENCODE_CONFIG_REDACTED_VALUE } from '../../services/opencode-config-file'
+import { parseJsonBody } from '../../utils/route-helpers'
 
-function redactSecret<T extends string | undefined>(value: T): T {
-  return (value ? OPENCODE_CONFIG_REDACTED_VALUE : value) as T
+function redactSecret(value: string): string
+function redactSecret(value: undefined): undefined
+function redactSecret(value: string | undefined): string | undefined
+function redactSecret(value: string | undefined): string | undefined {
+  return value ? OPENCODE_CONFIG_REDACTED_VALUE : value
 }
 
-/**
- * Replaces stored credentials in a settings response with `<redacted>` so token clients such as the
- * agent-facing `ocm` tool can read preferences without receiving secrets. Empty values stay empty, so a
- * caller can still tell whether a credential is configured.
- */
 function redactInternalSettings(settings: SettingsResponse): SettingsResponse {
   const { preferences } = settings
   return {
@@ -34,7 +33,9 @@ function redactInternalSettings(settings: SettingsResponse): SettingsResponse {
   }
 }
 
-export function createInternalSettingsRoutes(settingsService: SettingsService) {
+export type InternalSettingsRoutesService = Pick<SettingsService, 'getSettings' | 'updateSettings'>
+
+export function createInternalSettingsRoutes(settingsService: InternalSettingsRoutesService) {
   const app = new Hono()
 
   app.get('/', (c) => {
@@ -45,40 +46,29 @@ export function createInternalSettingsRoutes(settingsService: SettingsService) {
   app.patch('/', async (c) => {
     const userId = c.req.query('userId') ?? 'default'
 
-    let body: unknown
-    try {
-      body = await c.req.json()
-    } catch {
-      return c.json({ error: 'Invalid JSON' }, 400)
+    const body = await parseJsonBody(c, AssistantSettingsPatchSchema, { invalidBodyMessage: 'Invalid request body' })
+    if (!body.ok) {
+      return body.response
     }
 
-    const parsed = AssistantSettingsPatchSchema.safeParse(body)
-    if (!parsed.success) {
-      return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400)
-    }
-
-    const patch = parsed.data
+    const patch = body.data
     const currentPrefs = settingsService.getSettings(userId).preferences
-    const updates: Partial<UserPreferences> = {}
-    for (const key of Object.keys(patch)) {
-      if (key !== 'tts' && key !== 'stt') {
-        (updates as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key]
-      }
-    }
-    if (patch.tts) {
+    const { tts, stt, ...restPatch } = patch
+    const updates: Partial<UserPreferences> = { ...restPatch }
+    if (tts) {
       if (!currentPrefs.tts?.apiKey) {
         return c.json({ error: 'TTS is not configured. Set up TTS (including credentials) in the UI before adjusting it.' }, 400)
       }
-      updates.tts = { ...currentPrefs.tts, ...patch.tts }
+      updates.tts = { ...currentPrefs.tts, ...tts }
     }
-    if (patch.stt) {
+    if (stt) {
       if (!currentPrefs.stt?.apiKey) {
         return c.json({ error: 'STT is not configured. Set up STT (including credentials) in the UI before adjusting it.' }, 400)
       }
-      updates.stt = { ...currentPrefs.stt, ...patch.stt }
+      updates.stt = { ...currentPrefs.stt, ...stt }
     }
 
-    const updated = settingsService.updateSettings(updates as Partial<UserPreferences>, userId)
+    const updated = settingsService.updateSettings(updates, userId)
     return c.json(redactInternalSettings(updated))
   })
 

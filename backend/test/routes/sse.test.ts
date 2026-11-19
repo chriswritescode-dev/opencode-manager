@@ -1,37 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
-
-const sseMocks = vi.hoisted(() => ({
-  addClient: vi.fn(),
-  addDirectories: vi.fn(),
-  removeDirectories: vi.fn(),
-  setClientVisibility: vi.fn(),
-  getConnectionStatus: vi.fn(),
-  getClientCount: vi.fn(),
-  getActiveDirectories: vi.fn(),
-  getActiveSessions: vi.fn(),
-}))
-
-vi.mock('../../src/services/sse-aggregator', () => ({
-  sseAggregator: sseMocks,
-}))
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-    debug: vi.fn(),
-  },
-}))
-
-import { createSSERoutes } from '../../src/routes/sse'
-import { createAuthMiddleware } from '../../src/auth/middleware'
+import { z } from 'zod'
+import type { Session } from '../../src/auth'
+import type { V2Event } from '@opencode-manager/shared/opencode'
+import { createSSEAggregator, type SSEAggregator } from '../../src/services/sse-aggregator'
 import { closeSessionConnections } from '../../src/services/session-connections'
-import type { AuthInstance, Session } from '../../src/auth'
-import { encodeSSEFrame } from '../../src/utils/sse-frame'
+import { createSSERoutes } from '../../src/routes/sse'
+import { readJson } from '../helpers/read-json'
 
 const decoder = new TextDecoder()
+
+const ConnectedFrameSchema = z.object({
+  clientId: z.string(),
+  directories: z.array(z.string()),
+  connected: z.number(),
+  total: z.number(),
+})
+const SuccessResponseSchema = z.object({ success: z.boolean() })
+const ErrorResponseSchema = z.object({ success: z.boolean(), error: z.string() })
+const StatusResponseSchema = z.object({
+  connected: z.number(),
+  total: z.number(),
+  clients: z.number(),
+  directories: z.array(z.string()),
+  activeSessions: z.record(z.string(), z.array(z.string())),
+})
+
+const serverConnectedEvent = {
+  id: 'evt_connected',
+  type: 'server.connected',
+  data: {},
+} satisfies V2Event
 
 function createSession(sessionId: string): Session {
   return {
@@ -55,43 +54,49 @@ function createSession(sessionId: string): Session {
   }
 }
 
-function createAuthenticatedApp(sessionId: string) {
-  const app = new Hono<{ Variables: { session: Session['session']; user: Session['user'] } }>()
-  app.use('/*', createAuthMiddleware({
-    api: { getSession: async () => createSession(sessionId) },
-  } as unknown as AuthInstance))
-  app.route('/', createSSERoutes())
-  return app
+function responseReader(response: Response) {
+  if (!response.body) throw new Error('expected a streaming response body')
+  return response.body.getReader()
 }
 
-async function readChunk(reader: { read(): Promise<{ value?: Uint8Array }> }): Promise<string> {
-  const { value } = await reader.read()
+async function readFrame(reader: ReturnType<typeof responseReader>): Promise<string> {
+  const { value, done } = await reader.read()
+  if (done || value === undefined) throw new Error('expected an SSE frame')
   return decoder.decode(value)
 }
 
-describe('SSE Routes', () => {
+function parseConnectedFrame(frame: string) {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+  if (dataLine === undefined) throw new Error('expected a data line in the connected frame')
+  return ConnectedFrameSchema.parse(JSON.parse(dataLine.slice(6)))
+}
+
+describe('SSE routes', () => {
+  let aggregator: SSEAggregator
   let app: ReturnType<typeof createSSERoutes>
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    sseMocks.addClient.mockReturnValue(() => {})
-    sseMocks.addDirectories.mockReturnValue(true)
-    sseMocks.removeDirectories.mockReturnValue(true)
-    sseMocks.setClientVisibility.mockReturnValue(true)
-    sseMocks.getConnectionStatus.mockReturnValue({ connected: 1, total: 1 })
-    sseMocks.getClientCount.mockReturnValue(0)
-    sseMocks.getActiveDirectories.mockReturnValue([])
-    sseMocks.getActiveSessions.mockReturnValue({})
-
-    app = createSSERoutes()
+    aggregator = createSSEAggregator()
+    app = createSSERoutes(aggregator)
   })
 
-  describe('GET /stream', () => {
-    it('streams the connected frame and registers the client with parsed directories', async () => {
-      const cleanup = vi.fn()
-      sseMocks.addClient.mockReturnValue(cleanup)
-      sseMocks.getConnectionStatus.mockReturnValue({ connected: 1, total: 2 })
+  afterEach(() => {
+    aggregator.shutdown()
+    vi.restoreAllMocks()
+  })
 
+  function createSessionScopedApp(sessionId: string) {
+    const sessionApp = new Hono<{ Variables: { session: Session['session'] } }>()
+    sessionApp.use('/*', async (c, next) => {
+      c.set('session', createSession(sessionId).session)
+      await next()
+    })
+    sessionApp.route('/', createSSERoutes(aggregator))
+    return sessionApp
+  }
+
+  describe('GET /stream', () => {
+    it('streams the connected frame and registers the client with its directories', async () => {
       const res = await app.fetch(new Request('http://localhost/stream?directories=/one,/two,,/three'))
 
       expect(res.status).toBe(200)
@@ -100,87 +105,61 @@ describe('SSE Routes', () => {
       expect(res.headers.get('connection')).toBe('keep-alive')
       expect(res.headers.get('x-accel-buffering')).toBe('no')
 
-      const reader = res.body!.getReader()
+      const reader = responseReader(res)
       try {
-        const first = await readChunk(reader)
-        expect(first).toContain('event: connected')
-        expect(first).toContain('"directories":["/one","/two","/three"]')
-        expect(first).toContain('"connected":1')
-        expect(first).toContain('"total":2')
+        const connected = parseConnectedFrame(await readFrame(reader))
+        expect(connected.clientId).toMatch(/^client_\d+_[a-z0-9]+$/)
+        expect(connected.directories).toEqual(['/one', '/two', '/three'])
+        expect(connected.connected).toBe(0)
+        expect(connected.total).toBe(0)
+        expect(aggregator.getClientCount()).toBe(1)
+        expect(aggregator.hasClientDirectory(connected.clientId, '/two')).toBe(true)
 
-        const clientId = first.match(/"clientId":"([^"]+)"/)?.[1]
-        expect(clientId).toMatch(/^client_\d+_[a-z0-9]+$/)
+        aggregator.broadcastToAll('message', '{"from":"callback"}')
+        await expect(readFrame(reader)).resolves.toBe('event: message\ndata: {"from":"callback"}\n\n')
 
-        expect(sseMocks.addClient).toHaveBeenCalledTimes(1)
-        const [idArg, callbackArg, frameWriterArg, directoriesArg] = sseMocks.addClient.mock.calls[0] as [
-          string,
-          (event: string, data: string) => void,
-          (frame: Uint8Array) => void,
-          string[],
-        ]
-        expect(idArg).toBe(clientId)
-        expect(directoriesArg).toEqual(['/one', '/two', '/three'])
-
-        callbackArg('message', '{"from":"callback"}')
-        const second = await readChunk(reader)
-        expect(second).toBe('event: message\ndata: {"from":"callback"}\n\n')
-
-        frameWriterArg(encodeSSEFrame('message', '{"from":"frame"}'))
-        const third = await readChunk(reader)
-        expect(third).toBe('event: message\ndata: {"from":"frame"}\n\n')
+        aggregator.deliverRemoteEnvelope('srv_a', '/one', serverConnectedEvent)
+        const frame = await readFrame(reader)
+        expect(frame).toContain('event: message')
+        expect(frame).toContain('"serverId":"srv_a"')
       } finally {
         await reader.cancel()
       }
 
-      expect(cleanup).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(aggregator.getClientCount()).toBe(0))
     })
 
-    it('defaults directories to an empty array when the query is absent', async () => {
-      const cleanup = vi.fn()
-      sseMocks.addClient.mockReturnValue(cleanup)
-
+    it('registers no directories when the query is absent', async () => {
       const res = await app.fetch(new Request('http://localhost/stream'))
-      const reader = res.body!.getReader()
+
+      const reader = responseReader(res)
       try {
-        const first = await readChunk(reader)
-        expect(first).toContain('event: connected')
-        expect(first).toContain('"directories":[]')
+        await expect(readFrame(reader)).resolves.toContain('"directories":[]')
       } finally {
         await reader.cancel()
       }
 
-      expect(sseMocks.addClient).toHaveBeenCalledWith(
-        expect.stringMatching(/^client_/),
-        expect.any(Function),
-        expect.any(Function),
-        [],
-      )
-      expect(cleanup).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(aggregator.getClientCount()).toBe(0))
     })
 
     it('registers remote server directory keys unchanged', async () => {
       const directories = ['/local', 'srv_a|/remote', 'srv_b|/other']
       const res = await app.fetch(new Request(`http://localhost/stream?directories=${encodeURIComponent(directories.join(','))}`))
-      const reader = res.body!.getReader()
+
+      const reader = responseReader(res)
       try {
-        const first = await readChunk(reader)
-        expect(first).toContain(JSON.stringify(directories))
+        const connected = parseConnectedFrame(await readFrame(reader))
+        expect(connected.directories).toEqual(directories)
+        expect(aggregator.hasClientDirectory(connected.clientId, 'srv_a|/remote')).toBe(true)
       } finally {
         await reader.cancel()
       }
-
-      expect(sseMocks.addClient).toHaveBeenCalledWith(
-        expect.stringMatching(/^client_/),
-        expect.any(Function),
-        expect.any(Function),
-        directories,
-      )
     })
   })
 
   describe('POST /subscribe', () => {
     it('subscribes directories for an existing client', async () => {
-      sseMocks.addDirectories.mockReturnValue(true)
+      aggregator.addClient('client-1', () => {}, () => {}, [])
 
       const res = await app.fetch(new Request('http://localhost/subscribe', {
         method: 'POST',
@@ -189,27 +168,12 @@ describe('SSE Routes', () => {
       }))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.addDirectories).toHaveBeenCalledWith('client-1', ['/a', '/b'])
+      await expect(readJson(res, SuccessResponseSchema)).resolves.toEqual({ success: true })
+      expect(aggregator.hasClientDirectory('client-1', '/a')).toBe(true)
+      expect(aggregator.hasClientDirectory('client-1', '/b')).toBe(true)
     })
 
-    it('returns 400 for an invalid subscribe body', async () => {
-      const res = await app.fetch(new Request('http://localhost/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: '', directories: 'not-an-array' }),
-      }))
-
-      expect(res.status).toBe(400)
-      const json = await res.json() as { success: boolean; error: string }
-      expect(json.success).toBe(false)
-      expect(json.error).toBe('Invalid request')
-      expect(sseMocks.addDirectories).not.toHaveBeenCalled()
-    })
-
-    it('returns 404 when the client is not found', async () => {
-      sseMocks.addDirectories.mockReturnValue(false)
-
+    it('returns 404 when the client is not registered', async () => {
       const res = await app.fetch(new Request('http://localhost/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -217,13 +181,13 @@ describe('SSE Routes', () => {
       }))
 
       expect(res.status).toBe(404)
-      await expect(res.json()).resolves.toEqual({ success: false, error: 'Client not found' })
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ success: false, error: 'Client not found' })
     })
   })
 
   describe('POST /unsubscribe', () => {
-    it('unsubscribes directories for an existing client', async () => {
-      sseMocks.removeDirectories.mockReturnValue(true)
+    it('removes directories from an existing client', async () => {
+      aggregator.addClient('client-1', () => {}, () => {}, ['/a', '/b'])
 
       const res = await app.fetch(new Request('http://localhost/unsubscribe', {
         method: 'POST',
@@ -232,27 +196,12 @@ describe('SSE Routes', () => {
       }))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.removeDirectories).toHaveBeenCalledWith('client-1', ['/a'])
+      await expect(readJson(res, SuccessResponseSchema)).resolves.toEqual({ success: true })
+      expect(aggregator.hasClientDirectory('client-1', '/a')).toBe(false)
+      expect(aggregator.hasClientDirectory('client-1', '/b')).toBe(true)
     })
 
-    it('returns 400 for an invalid unsubscribe body', async () => {
-      const res = await app.fetch(new Request('http://localhost/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ directories: [] }),
-      }))
-
-      expect(res.status).toBe(400)
-      const json = await res.json() as { success: boolean; error: string }
-      expect(json.success).toBe(false)
-      expect(json.error).toBe('Invalid request')
-      expect(sseMocks.removeDirectories).not.toHaveBeenCalled()
-    })
-
-    it('returns 404 when the client is not found', async () => {
-      sseMocks.removeDirectories.mockReturnValue(false)
-
+    it('returns 404 when the client is not registered', async () => {
       const res = await app.fetch(new Request('http://localhost/unsubscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -260,69 +209,31 @@ describe('SSE Routes', () => {
       }))
 
       expect(res.status).toBe(404)
-      await expect(res.json()).resolves.toEqual({ success: false, error: 'Client not found' })
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ success: false, error: 'Client not found' })
     })
   })
 
   describe('POST /visibility', () => {
-    it('sets visibility with an explicit active session id', async () => {
-      sseMocks.setClientVisibility.mockReturnValue(true)
+    it.each([
+      ['an explicit active session', { visible: true, activeSessionId: 'session-9' }, { local: true, remote: false }],
+      ['a hidden client', { visible: false, activeSessionId: 'session-9' }, { local: false, remote: false }],
+      ['an explicit active server', { visible: true, activeSessionId: 'session-9', activeServerId: 'srv_a' }, { local: false, remote: true }],
+    ] as const)('records %s', async (_label, overrides, expected) => {
+      aggregator.addClient('client-1', () => {}, () => {}, [])
 
       const res = await app.fetch(new Request('http://localhost/visibility', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: 'client-1', visible: true, activeSessionId: 'session-9' }),
+        body: JSON.stringify({ clientId: 'client-1', ...overrides }),
       }))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', true, 'session-9', 'local')
+      await expect(readJson(res, SuccessResponseSchema)).resolves.toEqual({ success: true })
+      expect(aggregator.isSessionBeingViewed('session-9')).toBe(expected.local)
+      expect(aggregator.isSessionBeingViewed('session-9', 'srv_a')).toBe(expected.remote)
     })
 
-    it('defaults the active session id to null when omitted', async () => {
-      sseMocks.setClientVisibility.mockReturnValue(true)
-
-      const res = await app.fetch(new Request('http://localhost/visibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: 'client-1', visible: false }),
-      }))
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true })
-      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', false, null, 'local')
-    })
-
-    it('forwards an explicit active server id', async () => {
-      sseMocks.setClientVisibility.mockReturnValue(true)
-
-      const res = await app.fetch(new Request('http://localhost/visibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: 'client-1', visible: true, activeSessionId: 'session-9', activeServerId: 'srv_a' }),
-      }))
-
-      expect(res.status).toBe(200)
-      expect(sseMocks.setClientVisibility).toHaveBeenCalledWith('client-1', true, 'session-9', 'srv_a')
-    })
-
-    it('returns 400 for an invalid visibility body', async () => {
-      const res = await app.fetch(new Request('http://localhost/visibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: 'client-1', visible: 'yes' }),
-      }))
-
-      expect(res.status).toBe(400)
-      const json = await res.json() as { success: boolean; error: string }
-      expect(json.success).toBe(false)
-      expect(json.error).toBe('Invalid request')
-      expect(sseMocks.setClientVisibility).not.toHaveBeenCalled()
-    })
-
-    it('returns 404 when the client is not found', async () => {
-      sseMocks.setClientVisibility.mockReturnValue(false)
-
+    it('returns 404 when the client is not registered', async () => {
       const res = await app.fetch(new Request('http://localhost/visibility', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -330,79 +241,91 @@ describe('SSE Routes', () => {
       }))
 
       expect(res.status).toBe(404)
-      await expect(res.json()).resolves.toEqual({ success: false, error: 'Client not found' })
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ success: false, error: 'Client not found' })
+    })
+  })
+
+  describe('invalid request bodies', () => {
+    it.each([
+      ['/subscribe', { clientId: '', directories: 'not-an-array' }],
+      ['/unsubscribe', { directories: [] }],
+      ['/visibility', { clientId: 'client-1', visible: 'yes' }],
+    ])('returns 400 for %s', async (path, body) => {
+      aggregator.addClient('client-1', () => {}, () => {}, [])
+
+      const res = await app.fetch(new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }))
+
+      expect(res.status).toBe(400)
+      await expect(readJson(res, ErrorResponseSchema)).resolves.toMatchObject({
+        success: false,
+        error: 'Invalid request',
+      })
+      expect(aggregator.hasClientDirectory('client-1', '/a')).toBe(false)
     })
   })
 
   describe('GET /status', () => {
-    it('returns the merged connection status and counts', async () => {
-      sseMocks.getConnectionStatus.mockReturnValue({ connected: 1, total: 2 })
-      sseMocks.getClientCount.mockReturnValue(4)
-      sseMocks.getActiveDirectories.mockReturnValue(['/a', '/b'])
-      sseMocks.getActiveSessions.mockReturnValue({ '/a': ['session-1'] })
+    it('reports the connection status and registered clients', async () => {
+      aggregator.addClient('client-1', () => {}, () => {}, [])
 
       const res = await app.fetch(new Request('http://localhost/status'))
 
       expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({
-        connected: 1,
-        total: 2,
-        clients: 4,
-        directories: ['/a', '/b'],
-        activeSessions: { '/a': ['session-1'] },
+      await expect(readJson(res, StatusResponseSchema)).resolves.toEqual({
+        connected: 0,
+        total: 0,
+        clients: 1,
+        directories: [],
+        activeSessions: {},
       })
     })
   })
 
-  describe('GET /stream session binding', () => {
+  describe('session binding', () => {
     it('ends the stream once its session is closed', async () => {
-      const cleanup = vi.fn()
-      sseMocks.addClient.mockReturnValue(cleanup)
       const sessionId = 'session-revoked'
-      const authenticatedApp = createAuthenticatedApp(sessionId)
+      const sessionApp = createSessionScopedApp(sessionId)
 
-      const res = await authenticatedApp.fetch(new Request('http://localhost/stream'))
-      const reader = res.body!.getReader()
+      const res = await sessionApp.fetch(new Request('http://localhost/stream'))
+      const reader = responseReader(res)
       try {
-        expect(await readChunk(reader)).toContain('event: connected')
+        await expect(readFrame(reader)).resolves.toContain('event: connected')
 
         closeSessionConnections(sessionId)
 
-        await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+        await vi.waitFor(() => expect(aggregator.getClientCount()).toBe(0))
         expect(await reader.read()).toEqual({ done: true, value: undefined })
 
         closeSessionConnections(sessionId)
-        expect(cleanup).toHaveBeenCalledTimes(1)
+        expect(aggregator.getClientCount()).toBe(0)
       } finally {
         await reader.cancel()
       }
     })
 
     it('keeps streaming while another session is closed', async () => {
-      const cleanup = vi.fn()
-      sseMocks.addClient.mockReturnValue(cleanup)
       const sessionId = 'session-active'
-      const authenticatedApp = createAuthenticatedApp(sessionId)
+      const sessionApp = createSessionScopedApp(sessionId)
 
-      const res = await authenticatedApp.fetch(new Request('http://localhost/stream'))
-      const reader = res.body!.getReader()
+      const res = await sessionApp.fetch(new Request('http://localhost/stream'))
+      const reader = responseReader(res)
       try {
-        expect(await readChunk(reader)).toContain('event: connected')
-        const [, writeEvent] = sseMocks.addClient.mock.calls[0] as [
-          string,
-          (event: string, data: string) => void,
-        ]
+        await expect(readFrame(reader)).resolves.toContain('event: connected')
 
         closeSessionConnections('session-other')
+        aggregator.broadcastToAll('message', '{"still":"open"}')
 
-        writeEvent('message', '{"still":"open"}')
-        expect(await readChunk(reader)).toBe('event: message\ndata: {"still":"open"}\n\n')
-        expect(cleanup).not.toHaveBeenCalled()
+        await expect(readFrame(reader)).resolves.toBe('event: message\ndata: {"still":"open"}\n\n')
+        expect(aggregator.getClientCount()).toBe(1)
       } finally {
         await reader.cancel()
       }
 
-      expect(cleanup).toHaveBeenCalledTimes(1)
+      await vi.waitFor(() => expect(aggregator.getClientCount()).toBe(0))
     })
   })
 })

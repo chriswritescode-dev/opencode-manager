@@ -1,111 +1,42 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import { GitSettings } from './GitSettings'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { makeRepo } from '@/test/fixtures/api'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 import type { UserPreferences } from '@/api/types/settings'
 
-const {
-  getSettingsMock,
-  updateSettingsMock,
-  listReposMock,
-  updateRepoGitCredentialMock,
-  showToastMock,
-} = vi.hoisted(() => ({
-  getSettingsMock: vi.fn(),
-  updateSettingsMock: vi.fn(),
-  listReposMock: vi.fn(),
-  updateRepoGitCredentialMock: vi.fn(),
-  showToastMock: { success: vi.fn(), error: vi.fn(), loading: vi.fn() },
-}))
-
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    getSettings: getSettingsMock,
-    updateSettings: updateSettingsMock,
-  },
-}))
-
-vi.mock('@/api/repos', () => ({
-  listRepos: listReposMock,
-  updateRepoGitCredential: updateRepoGitCredentialMock,
-}))
-
-vi.mock('@/lib/toast', () => ({ showToast: showToastMock }))
-
-vi.mock('@/hooks/useOpenCodeServerActions', () => ({
-  useOpenCodeServerActions: () => ({
-    restartServerMutation: { isPending: false },
-    confirmOpen: false,
-    setConfirmOpen: vi.fn(),
-    activeSessionCount: 0,
-    requestRestart: vi.fn(),
-    confirmRestart: vi.fn(),
-  }),
-}))
-
-vi.mock('./GitCredentialDialog', () => ({
-  GitCredentialDialog: ({
-    open,
-    onSave,
-  }: {
-    open: boolean
-    onSave: (credential: unknown, options: unknown) => Promise<void>
-  }) =>
-    open ? (
-      <button
-        type="button"
-        onClick={() =>
-          void onSave(
-            { name: 'Work', host: 'github.com', type: 'pat', token: 'tok' },
-            { makeDefault: false, repoIds: [] },
-          )
-        }
-      >
-        Confirm credential save
-      </button>
-    ) : null,
-}))
-
-function buildPreferences(overrides: Partial<UserPreferences> = {}): UserPreferences {
-  return {
-    theme: 'dark',
-    mode: 'build',
-    autoScroll: true,
-    expandDiffs: true,
-    expandToolCalls: false,
-    showReasoning: false,
-    simpleChatMode: false,
-    keyboardShortcuts: {},
-    customCommands: [],
-    gitCredentials: [],
-    gitIdentity: { name: '', email: '' },
-    gitIdentities: [],
-    ...overrides,
-  }
+interface RenderOptions {
+  preferences?: Partial<UserPreferences>
+  repos?: ReturnType<typeof makeRepo>[]
+  patch?: () => FetchRouteResult | Promise<FetchRouteResult>
 }
 
-let serverPreferences: UserPreferences
-
-function setupServer(initial: UserPreferences) {
-  serverPreferences = initial
-  getSettingsMock.mockImplementation(async () => ({ preferences: serverPreferences, updatedAt: Date.now() }))
-  updateSettingsMock.mockImplementation(async (request: { preferences: Partial<UserPreferences> }) => {
-    serverPreferences = { ...serverPreferences, ...request.preferences }
-    return { preferences: serverPreferences, updatedAt: Date.now() }
+async function renderGitSettings(options: RenderOptions = {}) {
+  const settings = createSettingsServer(
+    { gitIdentity: { name: '', email: '' }, gitIdentities: [], gitCredentials: [], ...options.preferences },
+    { patch: options.patch },
+  )
+  const repos = options.repos ?? []
+  const fetchRoutes: FetchRoute[] = [
+    ...settings.routes,
+    { method: 'GET', path: '/api/repos', respond: () => ({ json: repos }) },
+    {
+      method: 'PATCH',
+      path: '/api/repos/:id/git-credential',
+      respond: async (_request, params) => ({ json: makeRepo({ id: Number(params.id) }) }),
+    },
+  ]
+  const result = renderWithProviders(<GitSettings />, {
+    auth: false,
+    theme: false,
+    tts: false,
+    fetchRoutes,
   })
-}
-
-function renderGitSettings(repos: unknown[] = []) {
-  listReposMock.mockResolvedValue(repos)
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  }
-  return { queryClient, ...render(<GitSettings />, { wrapper: Wrapper }) }
+  await screen.findByLabelText('Name', { selector: 'input#git-name' })
+  return { ...result, settings }
 }
 
 function defaultIdentityNameInput() {
@@ -116,26 +47,21 @@ function savedIdentityNameInput(index = 0) {
   return screen.getByLabelText('Name', { selector: `input#git-identity-${index}-name` })
 }
 
+function patchBodies(fetchFake: ReturnType<typeof renderWithProviders>['fetchFake']) {
+  return fetchFake.findRequests('PATCH', '/api/settings').map((request) => request.body)
+}
+
 describe('GitSettings draft preservation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it('keeps default identity edits when a saved identity is removed', async () => {
     const user = userEvent.setup()
-    setupServer(
-      buildPreferences({
+    await renderGitSettings({
+      preferences: {
         gitIdentity: { name: 'Old Name', email: 'old@example.com' },
         gitIdentities: [{ id: 'a', name: 'Alpha', email: 'alpha@example.com' }],
-      }),
-    )
-    renderGitSettings()
+      },
+    })
 
-    const nameInput = await screen.findByLabelText('Name', { selector: 'input#git-name' })
+    const nameInput = defaultIdentityNameInput()
     await user.clear(nameInput)
     await user.type(nameInput, 'New Name')
     expect(nameInput).toHaveValue('New Name')
@@ -149,92 +75,85 @@ describe('GitSettings draft preservation', () => {
 
   it('keeps saved identity drafts when a credential is saved', async () => {
     const user = userEvent.setup()
-    setupServer(buildPreferences())
-    renderGitSettings()
-
-    await screen.findByLabelText('Name', { selector: 'input#git-name' })
+    const { fetchFake } = await renderGitSettings()
 
     await user.click(screen.getAllByRole('button', { name: 'Add' })[1])
-    const identityNameInput = await screen.findByLabelText('Name', { selector: 'input#git-identity-0-name' })
+    const identityNameInput = screen.getByLabelText('Name', { selector: 'input#git-identity-0-name' })
     await user.type(identityNameInput, 'Draft Person')
 
     await user.click(screen.getAllByRole('button', { name: 'Add' })[0])
-    await user.click(await screen.findByRole('button', { name: 'Confirm credential save' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add Git Credential' })
+    await user.type(within(dialog).getByLabelText('Name *'), 'Work')
+    await user.type(within(dialog).getByLabelText('Access Token *'), 'tok')
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }))
 
-    await waitFor(() => expect(updateSettingsMock).toHaveBeenCalled())
+    expect(await screen.findByText('Credential saved')).toBeInTheDocument()
+    expect(patchBodies(fetchFake)).toHaveLength(1)
     expect(savedIdentityNameInput()).toHaveValue('Draft Person')
     expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument()
   })
 
   it('keeps saved identity drafts when a credential is deleted', async () => {
     const user = userEvent.setup()
-    setupServer(
-      buildPreferences({
+    const { fetchFake } = await renderGitSettings({
+      preferences: {
         gitCredentials: [{ id: 'cred-1', name: 'Work', host: 'github.com', type: 'pat', token: 'tok' }],
-      }),
-    )
-    renderGitSettings()
-
-    await screen.findByLabelText('Name', { selector: 'input#git-name' })
+      },
+    })
 
     await user.click(screen.getAllByRole('button', { name: 'Add' })[1])
-    const identityNameInput = await screen.findByLabelText('Name', { selector: 'input#git-identity-0-name' })
+    const identityNameInput = screen.getByLabelText('Name', { selector: 'input#git-identity-0-name' })
     await user.type(identityNameInput, 'Draft Person')
 
     await user.click(screen.getAllByTitle('Delete')[0])
 
-    await waitFor(() => expect(updateSettingsMock).toHaveBeenCalled())
+    expect(await screen.findByText('Credential deleted')).toBeInTheDocument()
+    expect(patchBodies(fetchFake)).toHaveLength(1)
     expect(savedIdentityNameInput()).toHaveValue('Draft Person')
     expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument()
   })
 
   it('removes a saved identity without touching repositories', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    setupServer(
-      buildPreferences({
+    const { fetchFake } = await renderGitSettings({
+      preferences: {
         gitIdentities: [{ id: 'a', name: 'Alpha', email: 'alpha@example.com' }],
-      }),
-    )
-    renderGitSettings([
-      {
-        id: 1,
-        localPath: 'repo-one',
-        fullPath: '/workspace/repo-one',
-        defaultBranch: 'main',
-        cloneStatus: 'ready',
-        clonedAt: Date.now(),
       },
-    ])
+      repos: [makeRepo({ id: 1 })],
+    })
 
-    await screen.findByLabelText('Name', { selector: 'input#git-name' })
-    await user.click(await screen.findByTitle('Delete'))
+    await user.click(screen.getByTitle('Delete'))
 
     await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
-    expect(confirmSpy).not.toHaveBeenCalled()
-    expect(updateRepoGitCredentialMock).not.toHaveBeenCalled()
-    expect(listReposMock).toHaveBeenCalledTimes(1)
+    expect(fetchFake.findRequests('GET', '/api/repos')).toHaveLength(1)
+    expect(fetchFake.findRequests('PATCH', '/api/repos/:id/git-credential')).toHaveLength(0)
+    expect(patchBodies(fetchFake)).toHaveLength(0)
   })
 
-  it('invalidates the repo git identity cache after saving', async () => {
+  it('saves the default identity and reports success', async () => {
     const user = userEvent.setup()
-    setupServer(buildPreferences())
-    const { queryClient } = renderGitSettings()
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const { fetchFake } = await renderGitSettings()
 
-    const nameInput = await screen.findByLabelText('Name', { selector: 'input#git-name' })
-    await user.type(nameInput, 'New Name')
+    await user.type(defaultIdentityNameInput(), 'New Name')
     await user.click(screen.getByRole('button', { name: /save changes/i }))
 
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['repoGitIdentity'] }))
+    expect(await screen.findByText('Git configuration saved')).toBeInTheDocument()
+    expect(patchBodies(fetchFake)).toEqual([
+      {
+        preferences: {
+          gitCredentials: [],
+          gitIdentity: { name: 'New Name', email: '' },
+          gitIdentities: [],
+        },
+      },
+    ])
   })
 
   it('blocks saving and shows an inline error for an invalid identity email', async () => {
     const user = userEvent.setup()
-    setupServer(buildPreferences())
-    renderGitSettings()
+    const { fetchFake } = await renderGitSettings()
 
-    const emailInput = await screen.findByLabelText('Email', { selector: 'input#git-email' })
+    const emailInput = screen.getByLabelText('Email', { selector: 'input#git-email' })
     await user.type(emailInput, 'not-an-email')
 
     expect(emailInput).toHaveAttribute('aria-invalid', 'true')
@@ -242,23 +161,22 @@ describe('GitSettings draft preservation', () => {
 
     await user.click(screen.getByRole('button', { name: /save changes/i }))
 
-    expect(updateSettingsMock).not.toHaveBeenCalled()
-    expect(showToastMock.success).not.toHaveBeenCalled()
+    expect(patchBodies(fetchFake)).toHaveLength(0)
     expect(emailInput).toHaveValue('not-an-email')
   })
 
   it('retains identity drafts when saving fails', async () => {
     const user = userEvent.setup()
-    setupServer(buildPreferences())
-    updateSettingsMock.mockRejectedValueOnce(new Error('network down'))
-    renderGitSettings()
+    await renderGitSettings({
+      patch: () => {
+        throw new Error('network down')
+      },
+    })
 
-    const nameInput = await screen.findByLabelText('Name', { selector: 'input#git-name' })
-    await user.type(nameInput, 'Draft Name')
-
+    await user.type(defaultIdentityNameInput(), 'Draft Name')
     await user.click(screen.getByRole('button', { name: /save changes/i }))
 
-    await waitFor(() => expect(showToastMock.error).toHaveBeenCalled())
+    expect(await screen.findByText('Failed to save git configuration')).toBeInTheDocument()
     expect(defaultIdentityNameInput()).toHaveValue('Draft Name')
     expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument()
   })

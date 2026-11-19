@@ -1,65 +1,52 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { ScheduleJobSchema, ScheduleRunSchema } from '@opencode-manager/shared/schemas'
+import { createServerScheduleRoutes } from '../../src/routes/schedules'
 import { ScheduleServiceError } from '../../src/services/schedules'
+import { readJson } from '../helpers/read-json'
+import { buildScheduleJob, buildScheduleRun, createFakeScheduleService } from '../helpers/fake-schedule-service'
 
-const scheduleService = {
-  listServerJobs: vi.fn(),
-  createServerJob: vi.fn(),
-  getServerJob: vi.fn(),
-  updateServerJob: vi.fn(),
-  deleteServerJob: vi.fn(),
-  runServerJob: vi.fn(),
-  listServerRuns: vi.fn(),
-  getServerRun: vi.fn(),
-  cancelServerRun: vi.fn(),
-  clearServerRunHistory: vi.fn(),
-  deleteServerRun: vi.fn(),
+const JobsEnvelopeSchema = z.object({ jobs: z.array(ScheduleJobSchema) })
+const JobEnvelopeSchema = z.object({ job: ScheduleJobSchema })
+const RunsEnvelopeSchema = z.object({ runs: z.array(ScheduleRunSchema) })
+const RunEnvelopeSchema = z.object({ run: ScheduleRunSchema })
+const ErrorEnvelopeSchema = z.object({ error: z.string() })
+const SuccessEnvelopeSchema = z.object({ success: z.boolean() })
+
+const jsonHeaders = { 'Content-Type': 'application/json' }
+
+function createApp(service = createFakeScheduleService()): Hono {
+  const app = new Hono()
+  app.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(service))
+  return app
 }
 
-vi.mock('../../src/services/schedules', async () => {
-  const actual = await vi.importActual('../../src/services/schedules')
-  return {
-    ...actual,
-    ScheduleService: vi.fn().mockImplementation(() => scheduleService),
-  }
-})
-
-vi.mock('../../src/utils/logger', () => ({
-  logger: {
-    error: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-  },
-}))
-
-import { createServerScheduleRoutes } from '../../src/routes/schedules'
-
-describe('Server schedule routes', () => {
-  let app: Hono
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    app = new Hono()
-    app.route('/opencode-servers/:serverId/schedules', createServerScheduleRoutes(scheduleService as unknown as import('../../src/services/schedules').ScheduleService))
-  })
-
-  it('lists jobs for a linked server', async () => {
-    scheduleService.listServerJobs.mockReturnValue([{ id: 7 }])
+describe('server schedule routes', () => {
+  it('lists the jobs of a linked server', async () => {
+    const app = createApp(createFakeScheduleService({
+      listServerJobs: vi.fn(() => [buildScheduleJob({ id: 7, serverId: 'srv_kitchen' })]),
+    }))
 
     const response = await app.request('/opencode-servers/srv_kitchen/schedules')
-    const body = await response.json() as { jobs: Array<{ id: number }> }
+    const body = await readJson(response, JobsEnvelopeSchema)
 
     expect(response.status).toBe(200)
-    expect(body.jobs).toHaveLength(1)
-    expect(scheduleService.listServerJobs).toHaveBeenCalledWith('srv_kitchen')
+    expect(body.jobs.map((job) => job.id)).toEqual([7])
   })
 
   it('creates a remote schedule with its target directory', async () => {
-    scheduleService.createServerJob.mockResolvedValue({ id: 7, serverId: 'srv_kitchen' })
+    let receivedDirectory = ''
+    const app = createApp(createFakeScheduleService({
+      createServerJob: vi.fn(async (_serverId, directory, input) => {
+        receivedDirectory = directory
+        return buildScheduleJob({ name: input.name, directory })
+      }),
+    }))
 
     const response = await app.request('/opencode-servers/srv_kitchen/schedules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
       body: JSON.stringify({
         name: 'Nightly audit',
         scheduleMode: 'interval',
@@ -68,19 +55,19 @@ describe('Server schedule routes', () => {
         directory: '/srv/projects/audit',
       }),
     })
+    const body = await readJson(response, JobEnvelopeSchema)
 
     expect(response.status).toBe(201)
-    expect(scheduleService.createServerJob).toHaveBeenCalledWith(
-      'srv_kitchen',
-      '/srv/projects/audit',
-      expect.objectContaining({ directory: '/srv/projects/audit' }),
-    )
+    expect(receivedDirectory).toBe('/srv/projects/audit')
+    expect(body.job).toMatchObject({ name: 'Nightly audit', directory: '/srv/projects/audit' })
   })
 
   it('rejects a remote schedule without a directory', async () => {
+    const app = createApp()
+
     const response = await app.request('/opencode-servers/srv_kitchen/schedules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
       body: JSON.stringify({
         name: 'Nightly audit',
         scheduleMode: 'interval',
@@ -88,62 +75,98 @@ describe('Server schedule routes', () => {
         prompt: 'Audit the project.',
       }),
     })
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
-    expect(scheduleService.createServerJob).not.toHaveBeenCalled()
+    expect(body.error).toBe('A remote schedule requires an absolute target directory')
   })
 
   it('updates, runs, and cancels a remote schedule', async () => {
-    scheduleService.updateServerJob.mockResolvedValue({ id: 7 })
-    scheduleService.runServerJob.mockResolvedValue({ id: 11, status: 'running' })
-    scheduleService.cancelServerRun.mockResolvedValue({ id: 11, status: 'cancelled' })
+    const app = createApp(createFakeScheduleService({
+      updateServerJob: vi.fn(async (_serverId, _jobId, input) => buildScheduleJob({ name: input.name ?? 'Nightly audit' })),
+      runServerJob: vi.fn(async (_serverId, _jobId, triggerSource) => buildScheduleRun({ status: 'running', triggerSource })),
+      cancelServerRun: vi.fn(async () => buildScheduleRun({ status: 'cancelled' })),
+    }))
 
     const updateResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
       body: JSON.stringify({ name: 'Updated audit' }),
     })
-    expect(updateResponse.status).toBe(200)
-    expect(scheduleService.updateServerJob).toHaveBeenCalledWith('srv_kitchen', 7, { name: 'Updated audit' })
+    const updateBody = await readJson(updateResponse, JobEnvelopeSchema)
 
     const runResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/run', { method: 'POST' })
-    expect(runResponse.status).toBe(200)
-    expect(scheduleService.runServerJob).toHaveBeenCalledWith('srv_kitchen', 7, 'manual')
+    const runBody = await readJson(runResponse, RunEnvelopeSchema)
 
     const cancelResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/runs/11/cancel', { method: 'POST' })
+    const cancelBody = await readJson(cancelResponse, RunEnvelopeSchema)
+
+    expect(updateResponse.status).toBe(200)
+    expect(updateBody.job.name).toBe('Updated audit')
+    expect(runResponse.status).toBe(200)
+    expect(runBody.run).toMatchObject({ status: 'running', triggerSource: 'manual' })
     expect(cancelResponse.status).toBe(200)
-    expect(scheduleService.cancelServerRun).toHaveBeenCalledWith('srv_kitchen', 7, 11)
+    expect(cancelBody.run.status).toBe('cancelled')
   })
 
   it('lists and deletes runs for a remote schedule', async () => {
-    scheduleService.listServerRuns.mockReturnValue([{ id: 11 }])
-    scheduleService.getServerRun.mockReturnValue({ id: 11 })
-    scheduleService.clearServerRunHistory.mockResolvedValue({ cleared: 1 })
-    scheduleService.deleteServerRun.mockResolvedValue(undefined)
+    const app = createApp(createFakeScheduleService({
+      listServerRuns: vi.fn((_serverId, _jobId, limit) => [buildScheduleRun({ id: limit })]),
+      getServerRun: vi.fn(() => buildScheduleRun({ id: 11 })),
+      clearServerRunHistory: vi.fn(async () => ({ cleared: 1 })),
+    }))
 
     const listResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/runs')
-    expect(listResponse.status).toBe(200)
-    expect(scheduleService.listServerRuns).toHaveBeenCalledWith('srv_kitchen', 7, 20)
+    const listBody = await readJson(listResponse, RunsEnvelopeSchema)
 
     const getResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/runs/11')
-    expect(getResponse.status).toBe(200)
-    expect(scheduleService.getServerRun).toHaveBeenCalledWith('srv_kitchen', 7, 11)
+    const getBody = await readJson(getResponse, RunEnvelopeSchema)
 
     const clearResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/runs', { method: 'DELETE' })
-    expect(clearResponse.status).toBe(200)
-    expect(scheduleService.clearServerRunHistory).toHaveBeenCalledWith('srv_kitchen', 7)
+    const clearBody = await readJson(clearResponse, z.object({ cleared: z.number() }))
 
     const deleteResponse = await app.request('/opencode-servers/srv_kitchen/schedules/7/runs/11', { method: 'DELETE' })
+
+    expect(listResponse.status).toBe(200)
+    expect(listBody.runs.map((run) => run.id)).toEqual([20])
+    expect(getResponse.status).toBe(200)
+    expect(getBody.run.id).toBe(11)
+    expect(clearResponse.status).toBe(200)
+    expect(clearBody.cleared).toBe(1)
     expect(deleteResponse.status).toBe(200)
-    expect(scheduleService.deleteServerRun).toHaveBeenCalledWith('srv_kitchen', 7, 11)
+  })
+
+  it('returns 404 when a remote schedule does not exist', async () => {
+    const app = createApp(createFakeScheduleService({ getServerJob: vi.fn(() => null) }))
+
+    const response = await app.request('/opencode-servers/srv_kitchen/schedules/7')
+    const body = await readJson(response, ErrorEnvelopeSchema)
+
+    expect(response.status).toBe(404)
+    expect(body.error).toBe('Schedule not found')
+  })
+
+  it('deletes a remote schedule', async () => {
+    const app = createApp()
+
+    const response = await app.request('/opencode-servers/srv_kitchen/schedules/7', { method: 'DELETE' })
+    const body = await readJson(response, SuccessEnvelopeSchema)
+
+    expect(response.status).toBe(200)
+    expect(body.success).toBe(true)
   })
 
   it('maps service errors to their status', async () => {
-    scheduleService.runServerJob.mockRejectedValue(new ScheduleServiceError('OpenCode server "Kitchen" is disabled', 400))
+    const app = createApp(createFakeScheduleService({
+      runServerJob: vi.fn(async () => {
+        throw new ScheduleServiceError('OpenCode server "Kitchen" is disabled', 400)
+      }),
+    }))
 
     const response = await app.request('/opencode-servers/srv_kitchen/schedules/7/run', { method: 'POST' })
+    const body = await readJson(response, ErrorEnvelopeSchema)
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ error: 'OpenCode server "Kitchen" is disabled' })
+    expect(body.error).toBe('OpenCode server "Kitchen" is disabled')
   })
 })

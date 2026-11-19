@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'path'
 import type { Database } from 'bun:sqlite'
-import { Cron } from 'croner'
+import { Cron, type CronOptions } from 'croner'
 import {
   type CreateScheduleJobRequest,
   type ScheduleJob,
@@ -69,6 +69,22 @@ import { createScheduleWorktreeDescriber } from './schedule-worktree-paths'
 import { SessionSandboxError, type SessionSandboxService } from './session-sandbox'
 import type { SandboxRuntimeService } from './sandbox/runtime'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+
+type SessionPromptInput = Parameters<OpenCodeClient['api']['session']['prompt']>[0]
+
+interface ScheduleRunIdentity {
+  id: number
+  repoId: number | null
+  jobId: number
+  sessionId: string | null
+  sessionTitle: string | null
+  triggerSource: ScheduleRunTriggerSource
+}
+
+interface ScheduleTargetPersistence {
+  repo: Repo | null
+  repoId: number | null
+}
 
 class ScheduleServiceError extends Error {
   status: number
@@ -273,38 +289,65 @@ export interface ScheduleSandboxDependencies {
   runtime: Pick<SandboxRuntimeService, 'planShell' | 'removeSessionSandbox'>
 }
 
-export class ScheduleService {
-  private static activeRuns = new Map<number, ActiveRun>()
-  private static pendingCancels = new Map<number, PendingCancel>()
-  private static activeTeardowns = new Set<string>()
-  private onJobChange: ((job: ScheduleJob | null, jobId: number) => void) | null = null
-  private onWorktreeRemoved: ((directory: string) => Promise<void>) | null = null
+export interface ScheduleActiveRunSnapshot {
+  runId: number
+  hasSessionMonitor: boolean
+}
 
-  constructor(
-    private readonly db: Database,
-    private readonly openCodeClient: OpenCodeClient,
-    private readonly worktreeManager: ScheduleWorktreeManager,
-    private readonly serverRegistry: OpenCodeServerRegistry | null = null,
-    private readonly sandbox: ScheduleSandboxDependencies | null = null,
-  ) {}
+export class ScheduleRunRegistry {
+  private readonly activeRuns = new Map<number, ActiveRun>()
+  private readonly pendingCancels = new Map<number, PendingCancel>()
+  private readonly activeTeardowns = new Set<string>()
 
-  setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
-    this.onJobChange = handler
+  snapshot(jobId: number): ScheduleActiveRunSnapshot | null {
+    const active = this.activeRuns.get(jobId)
+    if (!active) return null
+    return { runId: active.runId, hasSessionMonitor: active.sessionMonitor !== undefined }
   }
 
-  setWorktreeRemovedHandler(handler: ((directory: string) => Promise<void>) | null): void {
-    this.onWorktreeRemoved = handler
+  isActive(jobId: number): boolean {
+    return this.activeRuns.has(jobId)
   }
 
-  private static abortActiveRun(jobId: number, runId: number): void {
-    const active = ScheduleService.activeRuns.get(jobId)
+  start(jobId: number, runId: number, abort: AbortController): void {
+    this.activeRuns.set(jobId, { runId, abort })
+  }
+
+  abort(jobId: number, runId: number): void {
+    const active = this.activeRuns.get(jobId)
     if (active?.runId === runId) {
       active.abort.abort()
     }
   }
 
-  private static requestCancel(jobId: number, runId: number): Promise<CancelDecision> {
-    const existing = ScheduleService.pendingCancels.get(jobId)
+  release(jobId: number, runId: number): void {
+    if (this.activeRuns.get(jobId)?.runId === runId) {
+      this.activeRuns.delete(jobId)
+    }
+  }
+
+  attachSessionMonitor(jobId: number, runId: number, sessionMonitor: SessionMonitor): void {
+    const active = this.activeRuns.get(jobId)
+    if (active?.runId === runId) {
+      active.sessionMonitor = sessionMonitor
+    }
+  }
+
+  disposeSessionMonitor(jobId: number, runId: number): void {
+    const active = this.activeRuns.get(jobId)
+    if (active?.runId !== runId || !active.sessionMonitor) {
+      return
+    }
+    active.sessionMonitor.dispose()
+    active.sessionMonitor = undefined
+  }
+
+  hasPendingCancel(jobId: number): boolean {
+    return this.pendingCancels.has(jobId)
+  }
+
+  requestCancel(jobId: number, runId: number): Promise<CancelDecision> {
+    const existing = this.pendingCancels.get(jobId)
 
     if (existing?.runId === runId && !existing.resolved) {
       throw new ScheduleServiceError('Schedule run cancellation is already in progress', 409)
@@ -317,17 +360,17 @@ export class ScheduleService {
 
     let resolve!: (decision: CancelDecision) => void
     const decision = new Promise<CancelDecision>((r) => { resolve = r })
-    ScheduleService.pendingCancels.set(jobId, { runId, decision, resolve, resolved: false })
+    this.pendingCancels.set(jobId, { runId, decision, resolve, resolved: false })
     return decision
   }
 
-  private static settleCancel(jobId: number, runId: number, status: ScheduleRun['status'] | undefined): void {
+  settleCancel(jobId: number, runId: number, status: ScheduleRun['status'] | undefined): void {
     const decision: CancelDecision = status === 'cancelled' ? 'cancelled' : status === 'completed' || status === 'failed' ? 'settled' : 'resume'
-    ScheduleService.resolveCancel(jobId, runId, decision)
+    this.resolveCancel(jobId, runId, decision)
   }
 
-  private static resolveCancel(jobId: number, runId: number, decision: CancelDecision): void {
-    const pending = ScheduleService.pendingCancels.get(jobId)
+  resolveCancel(jobId: number, runId: number, decision: CancelDecision): void {
+    const pending = this.pendingCancels.get(jobId)
     if (pending?.runId !== runId || pending.resolved) {
       return
     }
@@ -336,39 +379,54 @@ export class ScheduleService {
     pending.resolve(decision)
   }
 
-  private static awaitCancelDecision(jobId: number, runId: number): Promise<CancelDecision> {
-    const pending = ScheduleService.pendingCancels.get(jobId)
+  awaitCancelDecision(jobId: number, runId: number): Promise<CancelDecision> {
+    const pending = this.pendingCancels.get(jobId)
     return pending?.runId === runId ? pending.decision : Promise.resolve('resume')
   }
 
-  private static clearCancel(jobId: number, runId: number): void {
-    if (ScheduleService.pendingCancels.get(jobId)?.runId !== runId) {
+  clearCancel(jobId: number, runId: number): void {
+    if (this.pendingCancels.get(jobId)?.runId !== runId) {
       return
     }
 
-    ScheduleService.pendingCancels.delete(jobId)
+    this.pendingCancels.delete(jobId)
   }
 
-  private static releaseActiveRun(jobId: number, runId: number): void {
-    if (ScheduleService.activeRuns.get(jobId)?.runId === runId) {
-      ScheduleService.activeRuns.delete(jobId)
-    }
+  beginTeardown(key: string): boolean {
+    if (this.activeTeardowns.has(key)) return false
+    this.activeTeardowns.add(key)
+    return true
   }
 
-  private static attachSessionMonitor(jobId: number, runId: number, sessionMonitor: SessionMonitor): void {
-    const active = ScheduleService.activeRuns.get(jobId)
-    if (active?.runId === runId) {
-      active.sessionMonitor = sessionMonitor
-    }
+  endTeardown(key: string): void {
+    this.activeTeardowns.delete(key)
+  }
+}
+
+export const defaultScheduleRunRegistry = new ScheduleRunRegistry()
+
+export class ScheduleService {
+  private onJobChange: ((job: ScheduleJob | null, jobId: number) => void) | null = null
+  private onWorktreeRemoved: ((directory: string) => Promise<void>) | null = null
+
+  constructor(
+    private readonly db: Database,
+    private readonly openCodeClient: OpenCodeClient,
+    private readonly worktreeManager: Pick<
+      ScheduleWorktreeManager,
+      'prepare' | 'finalize' | 'pruneRunArtifacts' | 'listWorktrees' | 'releaseWorktree'
+    >,
+    private readonly serverRegistry: Pick<OpenCodeServerRegistry, 'get' | 'getClient'> | null = null,
+    private readonly sandbox: ScheduleSandboxDependencies | null = null,
+    private readonly runs: ScheduleRunRegistry = defaultScheduleRunRegistry,
+  ) {}
+
+  setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
+    this.onJobChange = handler
   }
 
-  private static disposeActiveRunMonitor(jobId: number, runId: number): void {
-    const active = ScheduleService.activeRuns.get(jobId)
-    if (active?.runId !== runId || !active.sessionMonitor) {
-      return
-    }
-    active.sessionMonitor.dispose()
-    active.sessionMonitor = undefined
+  setWorktreeRemovedHandler(handler: ((directory: string) => Promise<void>) | null): void {
+    this.onWorktreeRemoved = handler
   }
 
   getActiveRunSessions(): ScheduledSessionRef[] {
@@ -451,7 +509,7 @@ export class ScheduleService {
     }
   }
 
-  private resolveTargetPersistence(target: ScheduleJobTarget): { repo: Repo | null; repoId: number | null } {
+  private resolveTargetPersistence(target: ScheduleJobTarget): ScheduleTargetPersistence {
     if (target.kind === 'repo') {
       return { repo: this.assertRepo(target.repoId), repoId: target.repoId }
     }
@@ -546,10 +604,6 @@ export class ScheduleService {
     return listAllScheduleJobsWithRepos(this.db).map((job) => ({ ...job, retainedWorktreeCount: counts.get(job.id) ?? 0 }))
   }
 
-  /**
-   * Lists the worktrees of a schedule that still exist on disk: kept run worktrees,
-   * the shared worktree, and the worktree of a run in progress.
-   */
   listWorktrees(repoId: number, jobId: number): ScheduleWorktree[] {
     this.assertJob(repoId, jobId)
     const describeSchedule = createScheduleWorktreeDescriber(this.db)
@@ -567,11 +621,6 @@ export class ScheduleService {
       .sort((left, right) => (right.runId ?? Number.MAX_SAFE_INTEGER) - (left.runId ?? Number.MAX_SAFE_INTEGER))
   }
 
-  /**
-   * Removes one of a schedule's worktrees, or every worktree not in use when no path is
-   * given. Pending changes are committed to each worktree's branch first and branches are
-   * kept, so a shared schedule continues from its branch on the next run.
-   */
   async removeWorktrees(repoId: number, jobId: number, worktreePath?: string): Promise<{ removed: number }> {
     const repo = this.assertRepo(repoId)
     const job = this.assertJob(repoId, jobId)
@@ -636,11 +685,11 @@ export class ScheduleService {
         continue
       }
 
-      if (ScheduleService.activeRuns.has(job.id)) {
+      if (this.runs.isActive(job.id)) {
         continue
       }
 
-      ScheduleService.activeRuns.set(job.id, { runId: run.id, abort: new AbortController() })
+      this.runs.start(job.id, run.id, new AbortController())
       await this.recoverRunningRun(job, run)
     }
   }
@@ -721,7 +770,7 @@ export class ScheduleService {
     }
 
     if (input.workspaceMode !== undefined && input.workspaceMode !== existing.workspaceMode) {
-      const running = ScheduleService.activeRuns.has(jobId) || getRunningScheduleRunByJob(this.db, context.repoId, jobId) !== null
+      const running = this.runs.isActive(jobId) || getRunningScheduleRunByJob(this.db, context.repoId, jobId) !== null
       if (running) {
         throw new ScheduleServiceError('Cannot change where runs execute while a run is in progress.', 409)
       }
@@ -758,7 +807,7 @@ export class ScheduleService {
     const job = this.loadJobForTarget(target, jobId)
     const { repoId } = this.resolveTargetPersistence(target)
 
-    if (ScheduleService.activeRuns.has(jobId)) {
+    if (this.runs.isActive(jobId)) {
       throw new ScheduleServiceError('Cannot delete a schedule while it is running. Cancel the run first.', 409)
     }
 
@@ -768,7 +817,7 @@ export class ScheduleService {
     }
 
     this.onJobChange?.(null, jobId)
-    ScheduleService.activeRuns.set(jobId, { runId: DELETION_RESERVATION_RUN_ID, abort: new AbortController() })
+    this.runs.start(jobId, DELETION_RESERVATION_RUN_ID, new AbortController())
 
     try {
       if (target.kind === 'repo') {
@@ -783,7 +832,7 @@ export class ScheduleService {
       this.onJobChange?.(job, jobId)
       throw error
     } finally {
-      ScheduleService.releaseActiveRun(jobId, DELETION_RESERVATION_RUN_ID)
+      this.runs.release(jobId, DELETION_RESERVATION_RUN_ID)
     }
   }
 
@@ -791,7 +840,7 @@ export class ScheduleService {
     const jobIds = listScheduleJobIdsByRepo(this.db, repoId)
 
     for (const jobId of jobIds) {
-      if (ScheduleService.activeRuns.has(jobId)) {
+      if (this.runs.isActive(jobId)) {
         throw new ScheduleServiceError('Cannot delete a repo while a schedule run is in progress. Cancel the run first.', 409)
       }
 
@@ -807,11 +856,6 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * Removes any schedule_jobs and schedule_runs whose repo_id (or job_id for
-   * runs) no longer exists in the repos / schedule_jobs table.  Safe to call
-   * on every startup — no-op when there are no orphans.
-   */
   cleanupOrphanedSchedules(): { orphanedJobs: number; orphanedRuns: number } {
     const result = cleanupOrphanedSchedules(this.db)
     if (result.orphanedJobs > 0 || result.orphanedRuns > 0) {
@@ -848,13 +892,6 @@ export class ScheduleService {
     return run
   }
 
-  /**
-   * Clears a job's run history: deletes every finished run's row plus its git
-   * run branch and any leftover worktree. A run currently in progress is left
-   * untouched (its row and live worktree are skipped). `worktrees` controls
-   * whether a worktree still on disk is committed and kept (`commit`) or
-   * discarded along with its branch (`discard`).
-   */
   async clearRunHistory(repoId: number, jobId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<{ cleared: number }> {
     return this.clearRunHistoryForTarget({ kind: 'repo', repoId }, jobId, worktrees)
   }
@@ -879,12 +916,6 @@ export class ScheduleService {
     return { cleared }
   }
 
-  /**
-   * Deletes a single finished run plus its git run branch and any leftover
-   * worktree. A run in progress must be cancelled first. `worktrees` controls
-   * whether a worktree still on disk is committed and kept (`commit`) or
-   * discarded along with its branch (`discard`).
-   */
   async deleteRun(repoId: number, jobId: number, runId: number, worktrees: ScheduleRunWorktreesMode = 'commit'): Promise<void> {
     return this.deleteRunForTarget({ kind: 'repo', repoId }, jobId, runId, worktrees)
   }
@@ -936,7 +967,7 @@ export class ScheduleService {
       throw new ScheduleServiceError('Schedule is already running', 409)
     }
 
-    if (ScheduleService.activeRuns.has(jobId)) {
+    if (this.runs.isActive(jobId)) {
       throw new ScheduleServiceError('Schedule is already running', 409)
     }
 
@@ -952,7 +983,7 @@ export class ScheduleService {
     })
 
     const abort = new AbortController()
-    ScheduleService.activeRuns.set(jobId, { runId: run.id, abort })
+    this.runs.start(jobId, run.id, abort)
     let repo: Repo | null = null
     let sessionId: string | null = null
 
@@ -1039,7 +1070,7 @@ export class ScheduleService {
       }
 
       const sessionMonitor = createSessionMonitor(runDirectory, session.id, context.serverId)
-      ScheduleService.attachSessionMonitor(jobId, run.id, sessionMonitor)
+      this.runs.attachSessionMonitor(jobId, run.id, sessionMonitor)
 
       void this.submitPromptAndMonitor({
         repoId,
@@ -1097,7 +1128,7 @@ export class ScheduleService {
 
       await this.teardownRunResources(repoId, jobId, run.id, job, repo, sessionId)
 
-      ScheduleService.releaseActiveRun(jobId, run.id)
+      this.runs.release(jobId, run.id)
 
       if (!failedRun) {
         throw new ScheduleServiceError('Failed to load failed run', 500)
@@ -1143,11 +1174,11 @@ export class ScheduleService {
     }
 
     if (!run.sessionId) {
-      ScheduleService.abortActiveRun(jobId, runId)
+      this.runs.abort(jobId, runId)
       return this.finalizeCancelledRun(context.repo, job, run, context.repoId, jobId, runId)
     }
 
-    ScheduleService.requestCancel(jobId, runId)
+    this.runs.requestCancel(jobId, runId)
 
     try {
       let outcome: AssistantOutcome
@@ -1163,7 +1194,7 @@ export class ScheduleService {
           responseText: outcome.responseText,
           errorText: outcome.errorText,
         }, context.repo)
-        ScheduleService.resolveCancel(jobId, runId, 'settled')
+        this.runs.resolveCancel(jobId, runId, 'settled')
         return this.getRunById(context.repoId, jobId, runId)
       }
 
@@ -1191,9 +1222,9 @@ export class ScheduleService {
       throw new ScheduleServiceError('Only running schedule runs can be cancelled', 409)
     }
 
-    ScheduleService.requestCancel(jobId, runId)
-    ScheduleService.abortActiveRun(jobId, runId)
-    ScheduleService.disposeActiveRunMonitor(jobId, runId)
+    this.runs.requestCancel(jobId, runId)
+    this.runs.abort(jobId, runId)
+    this.runs.disposeSessionMonitor(jobId, runId)
     return this.finalizeCancelledRun(null, job, run, null, jobId, runId)
   }
 
@@ -1213,7 +1244,7 @@ export class ScheduleService {
       status = undefined
     }
 
-    ScheduleService.settleCancel(jobId, runId, status)
+    this.runs.settleCancel(jobId, runId, status)
   }
 
   private async finalizeCancelledRun(
@@ -1250,8 +1281,8 @@ export class ScheduleService {
     })
 
     await this.teardownRunResources(repoId, jobId, runId, job, repo, run.sessionId)
-    ScheduleService.releaseActiveRun(jobId, runId)
-    ScheduleService.resolveCancel(jobId, runId, 'cancelled')
+    this.runs.release(jobId, runId)
+    this.runs.resolveCancel(jobId, runId, 'cancelled')
 
     if (!cancelledRun) {
       throw new ScheduleServiceError('Failed to update cancelled run', 500)
@@ -1274,24 +1305,24 @@ export class ScheduleService {
     directory: string
   }): Promise<void> {
     try {
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
       const skills = await this.resolveSkillAttachments(input.client, input.directory, input.job.skillMetadata)
 
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
       const notes = input.job.skillMetadata?.notes?.trim()
-      await input.client.api.session.prompt({
-        sessionID: input.sessionId,
-        text: notes ? `${input.job.prompt}\n\nSkill notes: ${notes}` : input.job.prompt,
-        ...(skills.length > 0 ? { skills } : {}),
-      })
+      const text = notes ? `${input.job.prompt}\n\nSkill notes: ${notes}` : input.job.prompt
+      const promptInput: SessionPromptInput = skills.length > 0
+        ? { sessionID: input.sessionId, text, skills }
+        : { sessionID: input.sessionId, text }
+      await input.client.api.session.prompt(promptInput)
 
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
@@ -1311,7 +1342,7 @@ export class ScheduleService {
       })
       return
     } catch (error) {
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
@@ -1345,11 +1376,11 @@ export class ScheduleService {
         nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } finally {
-      await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
+      await this.runs.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
       await this.teardownRunResources(input.repoId, input.job.id, input.runId, input.job, input.repo, input.sessionId)
-      ScheduleService.releaseActiveRun(input.job.id, input.runId)
-      ScheduleService.clearCancel(input.job.id, input.runId)
+      this.runs.release(input.job.id, input.runId)
+      this.runs.clearCancel(input.job.id, input.runId)
     }
   }
 
@@ -1368,7 +1399,7 @@ export class ScheduleService {
     try {
       const currentAssistantState = await this.readSettledAssistantState(input.client, input.sessionId)
       if (currentAssistantState) {
-        if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+        if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
           return
         }
 
@@ -1379,7 +1410,7 @@ export class ScheduleService {
           sessionId: input.sessionId,
           sessionTitle: input.sessionTitle,
           triggerSource: input.triggerSource,
-        } as ScheduleRun, {
+        }, {
           status: currentAssistantState.errorText ? 'failed' : 'completed',
           responseText: currentAssistantState.responseText,
           errorText: currentAssistantState.errorText,
@@ -1389,7 +1420,7 @@ export class ScheduleService {
 
       const response = await this.waitForAssistantMessage(input.client, input.sessionId, input.sessionMonitor)
 
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
@@ -1441,7 +1472,7 @@ export class ScheduleService {
         nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } catch (error) {
-      if ((await ScheduleService.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
+      if ((await this.runs.awaitCancelDecision(input.job.id, input.runId)) !== 'resume') {
         return
       }
 
@@ -1475,11 +1506,11 @@ export class ScheduleService {
         nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } finally {
-      await ScheduleService.awaitCancelDecision(input.job.id, input.runId)
+      await this.runs.awaitCancelDecision(input.job.id, input.runId)
       input.sessionMonitor.dispose()
       await this.teardownRunResources(input.repoId, input.job.id, input.runId, input.job, input.repo, input.sessionId)
-      ScheduleService.releaseActiveRun(input.job.id, input.runId)
-      ScheduleService.clearCancel(input.job.id, input.runId)
+      this.runs.release(input.job.id, input.runId)
+      this.runs.clearCancel(input.job.id, input.runId)
     }
   }
 
@@ -1513,7 +1544,7 @@ export class ScheduleService {
 
       if (outcome.kind === 'busy') {
         const sessionMonitor = createSessionMonitor(runDirectory, run.sessionId, context.serverId)
-        ScheduleService.attachSessionMonitor(job.id, run.id, sessionMonitor)
+        this.runs.attachSessionMonitor(job.id, run.id, sessionMonitor)
         void this.monitorRunCompletion({
           sessionMonitor,
           repoId: run.repoId,
@@ -1546,7 +1577,7 @@ export class ScheduleService {
 
   private async finalizeRecoveredRun(
     job: ScheduleJob,
-    run: ScheduleRun,
+    run: ScheduleRunIdentity,
     input: {
       status: 'completed' | 'failed'
       responseText?: string | null
@@ -1580,7 +1611,7 @@ export class ScheduleService {
     })
 
     await this.teardownRunResources(run.repoId, run.jobId, run.id, job, repo, run.sessionId)
-    ScheduleService.releaseActiveRun(job.id, run.id)
+    this.runs.release(job.id, run.id)
   }
 
   private async interruptCancelledSession(client: OpenCodeClient, sessionId: string): Promise<void> {
@@ -1607,9 +1638,9 @@ export class ScheduleService {
     if (sessionId) {
       await this.interruptCancelledSession(client, sessionId)
     }
-    ScheduleService.clearCancel(jobId, run.id)
+    this.runs.clearCancel(jobId, run.id)
     await this.teardownRunResources(repoId, jobId, run.id, job, repo, sessionId ?? run.sessionId)
-    ScheduleService.releaseActiveRun(jobId, run.id)
+    this.runs.release(jobId, run.id)
     return this.loadRun(repoId, jobId, run.id, run)
   }
 
@@ -1622,8 +1653,7 @@ export class ScheduleService {
     sessionId?: string | null,
   ): Promise<void> {
     const key = `${repoId}:${jobId}:${runId}`
-    if (ScheduleService.activeTeardowns.has(key)) return
-    ScheduleService.activeTeardowns.add(key)
+    if (!this.runs.beginTeardown(key)) return
     try {
       const fresh = getScheduleRunById(this.db, repoId, jobId, runId)
       if (repo && fresh?.worktreePath) {
@@ -1631,7 +1661,7 @@ export class ScheduleService {
       }
       await this.removeRunSandbox(sessionId ?? fresh?.sessionId ?? null)
     } finally {
-      ScheduleService.activeTeardowns.delete(key)
+      this.runs.endTeardown(key)
     }
   }
 
@@ -1672,11 +1702,6 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * An assistant message completing is not the end of a run: a multi-step agent
-   * settles one message per tool call. Only a session that has gone idle has
-   * finished, and only then is the final message guaranteed to carry its content.
-   */
   private async readAssistantOutcome(client: OpenCodeClient, sessionId: string): Promise<AssistantOutcome> {
     if (await this.isSessionActive(client, sessionId)) {
       return { kind: 'busy' }
@@ -1755,10 +1780,6 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * OpenCode admits a prompt for a session whose agent does not exist at its location
-   * but never delivers it, so a scheduled run falls back to the default agent when its agent is gone.
-   */
   private async resolveRunAgent(client: OpenCodeClient, directory: string, agentSlug: string | null): Promise<string | null> {
     if (!agentSlug) {
       return null
@@ -1785,11 +1806,6 @@ export class ScheduleService {
     }
   }
 
-  /**
-   * Makes every MCP server attached to the job available at the run's location before the
-   * session starts. Schedule-only servers are added to that location, and configured servers
-   * are connected even when their config disables them; both last until OpenCode restarts.
-   */
   private async connectMcpServers(client: OpenCodeClient, directory: string, servers: ScheduleJob['mcpServers']): Promise<void> {
     if (servers.length === 0) {
       return
@@ -1886,6 +1902,12 @@ interface Stoppable {
   stop(): void
 }
 
+export interface CronFactory {
+  (pattern: string, options: CronOptions, callback: () => void): Stoppable & { nextRun(): Date | null }
+}
+
+const defaultCronFactory: CronFactory = (pattern, options, callback) => new Cron(pattern, options, callback)
+
 function buildIntervalCronExpression(intervalMinutes: number): string | null {
   if (intervalMinutes < 5) {
     return null
@@ -1915,7 +1937,10 @@ function buildIntervalCronExpression(intervalMinutes: number): string | null {
 export class ScheduleRunner {
   private cronJobs = new Map<number, Stoppable>()
 
-  constructor(private readonly scheduleService: ScheduleService) {}
+  constructor(
+    private readonly scheduleService: ScheduleService,
+    private readonly createCron: CronFactory = defaultCronFactory,
+  ) {}
 
   async start(): Promise<void> {
     this.scheduleService.setJobChangeHandler((job, jobId) => {
@@ -1926,9 +1951,6 @@ export class ScheduleRunner {
       }
     })
 
-    // Clean up any schedule records whose repo no longer exists.  This handles
-    // leftovers from before foreign-key enforcement was enabled, and guards
-    // against edge cases where a repo row was removed outside the normal flow.
     this.scheduleService.cleanupOrphanedSchedules()
 
     await this.scheduleService.recoverRunningRuns()
@@ -1954,11 +1976,11 @@ export class ScheduleRunner {
       if (!job.cronExpression) {
         return
       }
-      const options: Record<string, unknown> = { protect: true }
+      const options: CronOptions = { protect: true }
       if (job.timezone) {
         options.timezone = job.timezone
       }
-      const cron = new Cron(job.cronExpression, options, () => {
+      const cron = this.createCron(job.cronExpression, options, () => {
         logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
         void this.executeJob(job)
       })
@@ -1977,7 +1999,7 @@ export class ScheduleRunner {
     }
 
     const cronExpression = buildIntervalCronExpression(job.intervalMinutes)
-    const options: Record<string, unknown> = { protect: true }
+    const options: CronOptions = { protect: true }
     if (job.timezone) {
       options.timezone = job.timezone
     }
@@ -1990,11 +2012,9 @@ export class ScheduleRunner {
         void this.executeJob(job)
       }
 
-      const cronOptions = {
-        ...options,
-        ...(nextRunDate > now ? { startAt: nextRunDate.toISOString() } : {}),
-      }
-      const cron = new Cron(cronExpression, cronOptions, () => {
+      const cronOptions: CronOptions = { ...options }
+      if (nextRunDate > now) cronOptions.startAt = nextRunDate.toISOString()
+      const cron = this.createCron(cronExpression, cronOptions, () => {
         logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
         void this.executeJob(job)
       })

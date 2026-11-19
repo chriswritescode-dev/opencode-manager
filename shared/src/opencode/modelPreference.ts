@@ -1,5 +1,6 @@
 import type { ModelInfo, ModelRef } from '@opencode/client'
-import { isRecord } from '../utils/record'
+import { z } from 'zod'
+import { JsonObjectSchema, JsonValueSchema, type JsonObject, type JsonValue } from '../utils/json'
 
 export type ModelPreferenceModel = {
   providerID: string
@@ -12,24 +13,30 @@ export type ModelPreference = {
   variant: Record<string, string | undefined>
 }
 
-export type ModelPreferenceDocument = Record<string, unknown> & ModelPreference
+export type ModelPreferenceDocument = ModelPreference &
+  Record<string, JsonValue | undefined | ModelPreference['variant']>
 
-function models(value: unknown): ModelPreferenceModel[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((item): ModelPreferenceModel[] => {
-    if (!isRecord(item)) return []
-    if (typeof item.providerID !== 'string' || item.providerID.length === 0) return []
-    if (typeof item.modelID !== 'string' || item.modelID.length === 0) return []
-    return [{ providerID: item.providerID, modelID: item.modelID }]
+const ModelPreferenceModelSchema = z.object({
+  providerID: z.string().min(1),
+  modelID: z.string().min(1),
+})
+
+function models(value: JsonValue | undefined): ModelPreferenceModel[] {
+  const entries = z.array(JsonValueSchema).safeParse(value)
+  if (!entries.success) return []
+  return entries.data.flatMap((item): ModelPreferenceModel[] => {
+    const model = ModelPreferenceModelSchema.safeParse(item)
+    return model.success ? [model.data] : []
   })
 }
 
-function variants(value: unknown): Record<string, string | undefined> {
-  if (!isRecord(value)) return {}
+function variants(value: JsonValue | undefined): Record<string, string | undefined> {
+  const entries = JsonObjectSchema.safeParse(value)
+  if (!entries.success) return {}
   return Object.fromEntries(
-    Object.entries(value).flatMap(([key, item]) => {
-      if (key.length === 0 || typeof item !== 'string' || item.length === 0) return []
-      return [[key, item]] as const
+    Object.entries(entries.data).flatMap(([key, item]) => {
+      const variant = z.string().min(1).safeParse(item)
+      return key.length > 0 && variant.success ? [[key, variant.data] as const] : []
     }),
   )
 }
@@ -115,8 +122,9 @@ export function cycleModelVariant(current: string | undefined, variants: string[
   return named[index + 1]
 }
 
-export function decodeModelPreference(value: unknown): ModelPreferenceDocument {
-  const root = isRecord(value) ? value : {}
+export function decodeModelPreference(value: JsonValue | undefined): ModelPreferenceDocument {
+  const parsed = JsonObjectSchema.safeParse(value)
+  const root: JsonObject = parsed.success ? parsed.data : {}
   return {
     ...root,
     recent: models(root.recent),

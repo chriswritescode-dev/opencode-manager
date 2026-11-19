@@ -4,9 +4,7 @@ import { cn } from "@/lib/utils"
 interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value?: number
   max?: number
-  /** Extra classes merged onto the filled indicator. */
   indicatorClassName?: string
-  /** Optional test id applied to the filled indicator. */
   indicatorTestId?: string
 }
 

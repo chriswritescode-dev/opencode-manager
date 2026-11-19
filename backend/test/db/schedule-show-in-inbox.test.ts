@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Database } from 'bun:sqlite'
-import { CreateScheduleJobRequestSchema, type ScheduleJob, type ScheduleRun, type ScheduleRunStatus, type ScheduleRunTriggerSource } from '@opencode-manager/shared/schemas'
-import { migrate } from '../../src/db/migration-runner'
-import { allMigrations } from '../../src/db/migrations'
+import { CreateScheduleJobRequestSchema, type CreateScheduleJobRequest, type ScheduleJob, type ScheduleRun, type ScheduleRunStatus, type ScheduleRunTriggerSource } from '@opencode-manager/shared/schemas'
 import { createRepo } from '../../src/db/queries'
 import {
   countUnreadScheduleRuns,
@@ -23,14 +21,9 @@ import {
   buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput,
 } from '../../src/services/schedule-config'
+import { createTestDatabase } from '../helpers/test-database'
 
-function createTestDb(): Database {
-  const db = new Database(':memory:')
-  migrate(db, allMigrations)
-  return db
-}
-
-function createTestJob(db: Database, overrides: Record<string, unknown> = {}, serverId?: string): ScheduleJob {
+function createTestJob(db: Database, overrides: Partial<CreateScheduleJobRequest> = {}, serverId?: string): ScheduleJob {
   const repo = createRepo(db, {
     localPath: '/abs/repo',
     sourcePath: '/abs/repo',
@@ -51,7 +44,7 @@ function createTestJob(db: Database, overrides: Record<string, unknown> = {}, se
 
 describe('schedule job show in inbox', () => {
   it('defaults a new job to showInInbox true', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const created = createTestJob(db)
 
     const loaded = getScheduleJobById(db, created.repoId, created.id)
@@ -63,7 +56,7 @@ describe('schedule job show in inbox', () => {
   })
 
   it('persists showInInbox false and reads it back from both queries', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const created = createTestJob(db, { showInInbox: false })
 
     const loaded = getScheduleJobById(db, created.repoId, created.id)
@@ -77,7 +70,7 @@ describe('schedule job show in inbox', () => {
   })
 
   it('preserves showInInbox false when an update omits it', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const created = createTestJob(db, { showInInbox: false })
 
     const updated = updateScheduleJob(
@@ -94,7 +87,7 @@ describe('schedule job show in inbox', () => {
   })
 
   it('sets showInInbox back to true when an update provides it', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const created = createTestJob(db, { showInInbox: false })
 
     const updated = updateScheduleJob(
@@ -140,7 +133,7 @@ function finishRun(
 
 describe('finishing runs', () => {
   it('stores a completed quiet run as viewed while keeping it in history', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false })
     const run = startRun(db, job)
     const finishedAt = run.startedAt + 5_000
@@ -158,7 +151,7 @@ describe('finishing runs', () => {
   })
 
   it('leaves a failed quiet run unread', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false })
     const run = startRun(db, job)
 
@@ -173,7 +166,7 @@ describe('finishing runs', () => {
   })
 
   it('stores a completed manual run of a quiet job as viewed', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false })
     const run = startRun(db, job, 'manual')
     const finishedAt = run.startedAt + 5_000
@@ -187,7 +180,7 @@ describe('finishing runs', () => {
   })
 
   it('keeps a completed announcing run unread', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: true })
     const run = startRun(db, job)
 
@@ -201,7 +194,7 @@ describe('finishing runs', () => {
   })
 
   it('does not rewrite runs that finished before the job became quiet', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: true })
     const run = startRun(db, job)
 
@@ -215,7 +208,7 @@ describe('finishing runs', () => {
   })
 
   it('stores a run as viewed when the job became quiet while it was running', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: true })
     const run = startRun(db, job)
 
@@ -230,7 +223,7 @@ describe('finishing runs', () => {
   })
 
   it('leaves a cancelled quiet run unread', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false })
     const run = startRun(db, job)
 
@@ -245,7 +238,7 @@ describe('finishing runs', () => {
 
 describe('quiet schedule run sessions', () => {
   it('reports the session of a quiet job as quiet', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false })
     const run = startRun(db, job)
     updateScheduleRunMetadata(db, job.repoId, job.id, run.id, { sessionId: 'ses_quiet' })
@@ -256,7 +249,7 @@ describe('quiet schedule run sessions', () => {
   })
 
   it('does not report the session of an announcing job as quiet', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: true })
     const run = startRun(db, job)
     updateScheduleRunMetadata(db, job.repoId, job.id, run.id, { sessionId: 'ses_loud' })
@@ -267,7 +260,7 @@ describe('quiet schedule run sessions', () => {
   })
 
   it('does not report an unknown session as quiet', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
 
     expect(isQuietScheduleRunSession(db, 'ses_unknown')).toBe(false)
 
@@ -275,7 +268,7 @@ describe('quiet schedule run sessions', () => {
   })
 
   it('scopes the lookup to the run server', () => {
-    const db = createTestDb()
+    const db = createTestDatabase()
     const job = createTestJob(db, { showInInbox: false }, 'srv_kitchen')
     const run = startRun(db, job, 'schedule', 'srv_kitchen')
     updateScheduleRunMetadata(db, job.repoId, job.id, run.id, { sessionId: 'ses_remote' })

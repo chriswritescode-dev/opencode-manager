@@ -11,7 +11,7 @@ import { listSkills } from '@/api/opencode'
 import { useLoadSkill } from '@/hooks/useOpenCode'
 import { useDeleteSkill } from '@/hooks/useDeleteSkill'
 import { invalidateSkillCaches } from '@/lib/queryInvalidation'
-import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/OpenCodeServerContext'
+import { isLocalOpenCodeServer, useOpenCodeServerId } from '@/contexts/opencode-server-context'
 import { serverScopedKey } from '@/lib/serverScope'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 import type { SkillInfo } from '@opencode-manager/shared/opencode'
@@ -116,7 +116,7 @@ export function RepoSkillsContent({
         <SkillLibraryList
           isLoading={isLoading}
           data={skills}
-          error={error as Error | null}
+          error={error}
           primaryAction={canLoad ? { label: 'Load', onClick: handleLoad } : undefined}
           rowActions={isRemoteServer ? [] : [{ label: 'Delete', onClick: setDeleteSkill, destructive: true }]}
           emptyTitle="No skills found"

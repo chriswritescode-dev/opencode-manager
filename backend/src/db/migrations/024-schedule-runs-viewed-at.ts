@@ -1,15 +1,12 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-}
 
 const migration: Migration = {
   id: '024-schedule-runs-viewed-at',
   legacy: { version: 24, name: 'schedule-runs-viewed-at' },
 
   up(db) {
-    const columns = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
+    const columns = selectTableColumns(db, 'schedule_runs')
     if (!columns.some((column) => column.name === 'viewed_at')) {
       db.run('ALTER TABLE schedule_runs ADD COLUMN viewed_at INTEGER')
     }

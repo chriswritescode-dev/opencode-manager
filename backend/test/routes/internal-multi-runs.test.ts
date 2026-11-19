@@ -1,22 +1,35 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { MultiRunService } from '../../src/services/multi-runs'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { Hono } from 'hono'
-import { Database } from 'bun:sqlite'
-import { allMigrations } from '../../src/db/migrations'
-import { createInternalTestApp } from '../helpers/internal-test-app'
+import { z } from 'zod'
+import { MultiRunSchema } from '@opencode-manager/shared/schemas'
+import type { FuseMultiRunRequest, MultiRun } from '@opencode-manager/shared/schemas'
+import type { MultiRunRoutesService } from '../../src/routes/multi-runs'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
-import { migrate } from '../../src/db/migration-runner'
+import { createInternalTestApp } from '../helpers/internal-test-app'
+import { createTestDatabase } from '../helpers/test-database'
+import { readJson } from '../helpers/read-json'
 
-function createMultiRunStub() {
+const MultiRunResponseSchema = z.object({ run: MultiRunSchema })
+const MultiRunsResponseSchema = z.object({ runs: z.array(MultiRunSchema) })
+
+interface MultiRunFakes {
+  list: Mock<MultiRunRoutesService['list']>
+  launch: Mock<MultiRunRoutesService['launch']>
+  discard: Mock<MultiRunRoutesService['discard']>
+  fuse: Mock<MultiRunRoutesService['fuse']>
+}
+
+function createMultiRunFakes(): MultiRunFakes {
   return {
-    list: vi.fn(),
-    launch: vi.fn(),
-    discard: vi.fn(),
-    fuse: vi.fn(),
+    list: vi.fn<MultiRunRoutesService['list']>(),
+    launch: vi.fn<MultiRunRoutesService['launch']>(),
+    discard: vi.fn<MultiRunRoutesService['discard']>(),
+    fuse: vi.fn<MultiRunRoutesService['fuse']>(),
   }
 }
 
-function createRun(overrides: Record<string, unknown> = {}) {
+function createRun(overrides: Partial<MultiRun> = {}): MultiRun {
   return {
     id: 1,
     repoId: 1,
@@ -33,7 +46,7 @@ function createRun(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function fuseBody(overrides: Record<string, unknown> = {}) {
+function fuseBody(overrides: Partial<FuseMultiRunRequest> = {}): FuseMultiRunRequest {
   return {
     requestId: '11111111-1111-4111-8111-111111111111',
     entryIds: [1, 2],
@@ -43,61 +56,73 @@ function fuseBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe('internal-multi-runs routes', () => {
-  let db: Database
-  let multiRuns: ReturnType<typeof createMultiRunStub>
+  let db: ReturnType<typeof createTestDatabase>
+  let multiRuns: MultiRunFakes
   let app: Hono
   let token: string
 
+  function authHeaders() {
+    return { authorization: `Bearer ${token}` }
+  }
+
   beforeEach(() => {
-    db = new Database(':memory:')
-    migrate(db, allMigrations)
-    multiRuns = createMultiRunStub()
-    app = new Hono()
-    app.route('/api/internal', createInternalTestApp(db, { multiRuns: multiRuns as unknown as MultiRunService }))
+    db = createTestDatabase()
+    multiRuns = createMultiRunFakes()
     token = getOrCreateInternalToken(db)
+    app = new Hono()
+    app.route('/api/internal', createInternalTestApp(db, { multiRuns }))
+  })
+
+  afterEach(() => {
+    db.close()
   })
 
   it('GET /api/internal/multi-runs returns 401 without bearer token', async () => {
     const res = await app.request('/api/internal/multi-runs?repoId=1')
+
     expect(res.status).toBe(401)
   })
 
   it('GET /api/internal/multi-runs returns the repository runs with a bearer token', async () => {
     multiRuns.list.mockReturnValue([])
 
-    const res = await app.request('/api/internal/multi-runs?repoId=1', {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await app.request('/api/internal/multi-runs?repoId=1', { headers: authHeaders() })
+    const body = await readJson(res, MultiRunsResponseSchema)
 
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ runs: [] })
+    expect(body.runs).toEqual([])
     expect(multiRuns.list).toHaveBeenCalledWith({ kind: 'repo', repoId: 1 })
   })
 
   it('POST /api/internal/multi-runs/3/entries/4/discard discards the entry', async () => {
-    multiRuns.discard.mockResolvedValue(createRun())
+    const run = createRun()
+    multiRuns.discard.mockResolvedValue(run)
 
     const res = await app.request('/api/internal/multi-runs/3/entries/4/discard', {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}` },
+      headers: authHeaders(),
     })
+    const body = await readJson(res, MultiRunResponseSchema)
 
     expect(res.status).toBe(200)
+    expect(body.run).toEqual(run)
     expect(multiRuns.discard).toHaveBeenCalledWith(3, 4)
   })
 
   it('POST /api/internal/multi-runs/3/fusions fuses the run', async () => {
-    multiRuns.fuse.mockResolvedValue({ run: createRun(), created: true })
+    const run = createRun()
+    multiRuns.fuse.mockResolvedValue({ run, created: true })
     const body = fuseBody()
 
     const res = await app.request('/api/internal/multi-runs/3/fusions', {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+    const parsed = await readJson(res, MultiRunResponseSchema)
 
     expect(res.status).toBe(201)
-    await expect(res.json()).resolves.toEqual({ run: createRun() })
+    expect(parsed.run).toEqual(run)
     expect(multiRuns.fuse).toHaveBeenCalledWith(3, body)
   })
 })

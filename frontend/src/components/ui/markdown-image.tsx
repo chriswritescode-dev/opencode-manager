@@ -9,15 +9,10 @@ type MarkdownImageProps = ComponentPropsWithoutRef<'img'> & ExtraProps & {
   resolveLocalPath?: (path: string) => string | null
 }
 
-/**
- * Renders a markdown image through the inline image viewer. Local file sources, resolved by
- * `resolveLocalPath` or absolute, load through the raw file API; everything else, including
- * `data:image/*` URIs, is rendered unchanged.
- */
 export function MarkdownImage({ src, alt, resolveLocalPath }: MarkdownImageProps) {
   const insideLink = useIsInsideMarkdownLink()
 
-  if (typeof src !== 'string' || src === '') {
+  if (!src) {
     return null
   }
 

@@ -1,24 +1,18 @@
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { installMatchMedia } from '@/test/browserFakes'
+import { renderWithProviders } from '@/test/render'
 import { RowActionsMenuContext, SettingsList, SettingsListRow } from './settings-list'
 import { DirectoryFilesList } from '@/components/settings/DirectoryFilesList'
 
-vi.mock('@/api/settings', () => ({
-  settingsApi: {
-    getOpenCodeDirectoryFile: vi.fn().mockResolvedValue({ content: '# file' }),
-    updateOpenCodeDirectoryFile: vi.fn().mockResolvedValue(undefined),
-    deleteOpenCodeDirectoryFile: vi.fn().mockResolvedValue(undefined),
-  },
-}))
-
 describe('SettingsList', () => {
   it('renders emptyTitle and emptyHint when isEmpty and no children visible', () => {
-    render(
+    renderWithProviders(
       <SettingsList isEmpty emptyTitle="Nothing here" emptyHint="Try adding something">
         <div>child</div>
       </SettingsList>,
+      { auth: false, theme: false },
     )
     expect(screen.getByText('Nothing here')).toBeInTheDocument()
     expect(screen.getByText('Try adding something')).toBeInTheDocument()
@@ -27,19 +21,21 @@ describe('SettingsList', () => {
   })
 
   it('renders loadingLabel when isLoading', () => {
-    render(
+    renderWithProviders(
       <SettingsList isEmpty={false} isLoading loadingLabel="Please wait...">
         <div>child</div>
       </SettingsList>,
+      { auth: false, theme: false },
     )
     expect(screen.getByText('Please wait...')).toBeInTheDocument()
   })
 
   it('renders error.message when error passed', () => {
-    render(
+    renderWithProviders(
       <SettingsList isEmpty={false} error={new Error('Something broke')}>
         <div>child</div>
       </SettingsList>,
+      { auth: false, theme: false },
     )
     expect(screen.getByText('Something broke')).toBeInTheDocument()
   })
@@ -47,12 +43,13 @@ describe('SettingsList', () => {
 
 describe('SettingsListRow', () => {
   it('renders title, description, and badges content', () => {
-    render(
+    renderWithProviders(
       <SettingsListRow
         title="Row Title"
         description="Row description"
         badges={<span data-testid="badge">Badge</span>}
       />,
+      { auth: false, theme: false },
     )
     expect(screen.getByText('Row Title')).toBeInTheDocument()
     expect(screen.getByText('Row description')).toBeInTheDocument()
@@ -62,7 +59,10 @@ describe('SettingsListRow', () => {
   it('calls primaryAction.onClick when primary action button is clicked', async () => {
     const user = userEvent.setup()
     const onClick = vi.fn()
-    render(<SettingsListRow title="Row" primaryAction={{ label: 'Do It', onClick }} />)
+    renderWithProviders(
+      <SettingsListRow title="Row" primaryAction={{ label: 'Do It', onClick }} />,
+      { auth: false, theme: false },
+    )
 
     await user.click(screen.getByText('Do It'))
     expect(onClick).toHaveBeenCalledTimes(1)
@@ -73,12 +73,13 @@ describe('SettingsListRow', () => {
     const rowClick = vi.fn()
     const primaryClick = vi.fn()
 
-    render(
+    renderWithProviders(
       <SettingsListRow
         title="Row"
         onClick={rowClick}
         primaryAction={{ label: 'Action', onClick: primaryClick }}
       />,
+      { auth: false, theme: false },
     )
 
     await user.click(screen.getByText('Row'))
@@ -93,7 +94,7 @@ describe('SettingsListRow', () => {
     const user = userEvent.setup()
     const actionClick = vi.fn()
 
-    render(
+    renderWithProviders(
       <SettingsListRow
         title="Row"
         actionsLabel="More options"
@@ -102,6 +103,7 @@ describe('SettingsListRow', () => {
           { label: 'Delete', onClick: actionClick, destructive: true },
         ]}
       />,
+      { auth: false, theme: false },
     )
 
     await user.click(screen.getByLabelText('More options'))
@@ -114,41 +116,29 @@ describe('SettingsListRow', () => {
     expect(actionClick).toHaveBeenCalledTimes(1)
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  const mockViewport = (isDesktop: boolean) => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query === '(min-width: 640px)' ? isDesktop : false,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      onchange: null,
-      dispatchEvent: vi.fn(),
-    }))
+  function renderScopedRow(onPrimary: () => void, onDelete: () => void) {
+    return renderWithProviders(
+      <RowActionsMenuContext.Provider value={true}>
+        <div data-opencode-settings>
+          <SettingsListRow
+            title="Row"
+            primaryAction={{ label: 'Edit', onClick: onPrimary }}
+            actionsLabel="More options"
+            actions={[{ label: 'Delete', onClick: onDelete, destructive: true }]}
+          />
+        </div>
+      </RowActionsMenuContext.Provider>,
+      { auth: false, theme: false },
+    )
   }
 
   it('keeps primary and overflow actions reachable inside the compact settings scope on desktop', async () => {
     const user = userEvent.setup()
     const primaryClick = vi.fn()
     const deleteClick = vi.fn()
-    mockViewport(true)
+    installMatchMedia(true)
 
-    render(
-      <RowActionsMenuContext.Provider value={true}>
-        <div data-opencode-settings>
-          <SettingsListRow
-            title="Row"
-            primaryAction={{ label: 'Edit', onClick: primaryClick }}
-            actionsLabel="More options"
-            actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
-          />
-        </div>
-      </RowActionsMenuContext.Provider>,
-    )
+    renderScopedRow(primaryClick, deleteClick)
 
     await user.click(screen.getByText('Edit'))
     expect(primaryClick).toHaveBeenCalledTimes(1)
@@ -162,20 +152,9 @@ describe('SettingsListRow', () => {
     const user = userEvent.setup()
     const primaryClick = vi.fn()
     const deleteClick = vi.fn()
-    mockViewport(false)
+    installMatchMedia(false)
 
-    render(
-      <RowActionsMenuContext.Provider value={true}>
-        <div data-opencode-settings>
-          <SettingsListRow
-            title="Row"
-            primaryAction={{ label: 'Edit', onClick: primaryClick }}
-            actionsLabel="More options"
-            actions={[{ label: 'Delete', onClick: deleteClick, destructive: true }]}
-          />
-        </div>
-      </RowActionsMenuContext.Provider>,
-    )
+    renderScopedRow(primaryClick, deleteClick)
 
     expect(screen.queryByText('Edit')).not.toBeInTheDocument()
 
@@ -192,15 +171,24 @@ describe('SettingsListRow', () => {
 describe('DirectoryFilesList', () => {
   it('labels the raw file editor with the full file path', async () => {
     const user = userEvent.setup()
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <DirectoryFilesList
-          kind="agents"
-          files={[{ kind: 'agents', name: 'planner', relativePath: 'team/planner.md' }]}
-        />
-      </QueryClientProvider>,
+    renderWithProviders(
+      <DirectoryFilesList
+        kind="agents"
+        files={[{ kind: 'agents', name: 'planner', relativePath: 'team/planner.md' }]}
+      />,
+      {
+        auth: false,
+        theme: false,
+        fetchRoutes: [
+          {
+            method: 'GET',
+            path: '/api/settings/opencode-directory-files/content',
+            respond: () => ({
+              json: { kind: 'agents', name: 'planner', relativePath: 'team/planner.md', content: '# file' },
+            }),
+          },
+        ],
+      },
     )
 
     await user.click(screen.getByText('planner'))

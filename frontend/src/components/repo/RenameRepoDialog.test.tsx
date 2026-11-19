@@ -78,7 +78,6 @@ describe('RenameRepoDialog', () => {
     const user = userEvent.setup()
     render(<RenameRepoDialog {...defaultProps} onSave={onSave} />)
 
-    // Click the clear (X) button to clear the input
     const clearButton = screen.getByRole('button', { name: /clear/i })
     await user.click(clearButton)
     await user.keyboard('{Enter}')

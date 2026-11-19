@@ -1,8 +1,5 @@
+import { selectTableColumns } from '../rows'
 import type { Migration } from '../migration-runner'
-
-interface ColumnInfo {
-  name: string
-}
 
 const COLUMNS = [
   { name: 'branch', sql: 'ALTER TABLE repos ADD COLUMN branch TEXT' },
@@ -20,7 +17,7 @@ const migration: Migration = {
   legacy: { version: 3, name: 'repos-add-columns' },
 
   up(db) {
-    const tableInfo = db.prepare('PRAGMA table_info(repos)').all() as ColumnInfo[]
+    const tableInfo = selectTableColumns(db, 'repos')
     const existing = new Set(tableInfo.map(col => col.name))
 
     for (const col of COLUMNS) {

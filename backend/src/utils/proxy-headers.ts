@@ -15,10 +15,14 @@ const HOP_BY_HOP_HEADERS = new Set([
   'authorization',
 ])
 
+export interface ProxyHeaderRecord {
+  [key: string]: string
+}
+
 export function filterProxyHeaders(
   headers: Headers,
   extraExcluded: ReadonlySet<string> = new Set(),
-): Record<string, string> {
+): ProxyHeaderRecord {
   const result: Record<string, string> = {}
   headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase()

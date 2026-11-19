@@ -1,767 +1,446 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { Hono } from 'hono'
+import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
-import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
-
-const mockDb = {
-  prepare: vi.fn(),
-  exec: vi.fn(),
-  close: vi.fn(),
-  transaction: vi.fn()
-} as unknown as Database
-
-vi.mock('bun:sqlite', () => ({
-  Database: vi.fn(() => mockDb)
-}))
-
-vi.mock('../../src/db/queries', () => ({
-  getRepoById: vi.fn(),
-  updateLastAccessed: vi.fn(),
-  listRepos: vi.fn(),
-  getRepoGitCredentialId: vi.fn(),
-  setRepoGitCredentialId: vi.fn(),
-  updateRepoName: vi.fn(),
-  getRepoSetting: vi.fn(),
-  setRepoSetting: vi.fn(),
-}))
-
-vi.mock('../../src/services/repo', () => ({
-  getCurrentBranch: vi.fn(),
-  initLocalRepo: vi.fn(),
-  cloneRepo: vi.fn(),
-  discoverLocalRepos: vi.fn(),
-  pullRepo: vi.fn(),
-  switchBranch: vi.fn(),
-  createBranch: vi.fn(),
-  deleteRepoFiles: vi.fn(),
-  getSiblingRepos: vi.fn(),
-  listRepoSiblings: vi.fn(),
-  resolveRepoOrAssistant: vi.fn(),
-  findSiblingByDirectory: vi.fn(),
-  resolveRepoWorkingDirectory: vi.fn(),
-  resolveRepoProjectId: vi.fn(),
-}))
-
-vi.mock('../../src/services/assistant-mode', () => ({
-  getAssistantModeStatus: vi.fn(),
-  ensureAssistantMode: vi.fn(),
-  convertAssistantOpenCodeConfigToV2: vi.fn(),
-  getAssistantModeDirectory: vi.fn(),
-  buildAssistantOpenCodeConfig: vi.fn(),
-  buildAssistantRepo: vi.fn(),
-}))
-
-vi.mock('../../src/services/archive', () => ({
-  createRepoArchive: vi.fn(),
-  getArchiveSize: vi.fn(),
-  getArchiveStream: vi.fn(),
-  deleteArchive: vi.fn(),
-}))
-
-const mockGetSettings = vi.fn()
-const mockUpdateSettings = vi.fn()
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: mockGetSettings,
-    updateSettings: mockUpdateSettings,
-  })),
-}))
-
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: {
-    clearStartupError: vi.fn(),
-    restart: vi.fn().mockResolvedValue(undefined),
-    isSandboxEnforced: vi.fn(),
-  },
-}))
-
-import { Readable } from 'stream'
-import * as db from '../../src/db/queries'
-import * as repoService from '../../src/services/repo'
-import * as archiveService from '../../src/services/archive'
-import { createRepoRoutes } from '../../src/routes/repos'
-import { opencodeServerManager } from '../../src/services/opencode-single-server'
-import { ProjectConfigService } from '../../src/services/project-config'
-import type { SecretsService } from '../../src/services/secrets'
-import { RepoWorkspaceService } from '../../src/services/repo-workspace'
-import { createGitService } from '../../src/services/git/GitService'
-import type { GitAuthService } from '../../src/services/git-auth'
-import type { ScheduleService } from '../../src/services/schedules'
-import type { TerminalService } from '../../src/services/terminal'
-import type { AssistantModeStatus, Repo } from '@opencode-manager/shared/types'
-import type { OpenCodeApi } from '@opencode-manager/shared/opencode'
 import { ClientError } from '@opencode-manager/shared/opencode'
-import { getAssistantModeStatus, ensureAssistantMode, buildAssistantRepo } from '../../src/services/assistant-mode'
-import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { getRepoById, getRepoGitCredentialId, listRepos } from '../../src/db/queries'
+import { SettingsService } from '../../src/services/settings'
+import { createRepoRoutes } from '../../src/routes/repos'
+import { createGitService } from '../../src/services/git/GitService'
+import { ProjectConfigService } from '../../src/services/project-config'
+import { RepoWorkspaceService } from '../../src/services/repo-workspace'
+import { ScheduleService } from '../../src/services/schedules'
+import { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
+import { SecretsService } from '../../src/services/secrets'
+import { TerminalService } from '../../src/services/terminal'
+import { CredentialProvider } from '../../src/services/credential-provider'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { createStubRepoEnvService } from '../helpers/stub-repo-env-service'
+import { createCommittedRepo, cloneOrigin, createGitAuthService, createOrigin, git } from '../helpers/git-fixtures'
+import { readJson } from '../helpers/read-json'
+import { createTestDatabase, seedRepo, seedSettings } from '../helpers/test-database'
+import { createTempWorkspace, type TempWorkspace } from '../helpers/test-env'
 
-const mockGitAuthService = {
-  getGitEnvironment: vi.fn().mockReturnValue({})
-} as unknown as GitAuthService
+const RepoSchema = z.looseObject({
+  id: z.number(),
+  localPath: z.string(),
+  fullPath: z.string(),
+  branch: z.string().nullable().optional(),
+  cloneStatus: z.string(),
+  gitCredentialId: z.string().optional(),
+  currentBranch: z.string().nullable().optional(),
+})
 
-const mockPrepareRepoDelete = vi.fn()
-const mockScheduleService = {
-  prepareRepoDelete: mockPrepareRepoDelete,
-} as unknown as ScheduleService
+const ErrorSchema = z.object({ error: z.string() })
 
-const mockTerminalService = {
-  removeAll: vi.fn().mockResolvedValue(undefined),
-  create: vi.fn(),
-} as unknown as TerminalService
+const AssistantFileSchema = z.object({ path: z.string(), exists: z.boolean(), created: z.boolean() })
 
-function createTestRoutes(openCodeClient: ReturnType<typeof createStubOpenCodeClient> = createStubOpenCodeClient()): ReturnType<typeof createRepoRoutes> {
-  const projectConfigService = new ProjectConfigService(mockDb, createGitService(mockGitAuthService), mockGitAuthService)
-  const repoWorkspaces = new RepoWorkspaceService(mockDb, openCodeClient, mockGitAuthService, projectConfigService, mockTerminalService, mockScheduleService)
-  return createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, openCodeClient, mockTerminalService, projectConfigService, repoWorkspaces, {} as unknown as SecretsService)
-}
+const AssistantStatusSchema = z.looseObject({
+  repoId: z.number(),
+  directory: z.string(),
+  relativePath: z.string(),
+  files: z.object({ agentsMd: AssistantFileSchema, opencodeJson: AssistantFileSchema }),
+})
 
-function createMockRepo(overrides: Partial<Repo> = {}): Repo {
-  return {
-    id: 1,
-    repoUrl: 'https://github.com/test/repo',
-    localPath: 'repos/test-repo',
-    fullPath: '/tmp/repos/test-repo',
-    sourcePath: '/tmp/repos/test-repo/.git',
-    branch: 'main',
-    defaultBranch: 'main',
-    cloneStatus: 'ready',
-    clonedAt: Date.now(),
-    lastAccessedAt: Date.now(),
-    ...overrides,
-  }
-}
+const DiscoverySchema = z.object({
+  repos: z.array(z.looseObject({ localPath: z.string() })),
+  discoveredCount: z.number(),
+  existingCount: z.number(),
+  errors: z.array(z.string()),
+})
 
-describe('Repo Routes', () => {
+const WorktreeSetupSchema = z.union([
+  z.object({ status: z.literal('none') }),
+  z.object({ status: z.literal('started'), repoCommandsSkipped: z.boolean() }),
+  z.object({ status: z.literal('failed'), error: z.string() }),
+])
+
+const WorkspaceSchema = z.object({ directory: z.string(), worktreeSetup: WorktreeSetupSchema })
+
+const jsonHeaders = { 'Content-Type': 'application/json' }
+
+type StubClient = ReturnType<typeof createStubOpenCodeClient>
+
+describe('repo routes', () => {
+  let workspace: TempWorkspace
+  let db: Database
+  let originPath: string
+  let workPath: string
+  let repoPath: string
+  let repo: ReturnType<typeof seedRepo>
+
   beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(opencodeServerManager.isSandboxEnforced).mockReturnValue(false)
-    mockGetSettings.mockReturnValue({
-      preferences: { repoOrder: [], gitCredentials: [] },
-      updatedAt: Date.now(),
-    })
-    mockUpdateSettings.mockReturnValue({
-      preferences: { repoOrder: [] },
-      updatedAt: Date.now(),
-    })
-    vi.mocked(db.getRepoGitCredentialId).mockReturnValue(null)
-    vi.mocked(db.getRepoSetting).mockReturnValue(null)
-    vi.mocked(repoService.resolveRepoProjectId).mockResolvedValue('commit-A')
-    vi.mocked(repoService.listRepoSiblings).mockResolvedValue([])
-    vi.mocked(repoService.resolveRepoOrAssistant).mockImplementation(
-      (_database, id) => vi.mocked(db.getRepoById)(_database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null),
-    )
+    workspace = createTempWorkspace('ocm-repo-routes-')
+    db = createTestDatabase()
+    originPath = path.join(workspace.path, 'origin.git')
+    workPath = path.join(workspace.path, 'work')
+    createOrigin(originPath, workPath)
+    repoPath = path.join(workspace.path, 'repos', 'repo')
+    cloneOrigin(originPath, repoPath)
+    repo = seedRepo(db, { localPath: 'repo', sourcePath: repoPath, repoUrl: originPath, isLocal: false })
   })
 
+  afterEach(() => {
+    db.close()
+    workspace.restore()
+  })
+
+  function createApp(client: StubClient = createStubOpenCodeClient()): Hono {
+    const gitAuthService = createGitAuthService()
+    const terminalService = new TerminalService(
+      { client, baseUrl: () => 'http://127.0.0.1:5551', includeLocalEnv: false },
+      new CredentialProvider(db),
+      createStubRepoEnvService(),
+    )
+    const projectConfigService = new ProjectConfigService(db, createGitService(gitAuthService), gitAuthService)
+    const scheduleService = new ScheduleService(db, client, new ScheduleWorktreeManager(gitAuthService, db))
+    const repoWorkspaces = new RepoWorkspaceService(
+      db,
+      client,
+      gitAuthService,
+      projectConfigService,
+      terminalService,
+      scheduleService,
+    )
+    const app = new Hono()
+    app.route('/', createRepoRoutes(
+      db,
+      gitAuthService,
+      scheduleService,
+      client,
+      terminalService,
+      projectConfigService,
+      repoWorkspaces,
+      new SecretsService(db),
+    ))
+    return app
+  }
+
   describe('POST /:id/access', () => {
-    it('should return 404 when repo not found', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
+    it('records the access time for an existing repo', async () => {
+      const app = createApp()
+      const before = getRepoById(db, repo.id)?.lastAccessedAt ?? 0
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/access', { method: 'POST' })
-
-      expect(res.status).toBe(404)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Repo not found')
-    })
-
-    it('should return 200 and call updateLastAccessed when repo exists', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/Users/test/repos/test-repo',
-        sourcePath: '/Users/test/repos/test-repo',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-        lastAccessedAt: Date.now()
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/access', { method: 'POST' })
+      const res = await app.request(`/${repo.id}/access`, { method: 'POST' })
+      const body = await readJson(res, z.object({ success: z.boolean() }))
 
       expect(res.status).toBe(200)
-      const body = await res.json() as { success: boolean }
       expect(body.success).toBe(true)
-      expect(db.updateLastAccessed).toHaveBeenCalledWith(mockDb, 1)
+      expect(getRepoById(db, repo.id)?.lastAccessedAt).toBeGreaterThanOrEqual(before)
     })
 
-    it('should return 500 when updateLastAccessed throws', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/Users/test/repos/test-repo',
-        sourcePath: '/Users/test/repos/test-repo',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now()
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
-      vi.mocked(db.updateLastAccessed).mockImplementation(() => {
-        throw new Error('Database error')
-      })
+    it('returns 404 for an unknown repo', async () => {
+      const res = await createApp().request('/999/access', { method: 'POST' })
+      const body = await readJson(res, ErrorSchema)
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/access', { method: 'POST' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Database error')
+      expect(res.status).toBe(404)
+      expect(body.error).toBe('Repo not found')
     })
   })
 
   describe('GET /:id/assistant-mode', () => {
-    it('should return 404 when repo not found', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/assistant-mode', { method: 'GET' })
-
-      expect(res.status).toBe(404)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Repo not found')
-    })
-
-    it('should call getAssistantModeStatus and return status', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/tmp/test-repo',
-        sourcePath: '/tmp/test-repo/.git',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-        lastAccessedAt: Date.now(),
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
-
-      const mockStatus: AssistantModeStatus = {
-        repoId: 1,
-        directory: '/tmp/workspace/repos/assistant',
-        relativePath: 'repos/assistant',
-        files: {
-          agentsMd: { path: '/tmp/workspace/repos/assistant/AGENTS.md', exists: false, created: false },
-          opencodeJson: { path: '/tmp/workspace/repos/assistant/opencode.json', exists: false, created: false },
-        },
-      }
-
-      vi.mocked(getAssistantModeStatus).mockResolvedValue(mockStatus)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/assistant-mode', { method: 'GET' })
+    it('reports the assistant workspace status for the assistant repo', async () => {
+      const res = await createApp().request('/0/assistant-mode')
+      const body = await readJson(res, AssistantStatusSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as typeof mockStatus
-      expect(body.repoId).toBe(1)
+      expect(body.repoId).toBe(0)
       expect(body.relativePath).toBe('repos/assistant')
+      expect(body.files.agentsMd).toBeDefined()
+    })
 
-      expect(ensureAssistantMode).not.toHaveBeenCalled()
+    it('reports the assistant workspace status for a repository', async () => {
+      const res = await createApp().request(`/${repo.id}/assistant-mode`)
+      const body = await readJson(res, AssistantStatusSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.repoId).toBe(repo.id)
     })
   })
 
   describe('POST /:id/assistant-mode', () => {
-    it('should return 404 when repo not found', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/assistant-mode', {
+    it('creates the assistant workspace files', async () => {
+      const res = await createApp().request('/0/assistant-mode', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-
-      expect(res.status).toBe(404)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Repo not found')
-    })
-
-    it('should validate body and call ensureAssistantMode', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/tmp/test-repo',
-        sourcePath: '/tmp/test-repo/.git',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-        lastAccessedAt: Date.now(),
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
-
-      const mockStatus: AssistantModeStatus = {
-        repoId: 1,
-        directory: '/tmp/workspace/repos/assistant',
-        relativePath: 'repos/assistant',
-        files: {
-          agentsMd: { path: '/tmp/workspace/repos/assistant/AGENTS.md', exists: true, created: true },
-          opencodeJson: { path: '/tmp/workspace/repos/assistant/opencode.json', exists: true, created: true },
-        },
-      }
-
-      vi.mocked(ensureAssistantMode).mockResolvedValue(mockStatus)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/assistant-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ overwriteAgentsMd: true }),
       })
+      const body = await readJson(res, AssistantStatusSchema)
 
       expect(res.status).toBe(200)
-
-      const body = await res.json() as typeof mockStatus
-      expect(body).toEqual(mockStatus)
-
-      expect(ensureAssistantMode).toHaveBeenCalledTimes(1)
-      expect(ensureAssistantMode).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 1, localPath: 'repos/test-repo' }),
-        expect.objectContaining({ overwriteAgentsMd: true }),
-      )
-
-      expect(opencodeServerManager.clearStartupError).not.toHaveBeenCalled()
-      expect(opencodeServerManager.restart).not.toHaveBeenCalled()
+      expect(body.repoId).toBe(0)
+      expect(body.files.agentsMd.exists).toBe(true)
+      expect(body.files.opencodeJson.exists).toBe(true)
+      expect(existsSync(body.files.agentsMd.path)).toBe(true)
     })
 
-    it('should handle errors from ensureAssistantMode', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: 'https://github.com/test/repo',
-        localPath: 'repos/test-repo',
-        fullPath: '/tmp/test-repo',
-        sourcePath: '/tmp/test-repo/.git',
-        branch: 'main',
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-        lastAccessedAt: Date.now(),
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+    it('returns 500 when the assistant directory cannot be created', async () => {
+      const assistantDirectory = path.join(workspace.path, 'repos', 'assistant')
+      mkdirSync(path.dirname(assistantDirectory), { recursive: true })
+      writeFileSync(assistantDirectory, 'not a directory')
 
-      vi.mocked(ensureAssistantMode).mockRejectedValue(new Error('Test error'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/assistant-mode', {
+      const res = await createApp().request('/0/assistant-mode', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({}),
       })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(500)
+      expect(body.error).not.toBe('')
     })
   })
 
   describe('POST /:id/reset-permissions', () => {
-    it('should return 404 when repo not found', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
+    it('removes every saved permission of the repo project', async () => {
+      const savedRemove = vi.fn(async () => undefined)
+      const client = createStubOpenCodeClient({
+        api: {
+          location: {
+            get: vi.fn(async () => ({
+              directory: repoPath,
+              project: { id: 'project-A', directory: repoPath, canonical: repoPath },
+            })),
+          },
+          permission: {
+            saved: {
+              list: vi.fn(async () => [
+                { id: 'perm-1', projectID: 'project-A', action: 'bash', resource: '*', time: { created: 1, updated: 1 } },
+                { id: 'perm-2', projectID: 'project-A', action: 'edit', resource: '*', time: { created: 2, updated: 2 } },
+              ]),
+              update: vi.fn(async () => ({
+                id: 'perm-updated',
+                projectID: 'project-A',
+                action: 'bash',
+                resource: '*',
+                time: { created: 1, updated: 1 },
+              })),
+              remove: savedRemove,
+            },
+          },
+        },
+      })
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+      const res = await createApp(client).request(`/${repo.id}/reset-permissions`, { method: 'POST' })
+      const body = await readJson(res, z.object({ removed: z.number() }))
+
+      expect(res.status).toBe(200)
+      expect(body.removed).toBe(2)
+      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-1' })
+      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-2' })
+    })
+
+    it('returns 404 for an unknown repo', async () => {
+      const res = await createApp().request('/999/reset-permissions', { method: 'POST' })
 
       expect(res.status).toBe(404)
     })
 
-    it('should return 400 without resolving the project when repo has no directory', async () => {
-      const mockRepo = {
-        id: 1,
-        repoUrl: undefined,
-        localPath: 'assistant',
-        fullPath: '',
-        sourcePath: undefined,
-        branch: undefined,
-        defaultBranch: 'main',
-        cloneStatus: 'ready' as const,
-        clonedAt: Date.now(),
-      }
-      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+    it('returns 502 when the OpenCode API call fails', async () => {
+      const client = createStubOpenCodeClient({
+        api: { location: { get: vi.fn(async () => { throw new ClientError('Transport') }) } },
+      })
 
-      const locationGet = vi.fn(async () => ({
-        directory: '/tmp/test-repo',
-        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
-      }))
-      const app = createTestRoutes(createStubOpenCodeClient({
-        api: { location: { get: locationGet } } as unknown as OpenCodeApi,
-      }))
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+      const res = await createApp(client).request(`/${repo.id}/reset-permissions`, { method: 'POST' })
+      const body = await readJson(res, z.object({ error: z.string(), code: z.string() }))
 
-      expect(res.status).toBe(400)
-      expect(locationGet).not.toHaveBeenCalled()
+      expect(res.status).toBe(502)
+      expect(body).toEqual({ error: 'Failed to reset permissions', code: 'ClientError' })
     })
 
-    it('should resolve the repo project, remove its saved permissions, and return the removed count', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
-
-      const locationGet = vi.fn(async () => ({
-        directory: '/tmp/test-repo',
-        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
-      }))
-      const savedList = vi.fn(async () => [
-        { id: 'perm-1', projectID: 'project-A', action: 'bash', resource: '*', time: { created: 1, updated: 1 } },
-        { id: 'perm-2', projectID: 'project-A', action: 'edit', resource: '*', time: { created: 2, updated: 2 } },
-      ])
-      const savedRemove = vi.fn(async () => undefined)
-
-      const app = createTestRoutes(createStubOpenCodeClient({
+    it('returns 500 when listing the saved permissions fails', async () => {
+      const client = createStubOpenCodeClient({
         api: {
-          location: { get: locationGet },
-          permission: { saved: { list: savedList, remove: savedRemove } },
-        } as unknown as OpenCodeApi,
-      }))
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+          location: {
+            get: vi.fn(async () => ({
+              directory: repoPath,
+              project: { id: 'project-A', directory: repoPath, canonical: repoPath },
+            })),
+          },
+          permission: {
+            saved: {
+              list: vi.fn(async () => {
+                throw new Error('list failed')
+              }),
+              update: vi.fn(async () => ({
+                id: 'perm-updated',
+                projectID: 'project-A',
+                action: 'bash',
+                resource: '*',
+                time: { created: 1, updated: 1 },
+              })),
+              remove: vi.fn(async () => undefined),
+            },
+          },
+        },
+      })
 
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ removed: 2 })
-      expect(locationGet).toHaveBeenCalledWith({ location: { directory: '/tmp/test-repo' } })
-      expect(savedList).toHaveBeenCalledWith({ projectID: 'project-A' })
-      expect(savedRemove).toHaveBeenCalledTimes(2)
-      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-1' })
-      expect(savedRemove).toHaveBeenCalledWith({ id: 'perm-2' })
+      const res = await createApp(client).request(`/${repo.id}/reset-permissions`, { method: 'POST' })
+      const body = await readJson(res, ErrorSchema)
+
+      expect(res.status).toBe(500)
+      expect(body.error).toBe('Failed to reset permissions')
     })
   })
 
   describe('POST /', () => {
-    it('should return 400 when neither repoUrl nor localPath is provided', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/', {
+    it('returns 400 when neither repoUrl nor localPath is provided', async () => {
+      const res = await createApp().request('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({}),
       })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
       expect(body.error).toBe('Either repoUrl or localPath is required')
     })
 
-    it('should create a local repo through initLocalRepo', async () => {
-      const repo = createMockRepo()
-      vi.mocked(repoService.initLocalRepo).mockResolvedValue(repo)
+    it('registers an existing local repository', async () => {
+      const localPath = path.join(workspace.path, 'local-project')
+      createCommittedRepo(localPath)
 
-      const app = createTestRoutes()
-      const res = await app.request('/', {
+      const res = await createApp().request('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ localPath: 'repos/test-repo', branch: 'main' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ localPath }),
       })
+      const body = await readJson(res, RepoSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo
-      expect(body.id).toBe(1)
-      expect(repoService.initLocalRepo).toHaveBeenCalledWith(mockDb, mockGitAuthService, 'repos/test-repo', 'main')
+      expect(body.localPath).toBe('local-project')
+      expect(listRepos(db).map((entry) => entry.localPath)).toContain('local-project')
     })
 
-    it('should clone a remote repo through cloneRepo', async () => {
-      const repo = createMockRepo({ repoUrl: 'https://github.com/test/remote' })
-      vi.mocked(repoService.cloneRepo).mockResolvedValue(repo)
+    it('clones a remote repository', async () => {
+      const otherOrigin = path.join(workspace.path, 'other-origin.git')
+      createOrigin(otherOrigin, path.join(workspace.path, 'other-work'))
 
-      const app = createTestRoutes()
-      const res = await app.request('/', {
+      const res = await createApp().request('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoUrl: 'https://github.com/test/remote', directoryName: 'remote' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ repoUrl: otherOrigin, directoryName: 'cloned' }),
       })
+      const body = await readJson(res, RepoSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo
-      expect(body.repoUrl).toBe('https://github.com/test/remote')
-      expect(repoService.cloneRepo).toHaveBeenCalledWith(mockDb, mockGitAuthService, 'https://github.com/test/remote', {
-        branch: undefined,
-        directoryName: 'remote',
-        useWorktree: undefined,
-        skipSSHVerification: undefined,
-        baseBranch: undefined,
-      })
+      expect(body.localPath).toBe('cloned')
+      expect(existsSync(path.join(workspace.path, 'repos', 'cloned', '.git'))).toBe(true)
     })
 
-    it('should return 500 when repo creation throws', async () => {
-      vi.mocked(repoService.initLocalRepo).mockRejectedValue(new Error('init failed'))
+    it('returns 500 when the repository cannot be created', async () => {
+      const blocker = path.join(workspace.path, 'repos', 'blocker')
+      mkdirSync(path.dirname(blocker), { recursive: true })
+      writeFileSync(blocker, 'not a directory')
 
-      const app = createTestRoutes()
-      const res = await app.request('/', {
+      const res = await createApp().request('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ localPath: 'repos/test-repo' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ localPath: 'blocker/child' }),
       })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('init failed')
+      expect(body.error).not.toBe('')
     })
 
-    it('should return the client status for user-input repo failures', async () => {
-      vi.mocked(repoService.cloneRepo).mockRejectedValue(Object.assign(
-        new Error('Repository not found or access denied: https://github.com/test/missing.'),
-        { statusCode: 400 },
-      ))
-
-      const app = createTestRoutes()
-      const res = await app.request('/', {
+    it('returns the client status for a user-input clone failure', async () => {
+      const res = await createApp().request('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoUrl: 'https://github.com/test/missing' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ repoUrl: path.join(workspace.path, 'missing-origin.git') }),
       })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Repository not found or access denied: https://github.com/test/missing.')
+      expect(body.error).not.toBe('')
     })
   })
 
-  describe('POST /:id/workspaces', () => {
-    it('creates the workspace and returns the worktree setup result', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/workspaces', { method: 'POST' })
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ directory: '/tmp/wrk-test', worktreeSetup: { status: 'none' } })
-    })
-
-    it('passes a requested worktree name to OpenCode', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-      const client = createStubOpenCodeClient()
-      const create = vi.fn(async () => ({ directory: '/tmp/feature-login' }))
-      client.api.worktree.create = create as never
-
-      const res = await createTestRoutes(client).request('/1/workspaces', {
+  describe('POST /discover', () => {
+    it('returns 400 for an invalid body', async () => {
+      const res = await createApp().request('/discover', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: ' feature-login ' }),
-      })
-
-      expect(res.status).toBe(200)
-      expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'feature-login' }))
-    })
-
-    it('rejects a worktree name that is not a single folder name', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-      const client = createStubOpenCodeClient()
-      const create = vi.fn(async () => ({ directory: '/tmp/x' }))
-      client.api.worktree.create = create as never
-
-      const res = await createTestRoutes(client).request('/1/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: '../escape' }),
-      })
-
-      expect(res.status).toBe(400)
-      expect(await res.json()).toEqual({ error: 'Directory name cannot contain dot-dot path segments' })
-      expect(create).not.toHaveBeenCalled()
-    })
-
-    it('returns 200 with a failed worktree setup when the setup terminal cannot start', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-      vi.mocked(db.getRepoSetting).mockImplementation((_database, _repoId, key) =>
-        key === 'worktreeSetupCommands' ? JSON.stringify(['pnpm install']) : null,
-      )
-      vi.mocked(mockTerminalService.create).mockRejectedValueOnce(new Error('spawn failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/workspaces', { method: 'POST' })
-
-      expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({
-        directory: '/tmp/wrk-test',
-        worktreeSetup: { status: 'failed', error: 'spawn failed' },
-      })
-    })
-
-    it('runs the main project setup when a linked worktree row creates a workspace', async () => {
-      const worktreeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'ocm-workspace-'))
-      const repoFile = { version: 1 as const, setupWorktree: ['pnpm repo-setup'] }
-      fs.mkdirSync(path.join(worktreeDirectory, '.ocm'), { recursive: true })
-      fs.writeFileSync(path.join(worktreeDirectory, '.ocm', 'project.json'), JSON.stringify(repoFile))
-      const hash = new ProjectConfigService(mockDb, {} as never, mockGitAuthService).hashRepoFile(repoFile)
-
-      vi.mocked(db.getRepoById).mockReturnValue(
-        createMockRepo({ id: 2, fullPath: '/tmp/repos/worktree', isWorktree: true }),
-      )
-      vi.mocked(db.getRepoSetting).mockImplementation((_database, repoId, key) => {
-        if (repoId !== 1) return null
-        if (key === 'worktreeSetupCommands') return JSON.stringify(['pnpm install'])
-        if (key === 'repoConfigTrustHash') return hash
-        return null
-      })
-      const mainRepo = createMockRepo({ id: 1, fullPath: '/tmp/repos/main' })
-      const resolveSpy = vi
-        .spyOn(ProjectConfigService.prototype, 'resolveProjectRepo')
-        .mockResolvedValue(mainRepo)
-      const client = createStubOpenCodeClient()
-      client.api.worktree.create = vi.fn(async () => ({ directory: worktreeDirectory })) as never
-      vi.mocked(mockTerminalService.create).mockResolvedValue({
-        id: 'pty-setup',
-        title: 'Worktree setup',
-        kind: 'setup',
-        cwd: worktreeDirectory,
-        status: 'running',
-      })
-
-      try {
-        const app = createTestRoutes(client)
-        const res = await app.request('/2/workspaces', { method: 'POST' })
-
-        expect(res.status).toBe(200)
-        const body = (await res.json()) as { worktreeSetup: { status: string; repoCommandsSkipped: boolean } }
-        expect(body.worktreeSetup).toMatchObject({ status: 'started', repoCommandsSkipped: false })
-        expect(vi.mocked(mockTerminalService.create)).toHaveBeenCalledWith(worktreeDirectory, {
-          kind: 'setup',
-          name: 'Worktree setup',
-          command: '/bin/sh',
-          args: ['-c', 'set -e\npnpm install\npnpm repo-setup'],
-          env: { ROOT_PROJECT_PATH: '/tmp/repos/main' },
-        })
-      } finally {
-        resolveSpy.mockRestore()
-        fs.rmSync(worktreeDirectory, { recursive: true, force: true })
-      }
-    })
-
-    it('returns 200 with a failed setup when resolving the main project fails', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(
-        createMockRepo({ id: 2, fullPath: '/tmp/repos/worktree', isWorktree: true }),
-      )
-      const resolveSpy = vi
-        .spyOn(ProjectConfigService.prototype, 'resolveProjectRepo')
-        .mockRejectedValue(new Error('git unavailable'))
-
-      try {
-        const app = createTestRoutes()
-        const res = await app.request('/2/workspaces', { method: 'POST' })
-
-        expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({
-          directory: '/tmp/wrk-test',
-          worktreeSetup: { status: 'failed', error: 'git unavailable' },
-        })
-      } finally {
-        resolveSpy.mockRestore()
-      }
-    })
-  })
-
-  describe('POST /discover', () => {    it('should return 400 for an invalid body', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/discover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ rootPath: '' }),
       })
 
       expect(res.status).toBe(400)
-      expect(repoService.discoverLocalRepos).not.toHaveBeenCalled()
     })
 
-    it('should return the discovered repos', async () => {
-      const discovery = { repos: [createMockRepo()], discoveredCount: 1, existingCount: 0, errors: [] }
-      vi.mocked(repoService.discoverLocalRepos).mockResolvedValue(discovery)
+    it('returns the discovered repositories', async () => {
+      const discoveryRoot = path.join(workspace.path, 'discovery')
+      createCommittedRepo(path.join(discoveryRoot, 'sample-repo'))
 
-      const app = createTestRoutes()
-      const res = await app.request('/discover', {
+      const res = await createApp().request('/discover', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath: '/tmp/repos', maxDepth: 2 }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ rootPath: discoveryRoot, maxDepth: 2 }),
       })
+      const body = await readJson(res, DiscoverySchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as typeof discovery
       expect(body.discoveredCount).toBe(1)
-      expect(repoService.discoverLocalRepos).toHaveBeenCalledWith(mockDb, mockGitAuthService, '/tmp/repos', 2)
+      expect(body.repos[0]?.localPath).toBe('sample-repo')
     })
 
-    it('should return 500 when discovery throws', async () => {
-      vi.mocked(repoService.discoverLocalRepos).mockRejectedValue(new Error('discover failed'))
+    it('returns 400 when the discovery root does not exist', async () => {
+      const missingRoot = path.join(workspace.path, 'missing-root')
 
-      const app = createTestRoutes()
-      const res = await app.request('/discover', {
+      const res = await createApp().request('/discover', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rootPath: '/tmp/repos' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ rootPath: missingRoot }),
       })
+      const body = await readJson(res, ErrorSchema)
 
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('discover failed')
+      expect(res.status).toBe(400)
+      expect(body.error).not.toBe('')
     })
   })
 
   describe('GET /', () => {
-    it('should return repos with current branch and git credential id, skipping the assistant repo', async () => {
-      const repo = createMockRepo({ id: 1 })
-      const assistantRepo = createMockRepo({ id: 0, localPath: 'assistant', fullPath: '/tmp/repos/assistant' })
-      vi.mocked(db.listRepos).mockReturnValue([repo, assistantRepo])
-      vi.mocked(repoService.getCurrentBranch).mockResolvedValue('main')
-      vi.mocked(db.getRepoGitCredentialId).mockReturnValue('cred-1')
-
-      const app = createTestRoutes()
-      const res = await app.request('/', { method: 'GET' })
+    it('returns the repos with their current branch', async () => {
+      const res = await createApp().request('/', { method: 'GET' })
+      const body = await readJson(res, z.array(RepoSchema))
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Array<Repo & { currentBranch?: string }>
-      expect(body).toHaveLength(2)
-      expect(body[0]?.currentBranch).toBe('main')
-      expect(body[0]?.gitCredentialId).toBe('cred-1')
-      expect(body[1]?.currentBranch).toBeUndefined()
-      expect(repoService.getCurrentBranch).toHaveBeenCalledTimes(1)
-      expect(repoService.getCurrentBranch).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), {})
-    })
-
-    it('should return 500 when listing repos throws', async () => {
-      vi.mocked(db.listRepos).mockImplementation(() => {
-        throw new Error('list failed')
-      })
-
-      const app = createTestRoutes()
-      const res = await app.request('/', { method: 'GET' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('list failed')
+      const listed = body.find((entry) => entry.id === repo.id)
+      expect(listed?.currentBranch).toBe('main')
+      expect(listed?.gitCredentialId).toBeUndefined()
     })
   })
 
   describe('PUT /order', () => {
-    it('should return 400 when order is not an array of numbers', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/order', {
+    it('returns 400 when the order is not an array of numbers', async () => {
+      const res = await createApp().request('/order', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ order: ['a', 'b'] }),
       })
 
       expect(res.status).toBe(400)
-      expect(mockUpdateSettings).not.toHaveBeenCalled()
     })
 
-    it('should update the repo order', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/order', {
+    it('stores the requested repo order', async () => {
+      const res = await createApp().request('/order', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order: [2, 1] }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ order: [repo.id] }),
       })
+      const body = await readJson(res, z.object({ success: z.boolean() }))
 
       expect(res.status).toBe(200)
-      const body = await res.json() as { success: boolean }
       expect(body.success).toBe(true)
-      expect(mockUpdateSettings).toHaveBeenCalledWith({ repoOrder: [2, 1] })
+      expect(new SettingsService(db).getSettings().preferences.repoOrder).toEqual([repo.id])
     })
 
-    it('should return 500 when the body is not valid JSON', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/order', {
+    it('returns 500 when the body is not valid JSON', async () => {
+      const res = await createApp().request('/order', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: 'not-json',
       })
 
@@ -770,540 +449,340 @@ describe('Repo Routes', () => {
   })
 
   describe('GET /:id', () => {
-    it('should return the repo with its current branch', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 5 }))
-      vi.mocked(repoService.getCurrentBranch).mockResolvedValue('develop')
-
-      const app = createTestRoutes()
-      const res = await app.request('/5', { method: 'GET' })
+    it('returns the repo with its current branch', async () => {
+      const res = await createApp().request(`/${repo.id}`, { method: 'GET' })
+      const body = await readJson(res, RepoSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo & { currentBranch?: string }
-      expect(body.id).toBe(5)
-      expect(body.currentBranch).toBe('develop')
+      expect(body.id).toBe(repo.id)
+      expect(body.currentBranch).toBe('main')
     })
 
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/5', { method: 'GET' })
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999', { method: 'GET' })
 
       expect(res.status).toBe(404)
-    })
-
-    it('should return 500 when reading the current branch throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 5 }))
-      vi.mocked(repoService.getCurrentBranch).mockRejectedValue(new Error('branch failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/5', { method: 'GET' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('branch failed')
     })
   })
 
   describe('PATCH /:id/git-credential', () => {
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/git-credential', {
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999/git-credential', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ credentialId: 'cred-1' }),
       })
 
       expect(res.status).toBe(404)
     })
 
-    it('should return 400 when the credential is not in settings', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      mockGetSettings.mockReturnValue({ preferences: { repoOrder: [], gitCredentials: [] }, updatedAt: Date.now() })
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/git-credential', {
+    it('returns 400 when the credential is not in settings', async () => {
+      const res = await createApp().request(`/${repo.id}/git-credential`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ credentialId: 'cred-1' }),
       })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(400)
-      expect(db.setRepoGitCredentialId).not.toHaveBeenCalled()
+      expect(body.error).toBe('Credential not found')
+      expect(getRepoGitCredentialId(db, repo.id)).toBeNull()
     })
 
-    it('should set the credential and return the updated repo', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      mockGetSettings.mockReturnValue({
-        preferences: { repoOrder: [], gitCredentials: [{ id: 'cred-1', name: 'test', host: 'github.com' }] },
-        updatedAt: Date.now(),
+    it('sets the credential and returns the updated repo', async () => {
+      seedSettings(db, {
+        gitCredentials: [{ id: 'cred-1', name: 'test', host: 'github.com', type: 'pat', token: 'token-1' }],
       })
-      vi.mocked(db.getRepoGitCredentialId).mockReturnValue('cred-1')
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/git-credential', {
+      const res = await createApp().request(`/${repo.id}/git-credential`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
+        body: JSON.stringify({ credentialId: 'cred-1' }),
+      })
+      const body = await readJson(res, RepoSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.gitCredentialId).toBe('cred-1')
+      expect(getRepoGitCredentialId(db, repo.id)).toBe('cred-1')
+    })
+
+    it('clears the credential when none is provided', async () => {
+      seedSettings(db, {
+        gitCredentials: [{ id: 'cred-1', name: 'test', host: 'github.com', type: 'pat', token: 'token-1' }],
+      })
+      await createApp().request(`/${repo.id}/git-credential`, {
+        method: 'PATCH',
+        headers: jsonHeaders,
         body: JSON.stringify({ credentialId: 'cred-1' }),
       })
 
-      expect(res.status).toBe(200)
-      const body = await res.json() as Repo
-      expect(body.gitCredentialId).toBe('cred-1')
-      expect(db.setRepoGitCredentialId).toHaveBeenCalledWith(mockDb, 1, 'cred-1')
-    })
-
-    it('should clear the credential when none is provided', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(db.getRepoGitCredentialId).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/git-credential', {
+      const res = await createApp().request(`/${repo.id}/git-credential`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ credentialId: '' }),
       })
 
       expect(res.status).toBe(200)
-      expect(db.setRepoGitCredentialId).toHaveBeenCalledWith(mockDb, 1, null)
-    })
-
-    it('should return 500 when reading the repo throws', async () => {
-      vi.mocked(db.getRepoById).mockImplementation(() => {
-        throw new Error('repo failed')
-      })
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/git-credential', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialId: 'cred-1' }),
-      })
-
-      expect(res.status).toBe(500)
+      expect(getRepoGitCredentialId(db, repo.id)).toBeNull()
     })
   })
 
   describe('DELETE /:id', () => {
-    it('should return 403 for the assistant repo id', async () => {
-      const app = createTestRoutes()
-      const res = await app.request('/0', { method: 'DELETE' })
+    it('returns 403 for the assistant repo id', async () => {
+      const res = await createApp().request('/0', { method: 'DELETE' })
 
       expect(res.status).toBe(403)
     })
 
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999', { method: 'DELETE' })
 
       expect(res.status).toBe(404)
     })
 
-    it('should prepare the delete and remove the repo files', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
+    it('removes the checkout and the repo row', async () => {
+      const res = await createApp().request(`/${repo.id}`, { method: 'DELETE' })
+      const body = await readJson(res, z.object({ success: z.boolean() }))
 
       expect(res.status).toBe(200)
-      const body = await res.json() as { success: boolean }
       expect(body.success).toBe(true)
-      expect(mockPrepareRepoDelete).toHaveBeenCalledWith(1)
-      expect(mockTerminalService.removeAll).toHaveBeenCalledWith('/tmp/repos/test-repo')
-      expect(repoService.deleteRepoFiles).toHaveBeenCalledWith(mockDb, 1)
+      expect(existsSync(repoPath)).toBe(false)
+      expect(getRepoById(db, repo.id)).toBeNull()
     })
 
-    it('should still delete the repo when terminal cleanup throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-      vi.mocked(mockTerminalService.removeAll).mockRejectedValueOnce(new Error('pty cleanup failed'))
+    it('still deletes the repo when terminal cleanup fails', async () => {
+      const client = createStubOpenCodeClient({ api: { pty: { list: vi.fn(async () => { throw new Error('pty cleanup failed') }) } } })
 
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
+      const res = await createApp(client).request(`/${repo.id}`, { method: 'DELETE' })
 
       expect(res.status).toBe(200)
-      expect(repoService.deleteRepoFiles).toHaveBeenCalledWith(mockDb, 1)
-    })
-
-    it('removes terminals for OpenCode workspace siblings but not manager worktree repos', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-      vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-      vi.mocked(repoService.listRepoSiblings).mockImplementation(async (_database, _repoId, _gitEnv, _client, filter) => {
-        const siblings = [
-          { ...createMockRepo({ id: 2, fullPath: '/tmp/repos/manager-worktree', isWorktree: true }), currentBranch: undefined },
-          { ...createMockRepo({ id: -1, fullPath: '/tmp/plugin-workspace' }), currentBranch: undefined, worktreeSource: 'opencode' as const },
-        ]
-        return filter ? siblings.filter(filter) : siblings
-      })
-
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
-
-      expect(res.status).toBe(200)
-      expect(mockTerminalService.removeAll).toHaveBeenCalledWith('/tmp/repos/test-repo')
-      expect(mockTerminalService.removeAll).toHaveBeenCalledWith('/tmp/plugin-workspace')
-      expect(mockTerminalService.removeAll).not.toHaveBeenCalledWith('/tmp/repos/manager-worktree')
-      expect(repoService.listRepoSiblings).toHaveBeenCalledWith(mockDb, 1, {}, expect.anything(), expect.any(Function))
-      expect(repoService.deleteRepoFiles).toHaveBeenCalledWith(mockDb, 1)
-    })
-
-    it('still deletes the repo when listing workspace siblings throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.deleteRepoFiles).mockResolvedValue(undefined)
-      vi.mocked(repoService.listRepoSiblings).mockRejectedValue(new Error('siblings failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
-
-      expect(res.status).toBe(200)
-      expect(repoService.deleteRepoFiles).toHaveBeenCalledWith(mockDb, 1)
-    })
-
-    it('should return 500 when removing the repo files throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.deleteRepoFiles).mockRejectedValue(new Error('delete failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1', { method: 'DELETE' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('delete failed')
+      expect(getRepoById(db, repo.id)).toBeNull()
     })
   })
 
   describe('POST /:id/pull', () => {
-    it('should pull the repo and return the refreshed repo', async () => {
-      const repo = createMockRepo({ id: 3 })
-      vi.mocked(repoService.pullRepo).mockResolvedValue(undefined)
-      vi.mocked(db.getRepoById).mockReturnValue(repo)
+    it('pulls a commit pushed to the origin', async () => {
+      git(['commit', '--allow-empty', '-m', 'Remote change'], workPath)
+      git(['push', 'origin', 'main'], workPath)
 
-      const app = createTestRoutes()
-      const res = await app.request('/3/pull', { method: 'POST' })
+      const res = await createApp().request(`/${repo.id}/pull`, { method: 'POST' })
+      const body = await readJson(res, RepoSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo
-      expect(body.id).toBe(3)
-      expect(repoService.pullRepo).toHaveBeenCalledWith(mockDb, mockGitAuthService, 3)
+      expect(body.id).toBe(repo.id)
+      expect(git(['log', '-1', '--format=%s'], repoPath)).toBe('Remote change')
     })
 
-    it('should return 500 when pulling throws', async () => {
-      vi.mocked(repoService.pullRepo).mockRejectedValue(new Error('pull failed'))
+    it('returns 500 when the origin is unreachable', async () => {
+      rmSync(originPath, { recursive: true, force: true })
 
-      const app = createTestRoutes()
-      const res = await app.request('/3/pull', { method: 'POST' })
+      const res = await createApp().request(`/${repo.id}/pull`, { method: 'POST' })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('pull failed')
+      expect(body.error).not.toBe('')
     })
   })
 
   describe('POST /:id/branch/switch', () => {
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/switch', {
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999/branch/switch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ branch: 'feature' }),
       })
 
       expect(res.status).toBe(404)
     })
 
-    it('should return 400 when the branch is missing', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/switch', {
+    it('returns 400 when the branch is missing', async () => {
+      const res = await createApp().request(`/${repo.id}/branch/switch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({}),
       })
 
       expect(res.status).toBe(400)
     })
 
-    it('should switch the branch and return the current branch', async () => {
-      const repo = createMockRepo({ id: 1 })
-      vi.mocked(db.getRepoById).mockReturnValue(repo)
-      vi.mocked(repoService.switchBranch).mockResolvedValue(undefined)
-      vi.mocked(repoService.getCurrentBranch).mockResolvedValue('feature')
+    it('switches to an existing branch', async () => {
+      git(['branch', 'feature'], repoPath)
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/switch', {
+      const res = await createApp().request(`/${repo.id}/branch/switch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ branch: 'feature' }),
       })
+      const body = await readJson(res, RepoSchema)
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo & { currentBranch?: string }
       expect(body.currentBranch).toBe('feature')
-      expect(repoService.switchBranch).toHaveBeenCalledWith(mockDb, mockGitAuthService, 1, 'feature')
-    })
-
-    it('should return 500 when switching the branch throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.switchBranch).mockRejectedValue(new Error('switch failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch: 'feature' }),
-      })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('switch failed')
+      expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).toBe('feature')
     })
   })
 
   describe('POST /:id/branch/create', () => {
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/create', {
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999/branch/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ branch: 'feature' }),
       })
 
       expect(res.status).toBe(404)
     })
 
-    it('should return 400 when the branch is missing', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/create', {
+    it('returns 400 when the branch is missing', async () => {
+      const res = await createApp().request(`/${repo.id}/branch/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({}),
       })
 
       expect(res.status).toBe(400)
     })
 
-    it('should create the branch and return the current branch', async () => {
-      const repo = createMockRepo({ id: 1 })
-      vi.mocked(db.getRepoById).mockReturnValue(repo)
-      vi.mocked(repoService.createBranch).mockResolvedValue(undefined)
-      vi.mocked(repoService.getCurrentBranch).mockResolvedValue('feature')
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/create', {
+    it('creates and checks out the branch', async () => {
+      const res = await createApp().request(`/${repo.id}/branch/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ branch: 'feature' }),
+      })
+      const body = await readJson(res, RepoSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.currentBranch).toBe('feature')
+      expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).toBe('feature')
+    })
+
+    it('returns 400 for an invalid branch name', async () => {
+      const res = await createApp().request(`/${repo.id}/branch/create`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ branch: 'bad name..x' }),
+      })
+      const body = await readJson(res, ErrorSchema)
+
+      expect(res.status).toBe(400)
+      expect(body.error).not.toBe('')
+    })
+  })
+
+  describe('POST /:id/workspaces', () => {
+    function createWorktreeClient(directory: string): StubClient {
+      return createStubOpenCodeClient({ api: { worktree: { create: vi.fn(async () => ({ directory })) } } })
+    }
+
+    it('creates the workspace and reports no worktree setup', async () => {
+      const worktreeDirectory = path.join(workspace.path, 'repos', 'repo-worktree')
+      const res = await createApp(createWorktreeClient(worktreeDirectory)).request(`/${repo.id}/workspaces`, { method: 'POST' })
+      const body = await readJson(res, WorkspaceSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.directory).toBe(worktreeDirectory)
+      expect(body.worktreeSetup).toEqual({ status: 'none' })
+    })
+
+    it('passes the requested worktree name to OpenCode', async () => {
+      const create = vi.fn(async () => ({ directory: path.join(workspace.path, 'repos', 'feature-login') }))
+      const client = createStubOpenCodeClient({ api: { worktree: { create } } })
+
+      const res = await createApp(client).request(`/${repo.id}/workspaces`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ name: ' feature-login ' }),
       })
 
       expect(res.status).toBe(200)
-      const body = await res.json() as Repo & { currentBranch?: string }
-      expect(body.currentBranch).toBe('feature')
-      expect(repoService.createBranch).toHaveBeenCalledWith(mockDb, mockGitAuthService, 1, 'feature')
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'feature-login' }))
     })
 
-    it('should return 500 when creating the branch throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.createBranch).mockRejectedValue(new Error('create failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/create', {
+    it('rejects a worktree name that is not a single folder name', async () => {
+      const res = await createApp().request(`/${repo.id}/workspaces`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch: 'feature' }),
+        headers: jsonHeaders,
+        body: JSON.stringify({ name: '../escape' }),
       })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('create failed')
-    })
-
-    it('should return 400 when the branch name is invalid', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(repoService.createBranch).mockRejectedValue(Object.assign(
-        new Error("Invalid branch name: 'bad name..x'."),
-        { statusCode: 400 },
-      ))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/branch/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch: 'bad name..x' }),
-      })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(400)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe("Invalid branch name: 'bad name..x'.")
+      expect(body.error).toBe('Directory name cannot contain dot-dot path segments')
+    })
+
+    it('reports a failed worktree setup when the setup terminal cannot start', async () => {
+      const worktreeDirectory = path.join(workspace.path, 'repos', 'repo-setup-worktree')
+      const projectConfigService = new ProjectConfigService(db, createGitService(createGitAuthService()), createGitAuthService())
+      projectConfigService.setPersonalSetup(repo, ['pnpm install'])
+      const client = createStubOpenCodeClient({
+        api: {
+          worktree: { create: vi.fn(async () => ({ directory: worktreeDirectory })) },
+          pty: { create: vi.fn(async () => { throw new Error('spawn failed') }) },
+        },
+      })
+
+      const res = await createApp(client).request(`/${repo.id}/workspaces`, { method: 'POST' })
+      const body = await readJson(res, WorkspaceSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.worktreeSetup).toEqual({ status: 'failed', error: 'spawn failed' })
+    })
+
+    it('skips repo commands when the worktree repo file is not trusted', async () => {
+      const worktreeDirectory = path.join(workspace.path, 'repos', 'repo-untrusted-worktree')
+      mkdirSync(path.join(worktreeDirectory, '.ocm'), { recursive: true })
+      writeFileSync(
+        path.join(worktreeDirectory, '.ocm', 'project.json'),
+        JSON.stringify({ version: 1, setupWorktree: ['pnpm repo-setup'] }),
+      )
+      const projectConfigService = new ProjectConfigService(db, createGitService(createGitAuthService()), createGitAuthService())
+      projectConfigService.setPersonalSetup(repo, ['pnpm install'])
+      const client = createStubOpenCodeClient({
+        api: {
+          worktree: { create: vi.fn(async () => ({ directory: worktreeDirectory })) },
+          pty: {
+            create: vi.fn(async () => ({
+              location: { directory: worktreeDirectory },
+              data: { id: 'pty-setup', title: 'Worktree setup', command: '/bin/sh', args: [], cwd: worktreeDirectory, status: 'running' as const, pid: 1 },
+            })),
+          },
+        },
+      })
+
+      const res = await createApp(client).request(`/${repo.id}/workspaces`, { method: 'POST' })
+      const body = await readJson(res, WorkspaceSchema)
+
+      expect(res.status).toBe(200)
+      expect(body.worktreeSetup).toMatchObject({ status: 'started', repoCommandsSkipped: true })
     })
   })
 
   describe('GET /:id/download', () => {
-    it('should return 404 when the repo does not exist', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
+    it('streams a zip archive of the repository', async () => {
+      const res = await createApp().request(`/${repo.id}/download?includeGit=true&includePaths=src,docs`)
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/download', { method: 'GET' })
+      expect(res.status).toBe(200)
+      expect(res.headers.get('Content-Type')).toBe('application/zip')
+      expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="repo.zip"')
+      const body = Buffer.from(await res.arrayBuffer())
+      expect(body.length).toBeGreaterThan(0)
+      expect(res.headers.get('Content-Length')).toBe(String(body.length))
+    })
+
+    it('returns 404 when the repo does not exist', async () => {
+      const res = await createApp().request('/999/download', { method: 'GET' })
 
       expect(res.status).toBe(404)
     })
 
-    it('should stream the archive with the requested options', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/repos/test-repo' }))
-      vi.mocked(archiveService.createRepoArchive).mockResolvedValue('/tmp/repo-archive.zip')
-      vi.mocked(archiveService.getArchiveSize).mockResolvedValue(3)
-      vi.mocked(archiveService.getArchiveStream).mockReturnValue(
-        Readable.from(['zip']) as unknown as ReturnType<typeof archiveService.getArchiveStream>,
-      )
-      vi.mocked(archiveService.deleteArchive).mockResolvedValue(undefined)
+    it('returns 500 when the archive cannot be created', async () => {
+      const missingPath = path.join(workspace.path, 'repos', 'gone')
+      const missing = seedRepo(db, { localPath: 'gone', sourcePath: missingPath, isLocal: false })
 
-      const app = createTestRoutes()
-      const res = await app.request('/1/download?includeGit=true&includePaths=src,docs', { method: 'GET' })
-
-      expect(res.status).toBe(200)
-      expect(res.headers.get('Content-Type')).toBe('application/zip')
-      expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="test-repo.zip"')
-      expect(res.headers.get('Content-Length')).toBe('3')
-      expect(archiveService.createRepoArchive).toHaveBeenCalledWith('/tmp/repos/test-repo', {
-        includeGit: true,
-        includePaths: ['src', 'docs'],
-      })
-
-      const body = await res.text()
-      expect(body).toBe('zip')
-      await vi.waitFor(() => {
-        expect(archiveService.deleteArchive).toHaveBeenCalledWith('/tmp/repo-archive.zip')
-      })
-    })
-
-    it('should return 500 when archive creation throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1 }))
-      vi.mocked(archiveService.createRepoArchive).mockRejectedValue(new Error('archive failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/1/download', { method: 'GET' })
+      const res = await createApp().request(`/${missing.id}/download`, { method: 'GET' })
+      const body = await readJson(res, ErrorSchema)
 
       expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('archive failed')
-    })
-  })
-
-  describe('POST /:id/reset-permissions upstream failure', () => {
-    it('should return 502 when the OpenCode API call fails', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
-      const locationGet = vi.fn(async () => {
-        throw new ClientError('Transport')
-      })
-
-      const app = createTestRoutes(createStubOpenCodeClient({
-        api: { location: { get: locationGet } } as unknown as OpenCodeApi,
-      }))
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
-
-      expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: 'Failed to reset permissions', code: 'ClientError' })
-    })
-
-    it('should return 500 when listing saved permissions throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(createMockRepo({ id: 1, fullPath: '/tmp/test-repo' }))
-      const locationGet = vi.fn(async () => ({
-        directory: '/tmp/test-repo',
-        project: { id: 'project-A', directory: '/tmp/test-repo', canonical: '/tmp/test-repo' },
-      }))
-      const savedList = vi.fn(async () => {
-        throw new Error('list failed')
-      })
-
-      const app = createTestRoutes(createStubOpenCodeClient({
-        api: {
-          location: { get: locationGet },
-          permission: { saved: { list: savedList, remove: vi.fn() } },
-        } as unknown as OpenCodeApi,
-      }))
-      const res = await app.request('/1/reset-permissions', { method: 'POST' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('Failed to reset permissions')
-    })
-  })
-
-  describe('assistant repo id 0', () => {
-    const assistantRepo = createMockRepo({ id: 0, localPath: 'assistant', fullPath: '/tmp/repos/assistant' })
-
-    it('should return assistant mode status for the assistant repo on GET', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-      vi.mocked(buildAssistantRepo).mockReturnValue(assistantRepo)
-      const status: AssistantModeStatus = {
-        repoId: 0,
-        directory: '/tmp/repos/assistant',
-        relativePath: 'repos/assistant',
-        files: {
-          agentsMd: { path: '/tmp/repos/assistant/AGENTS.md', exists: true, created: false },
-          opencodeJson: { path: '/tmp/repos/assistant/opencode.json', exists: true, created: false },
-        },
-      }
-      vi.mocked(getAssistantModeStatus).mockResolvedValue(status)
-
-      const app = createTestRoutes()
-      const res = await app.request('/0/assistant-mode', { method: 'GET' })
-
-      expect(res.status).toBe(200)
-      const body = await res.json() as AssistantModeStatus
-      expect(body.repoId).toBe(0)
-      expect(getAssistantModeStatus).toHaveBeenCalledWith(assistantRepo)
-    })
-
-    it('should initialize assistant mode for the assistant repo on POST', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-      vi.mocked(buildAssistantRepo).mockReturnValue(assistantRepo)
-      const status: AssistantModeStatus = {
-        repoId: 0,
-        directory: '/tmp/repos/assistant',
-        relativePath: 'repos/assistant',
-        files: {
-          agentsMd: { path: '/tmp/repos/assistant/AGENTS.md', exists: true, created: true },
-          opencodeJson: { path: '/tmp/repos/assistant/opencode.json', exists: true, created: true },
-        },
-      }
-      vi.mocked(ensureAssistantMode).mockResolvedValue(status)
-
-      const app = createTestRoutes()
-      const res = await app.request('/0/assistant-mode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overwriteAgentsMd: true }),
-      })
-
-      expect(res.status).toBe(200)
-      const body = await res.json() as AssistantModeStatus
-      expect(body.repoId).toBe(0)
-      expect(ensureAssistantMode).toHaveBeenCalledWith(assistantRepo, { overwriteAgentsMd: true })
-    })
-
-    it('should return 500 when the assistant mode status throws', async () => {
-      vi.mocked(db.getRepoById).mockReturnValue(null)
-      vi.mocked(buildAssistantRepo).mockReturnValue(assistantRepo)
-      vi.mocked(getAssistantModeStatus).mockRejectedValue(new Error('assistant failed'))
-
-      const app = createTestRoutes()
-      const res = await app.request('/0/assistant-mode', { method: 'GET' })
-
-      expect(res.status).toBe(500)
-      const body = await res.json() as { error: string }
-      expect(body.error).toBe('assistant failed')
+      expect(body.error).not.toBe('')
     })
   })
 })

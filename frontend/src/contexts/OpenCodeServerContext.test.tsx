@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
-import { useRouteOpenCodeServerId } from './OpenCodeServerContext'
+import { useRouteOpenCodeServerId } from './opencode-server-context'
 
 function renderRouteServerId(pathname: string) {
   return renderHook(() => useRouteOpenCodeServerId(), {

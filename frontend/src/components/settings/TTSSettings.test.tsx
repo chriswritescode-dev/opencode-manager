@@ -1,24 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import { TTSSettings } from './TTSSettings'
-import { useSettings } from '@/hooks/useSettings'
-import { useTTS } from '@/hooks/useTTS'
-import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/hooks/useTTSDiscovery'
-import { getAvailableVoiceNames, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
-import { createUseSettingsMock } from '@/test/test-utils'
+import { renderWithProviders } from '@/test/render'
+import { createSettingsServer } from '@/test/fixtures/settingsServer'
+import { installPointerCapture, installSpeechSynthesis } from '@/test/browserFakes'
+import type { FetchRoute, FetchRouteResult } from '@/test/fetchFake'
 import type { UserPreferences } from '@/api/types/settings'
 
-vi.mock('@/hooks/useSettings')
-vi.mock('@/hooks/useTTS')
-vi.mock('@/hooks/useTTSDiscovery')
-vi.mock('@/lib/webSpeechSynthesizer')
-
-const fetchMock = vi.fn()
-
-const baseTts: NonNullable<UserPreferences['tts']> = {
+const externalTts: NonNullable<UserPreferences['tts']> = {
   enabled: true,
   provider: 'external',
   autoPlay: false,
@@ -33,183 +23,123 @@ const baseTts: NonNullable<UserPreferences['tts']> = {
   lastModelsFetch: 0,
 }
 
-function buildPreferences(overrides: Partial<UserPreferences> = {}): UserPreferences {
-  return {
-    theme: 'dark',
-    mode: 'build',
-    autoScroll: true,
-    expandDiffs: true,
-    expandToolCalls: false,
-    showReasoning: false,
-    simpleChatMode: false,
-    keyboardShortcuts: {},
-    customCommands: [],
-    tts: baseTts,
-    ...overrides,
-  }
+interface TtsRenderOptions {
+  tts?: Partial<NonNullable<UserPreferences['tts']>>
+  clearCache?: () => FetchRouteResult | Promise<FetchRouteResult>
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
+function renderTtsSettings(options: TtsRenderOptions = {}) {
+  installPointerCapture()
+  installSpeechSynthesis(['Alex'])
+  const settings = createSettingsServer({ tts: { ...externalTts, ...options.tts } })
+  const fetchRoutes: FetchRoute[] = [
+    ...settings.routes,
+    { method: 'GET', path: '/api/tts/models', respond: () => ({ json: { models: ['tts-1'], cached: false } }) },
+    { method: 'GET', path: '/api/tts/voices', respond: () => ({ json: { voices: ['alloy'], cached: false } }) },
+    {
+      method: 'DELETE',
+      path: '/api/tts/cache',
+      respond: options.clearCache ?? (() => ({ json: { cleared: 3 } })),
+    },
+  ]
+  const result = renderWithProviders(<TTSSettings />, {
+    tts: true,
+    fetchRoutes,
   })
+  return { ...result, settings }
 }
 
-function renderTTSSettings() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  }
-  return render(<TTSSettings />, { wrapper: Wrapper })
-}
-
-function mockHooks(preferences: UserPreferences = buildPreferences()) {
-  vi.mocked(useSettings).mockReturnValue(createUseSettingsMock({ preferences }))
-  vi.mocked(useTTS).mockReturnValue({
-    speak: vi.fn(),
-    speakWithConfig: vi.fn(),
-    speakMessage: vi.fn(),
-    queueMessage: vi.fn(),
-    stop: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    unlock: vi.fn(),
-    state: 'idle',
-    error: null,
-    currentText: null,
-    originalText: null,
-    activeMessageId: null,
-    isEnabled: true,
-    isPlaying: false,
-    isLoading: false,
-    isIdle: true,
-    isPaused: false,
-  })
-  vi.mocked(useTTSDiscovery).mockReturnValue({
-    refreshModels: vi.fn(),
-    refreshVoices: vi.fn(),
-    refreshAll: vi.fn(),
-    invalidateModels: vi.fn(),
-    invalidateVoices: vi.fn(),
-    invalidateAll: vi.fn(),
-  })
-  vi.mocked(useTTSModels).mockReturnValue({
-    data: undefined,
-    isLoading: false,
-    refetch: vi.fn(),
-  } as unknown as ReturnType<typeof useTTSModels>)
-  vi.mocked(useTTSVoices).mockReturnValue({
-    data: undefined,
-    isLoading: false,
-    refetch: vi.fn(),
-  } as unknown as ReturnType<typeof useTTSVoices>)
-  vi.mocked(isWebSpeechSupported).mockReturnValue(true)
-  vi.mocked(getAvailableVoiceNames).mockResolvedValue(['Alex'])
+async function findClearCacheButton() {
+  return screen.findByRole('button', { name: 'Clear audio cache' })
 }
 
 describe('TTSSettings audio cache', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.stubGlobal('fetch', fetchMock)
-    mockHooks()
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('clears the server cache via DELETE /api/tts/cache and reports the count', async () => {
+  it('clears the server cache and reports the count', async () => {
     const user = userEvent.setup()
-    fetchMock.mockResolvedValueOnce(jsonResponse({ cleared: 3 }))
-    renderTTSSettings()
+    const { fetchFake } = renderTtsSettings()
 
-    await user.click(screen.getByRole('button', { name: 'Clear audio cache' }))
+    await user.click(await findClearCacheButton())
 
     expect(await screen.findByRole('status')).toHaveTextContent('Cleared 3 cached audio file(s).')
-    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(String(url)).toContain('/api/tts/cache')
-    expect(options).toMatchObject({ method: 'DELETE' })
+    expect(fetchFake.findRequests('DELETE', '/api/tts/cache')).toHaveLength(1)
   })
 
   it('disables the button and shows a pending label while clearing', async () => {
     const user = userEvent.setup()
-    let resolveResponse: (response: Response) => void = () => {}
-    fetchMock.mockReturnValueOnce(
-      new Promise<Response>((resolve) => {
-        resolveResponse = resolve
+    let resolveClear: (reply: FetchRouteResult) => void = () => {}
+    renderTtsSettings({
+      clearCache: () => new Promise<FetchRouteResult>((resolve) => {
+        resolveClear = resolve
       }),
-    )
-    renderTTSSettings()
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Clear audio cache' }))
+    await user.click(await findClearCacheButton())
 
     const pendingButton = screen.getByRole('button', { name: /clearing/i })
     expect(pendingButton).toBeDisabled()
 
-    resolveResponse(jsonResponse({ cleared: 1 }))
+    resolveClear({ json: { cleared: 1 } })
     expect(await screen.findByRole('status')).toHaveTextContent('Cleared 1 cached audio file(s).')
   })
 
   it('shows an actionable error and allows retrying after a failure', async () => {
     const user = userEvent.setup()
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ error: 'cache unavailable' }, 500))
-      .mockResolvedValueOnce(jsonResponse({ cleared: 2 }))
-    renderTTSSettings()
+    let attempt = 0
+    const { fetchFake } = renderTtsSettings({
+      clearCache: () => {
+        attempt += 1
+        return attempt === 1
+          ? { status: 500, json: { error: 'cache unavailable' } }
+          : { json: { cleared: 2 } }
+      },
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Clear audio cache' }))
+    await user.click(await findClearCacheButton())
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('cache unavailable')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not clear cached audio: cache unavailable. Try again.',
+    )
     const retryButton = screen.getByRole('button', { name: 'Clear audio cache' })
     expect(retryButton).toBeEnabled()
 
     await user.click(retryButton)
 
     expect(await screen.findByRole('status')).toHaveTextContent('Cleared 2 cached audio file(s).')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchFake.findRequests('DELETE', '/api/tts/cache')).toHaveLength(2)
   })
 
-  it('stays available when TTS is disabled or the builtin provider is selected', async () => {
-    mockHooks(buildPreferences({ tts: { ...baseTts, enabled: false } }))
-    const disabledRender = renderTTSSettings()
-    expect(screen.getByRole('button', { name: 'Clear audio cache' })).toBeInTheDocument()
-    disabledRender.unmount()
+  it.each([
+    { label: 'TTS is disabled', tts: { enabled: false } },
+    { label: 'the builtin provider is selected', tts: { provider: 'builtin', voice: 'Alex' } },
+  ])('keeps the cache button available while $label', async ({ tts }) => {
+    renderTtsSettings({ tts })
 
-    mockHooks(buildPreferences({ tts: { ...baseTts, provider: 'builtin', voice: 'Alex' } }))
-    renderTTSSettings()
-    expect(screen.getByRole('button', { name: 'Clear audio cache' })).toBeInTheDocument()
+    expect(await findClearCacheButton()).toBeInTheDocument()
+  })
+
+  it('shows the browser voice count for the builtin provider', async () => {
+    renderTtsSettings({ tts: { provider: 'builtin', voice: 'Alex' } })
+
     expect(await screen.findByText('1 voices available in your browser')).toBeInTheDocument()
   })
 
   it('discovers models and voices only when external TTS is configured', async () => {
-    renderTTSSettings()
-    await act(async () => {})
-    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(true)
-    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(true)
+    const { fetchFake } = renderTtsSettings()
+
+    await screen.findByText('Available voices (1)')
+    expect(fetchFake.findRequests('GET', '/api/tts/models')).toHaveLength(1)
+    expect(fetchFake.findRequests('GET', '/api/tts/voices')).toHaveLength(1)
   })
 
-  it('skips server discovery while TTS is disabled, builtin, or missing credentials', async () => {
-    mockHooks(buildPreferences({ tts: { ...baseTts, enabled: false } }))
-    const disabledRender = renderTTSSettings()
-    await act(async () => {})
-    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
-    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
-    disabledRender.unmount()
+  it.each([
+    { label: 'TTS is disabled', tts: { enabled: false } },
+    { label: 'the builtin provider is selected', tts: { provider: 'builtin', voice: 'Alex' } },
+    { label: 'the API key is missing', tts: { apiKey: '' } },
+  ])('skips server discovery while $label', async ({ tts }) => {
+    const { fetchFake } = renderTtsSettings({ tts })
 
-    mockHooks(buildPreferences({ tts: { ...baseTts, provider: 'builtin', voice: 'Alex' } }))
-    const builtinRender = renderTTSSettings()
-    await act(async () => {})
-    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
-    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
-    builtinRender.unmount()
-
-    mockHooks(buildPreferences({ tts: { ...baseTts, apiKey: '' } }))
-    renderTTSSettings()
-    await act(async () => {})
-    expect(vi.mocked(useTTSModels).mock.calls.at(-1)?.[1]).toBe(false)
-    expect(vi.mocked(useTTSVoices).mock.calls.at(-1)?.[1]).toBe(false)
+    expect(await findClearCacheButton()).toBeInTheDocument()
+    expect(fetchFake.findRequests('GET', '/api/tts/models')).toHaveLength(0)
+    expect(fetchFake.findRequests('GET', '/api/tts/voices')).toHaveLength(0)
   })
 })

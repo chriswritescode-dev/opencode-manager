@@ -74,8 +74,8 @@ export function useLaunchMultiRun(target: MultiRunTarget) {
         showToast.warning(`Started ${started}, failed ${failed}`)
       }
     },
-    onError: (error: unknown) => {
-      showToast.error(error instanceof Error ? error.message : 'Failed to launch multi-run')
+    onError: (cause: unknown) => {
+      showToast.error(cause instanceof Error ? cause.message : 'Failed to launch multi-run')
     },
   })
 }
@@ -125,8 +125,8 @@ export function useDiscardMultiRunEntry(target: MultiRunTarget) {
       invalidateMultiRunCaches(queryClient, target)
       showToast.success('Run discarded')
     },
-    onError: (error: unknown) => {
-      showToast.error(error instanceof Error ? error.message : 'Failed to discard run')
+    onError: (cause: unknown) => {
+      showToast.error(cause instanceof Error ? cause.message : 'Failed to discard run')
     },
   })
 }

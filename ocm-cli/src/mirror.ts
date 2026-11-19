@@ -17,6 +17,23 @@ const PART_RETRIES = 3
 const PART_BACKOFF_MS = [500, 2000, 8000]
 const MIRROR_GZIP = true
 
+async function* webStreamChunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Buffer> {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done === true) return
+      yield Buffer.from(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function readableFromWebStream(stream: ReadableStream<Uint8Array>): Readable {
+  return Readable.from(webStreamChunks(stream))
+}
+
 function getGitignoreExclusions(repoRoot: string): string[] {
   const res = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], {
     cwd: repoRoot,
@@ -45,6 +62,16 @@ export class MirrorAbort extends Error {
     this.name = 'MirrorAbort'
   }
 }
+
+export type MirrorHeadApi = Pick<ManagerApi, 'mirrorHead'>
+export type MirrorPullApi = Pick<ManagerApi, 'mirrorContains' | 'mirrorHead'>
+export type MirrorCheckoutsApi = Pick<ManagerApi, 'mirrorCheckouts'>
+export type MirrorUploadApi = Pick<ManagerApi, 'mirrorBegin' | 'mirrorUploadPart' | 'mirrorCommit' | 'mirrorAbort'>
+export type MirrorDownloadApi = Pick<ManagerApi, 'mirrorDown'>
+export type MirrorDownFastApi = Pick<ManagerApi, 'mirrorPatchSnapshot' | 'mirrorDownloadBundle'>
+export type MirrorPatchApi = Pick<ManagerApi, 'mirrorPatch'>
+export type MirrorUpFastApi = Pick<ManagerApi, 'mirrorCreateWorktree' | 'mirrorUploadBundle' | 'mirrorPatch'>
+export type MirrorMoveApi = MirrorCheckoutsApi & MirrorUpFastApi
 
 export interface RemoteRepoSummary {
   repoId: number
@@ -87,7 +114,7 @@ export interface PushDivergence {
 
 export async function checkPushDivergence(
   repoRoot: string,
-  api: ManagerApi,
+  api: MirrorHeadApi,
   repoId: number,
   directory?: string,
 ): Promise<PushDivergence> {
@@ -198,7 +225,7 @@ export interface PullDivergence {
 
 export async function checkPullDivergence(
   repoRoot: string,
-  api: ManagerApi,
+  api: MirrorPullApi,
   repoId: number,
   directory?: string,
 ): Promise<PullDivergence> {
@@ -214,7 +241,6 @@ export async function checkPullDivergence(
     serverHead = (await api.mirrorHead(repoId, directory)).head
     if (serverHead) lostCommits = countCommitsAhead(repoRoot, serverHead, localHead)
   } catch {
-    // best-effort: count is informational only
   }
   return { diverged: true, lostCommits, serverHead }
 }
@@ -225,7 +251,7 @@ export interface BranchCheckoutSelection {
 }
 
 export async function resolveBranchCheckout(
-  api: ManagerApi,
+  api: MirrorCheckoutsApi,
   repoId: number,
   repoRoot: string,
 ): Promise<BranchCheckoutSelection> {
@@ -254,21 +280,21 @@ export interface MirrorProgress {
 }
 
 export interface MirrorUpOpts {
-  api: ManagerApi
+  api: MirrorUploadApi
   force: boolean
   create?: { name: string; originUrl: string | null; branch: string | null }
   onProgress?: (p: MirrorProgress) => void
 }
 
-function isRetryablePartError(err: unknown): boolean {
-  if (err instanceof ManagerApiError) {
-    return err.status >= 500 || err.status === 408 || err.status === 429
+function isRetryablePartError(cause: unknown): boolean {
+  if (cause instanceof ManagerApiError) {
+    return cause.status >= 500 || cause.status === 408 || cause.status === 429
   }
   return true
 }
 
 async function uploadPartWithRetry(
-  api: ManagerApi,
+  api: MirrorUploadApi,
   repoId: number,
   uploadId: string,
   index: number,
@@ -296,7 +322,7 @@ interface PartFlusher {
 }
 
 function createPartFlusher(
-  api: ManagerApi,
+  api: MirrorUploadApi,
   repoId: number,
   uploadId: string,
   chunkSize: number,
@@ -382,9 +408,12 @@ export async function mirrorUp(
   const flusher = createPartFlusher(opts.api, begin.repoId, begin.uploadId, begin.chunkSize)
 
   try {
-    for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
-      await flusher.push(chunk)
-      bytesSent += chunk.length
+    const tarStdout = child.stdout
+    if (!tarStdout) throw new Error('tar stdout is unavailable')
+    for await (const chunk of tarStdout) {
+      const data: Buffer = chunk
+      await flusher.push(data)
+      bytesSent += data.length
       opts.onProgress?.({ bytesSent })
     }
     await tarExit
@@ -406,7 +435,7 @@ export async function mirrorUp(
 export async function mirrorDown(
   repoId: number,
   repoRoot: string,
-  api: ManagerApi,
+  api: MirrorDownloadApi,
   opts: { force: boolean; onProgress?: (bytesReceived: number) => void } = { force: false },
 ): Promise<void> {
   if (!opts.force && getDirtyPaths(repoRoot).size > 0) {
@@ -437,7 +466,7 @@ export async function mirrorDown(
       child.on('error', reject)
     })
 
-    const stdinWritable = Readable.fromWeb(tarball as unknown as Parameters<typeof Readable.fromWeb>[0])
+    const stdinWritable = readableFromWebStream(tarball)
     let received = 0
     stdinWritable.on('data', (chunk: Buffer) => {
       received += chunk.length
@@ -483,7 +512,7 @@ export async function mirrorDown(
 
 export async function mirrorUpPatch(
   plan: MirrorPlan,
-  opts: Pick<MirrorUpOpts, 'api' | 'force'> & { directory?: string },
+  opts: { api: MirrorPatchApi; force: boolean; directory?: string },
 ): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false; applied: true }> {
   const repoId = plan.matched[0]!.repoId
   const patch = getMirrorPatch(plan.repoRoot)
@@ -637,11 +666,11 @@ function importLocalBundle(
   }
 }
 
-async function writeBundleStream(repoId: number, api: ManagerApi, directory?: string): Promise<string> {
+async function writeBundleStream(repoId: number, api: MirrorDownFastApi, directory?: string): Promise<string> {
   const bundlePath = join(tmpdir(), `ocm-bundle-down-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
   const stream = await api.mirrorDownloadBundle(repoId, directory)
   await pipeline(
-    Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]),
+    readableFromWebStream(stream),
     createWriteStream(bundlePath),
   )
   return bundlePath
@@ -653,7 +682,9 @@ export type MirrorUpFastPhase =
   | { kind: 'processing' }
   | { kind: 'patching' }
 
-type MirrorUpFastOpts = Pick<MirrorUpOpts, 'api' | 'force'> & {
+export type MirrorUpFastOpts = {
+  api: MirrorUpFastApi
+  force: boolean
   requireCurrentBranch?: boolean
   directory?: string
   targetBranch?: string
@@ -732,7 +763,7 @@ export async function mirrorUpFast(
 export async function mirrorDownFast(
   repoId: number,
   repoRoot: string,
-  api: ManagerApi,
+  api: MirrorDownFastApi,
   opts: { force: boolean; directory?: string; sourceBranch?: string; targetBranch?: string } = { force: false },
 ): Promise<void> {
   if (!opts.force && getDirtyPaths(repoRoot).size > 0) {

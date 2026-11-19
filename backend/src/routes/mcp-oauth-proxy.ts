@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import type { Context, MiddlewareHandler } from 'hono'
 import { createServer } from 'node:net'
-import type { AddressInfo } from 'node:net'
 import { z } from 'zod'
 import {
   MCP_OAUTH_CALLBACK_PATH,
@@ -73,13 +72,19 @@ function renderPage(heading: string, message: string, isSuccess: boolean): strin
 </html>`
 }
 
+const AddressInfoSchema = z.object({ port: z.number() })
+
 function probeLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer()
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as AddressInfo
-      server.close(() => resolve(port))
+      const address = AddressInfoSchema.safeParse(server.address())
+      if (!address.success) {
+        reject(new Error('Failed to determine the MCP OAuth loopback callback port'))
+        return
+      }
+      server.close(() => resolve(address.data.port))
     })
   })
 }
@@ -115,9 +120,6 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
     }
   }
 
-  // V2 binds the redirect URI's port on the OpenCode host's loopback for the lifetime of an attempt, so
-  // the Manager's own port would collide. Re-add the server on a free loopback port before connecting;
-  // the browser still reaches the Manager because the redirect URI stays the Manager's callback.
   const reserveCallbackPort = async (server: { name: string; integrationID?: string }, origin: string, directory: string | undefined) => {
     const port = await probeLoopbackPort()
     if (!server.integrationID) return port
@@ -132,7 +134,7 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
         config: {
           ...v2Config,
           oauth: {
-            ...(v2Config.oauth === false ? {} : v2Config.oauth ?? {}),
+            ...(v2Config.oauth === false ? undefined : v2Config.oauth),
             redirect_uri: mcpOAuthRedirectUri(origin),
             callback_port: port,
           },
@@ -258,8 +260,6 @@ export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requir
     }
 
     try {
-      // Hand the code to the OpenCode host's loopback listener, which owns PKCE, the token exchange,
-      // and the credential; the Manager only relays the browser's redirect.
       const callbackUrl = new URL(MCP_OAUTH_CALLBACK_PATH, `http://127.0.0.1:${flow.callbackPort}`)
       callbackUrl.searchParams.set('code', code)
       callbackUrl.searchParams.set('state', state)

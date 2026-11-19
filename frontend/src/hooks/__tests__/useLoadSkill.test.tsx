@@ -1,110 +1,60 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useLoadSkill } from '../useOpenCode'
+import { renderHookWithProviders } from '@/test/render'
 
-import { showToast } from '../../lib/toast'
+const skillRoute = '/api/opencode/api/experimental/session/ses_skill/skill'
 
-const mocks = vi.hoisted(() => ({
-  activateSkill: vi.fn(),
-}))
-
-vi.mock('../../api/opencode', () => ({
-  activateSkill: mocks.activateSkill,
-}))
-
-vi.mock('../../lib/toast', () => ({
-  showToast: {
-    error: vi.fn(),
-    success: vi.fn(),
-    info: vi.fn(),
-  },
-}))
-
-const createWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-  return ({ children }: { children: React.ReactNode }) =>
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-}
+const hookProviders = {
+  auth: false,
+  theme: false,
+  tts: false,
+} as const
 
 describe('useLoadSkill', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('activates the skill for the session', async () => {
-    mocks.activateSkill.mockResolvedValue(undefined)
-
-    const { result } = renderHook(
-      () => useLoadSkill('test-session-id'),
-      { wrapper: createWrapper() }
-    )
-
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
+    const { result, fetchFake } = renderHookWithProviders(() => useLoadSkill('ses_skill'), {
+      ...hookProviders,
+      fetchRoutes: [{ method: 'POST', path: skillRoute, respond: () => ({ status: 204 }) }],
     })
 
-    expect(mocks.activateSkill).toHaveBeenCalledTimes(1)
-    expect(mocks.activateSkill).toHaveBeenCalledWith('test-session-id', 'my-skill', 'local')
+    await act(async () => {
+      await result.current.mutateAsync({ skillName: 'my-skill' })
+    })
+
+    expect(fetchFake.lastRequest('POST', skillRoute)?.body).toEqual({ id: 'my-skill' })
   })
 
-  it('throws error when sessionID is undefined', async () => {
-    const { result } = renderHook(
-      () => useLoadSkill(undefined),
-      { wrapper: createWrapper() }
-    )
+  it('rejects without a request when there is no active session', async () => {
+    const { result, fetchFake } = renderHookWithProviders(() => useLoadSkill(undefined), hookProviders)
 
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
+    await act(async () => {
+      await expect(result.current.mutateAsync({ skillName: 'my-skill' })).rejects.toThrow('No active session')
     })
 
-    expect(result.current.error).toBeInstanceOf(Error)
-    expect((result.current.error as Error).message).toBe('No active session')
+    expect(fetchFake.requests).toHaveLength(0)
+    expect(await screen.findByText('No active session')).toBeInTheDocument()
   })
 
-  it('calls showToast.error when activating the skill fails', async () => {
-    const testError = new Error('Command failed')
-    mocks.activateSkill.mockRejectedValue(testError)
-
-    const { result } = renderHook(
-      () => useLoadSkill('test-session-id'),
-      { wrapper: createWrapper() }
-    )
-
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
+  it.each([
+    { title: 'a server error', route: () => ({ status: 500, json: { error: 'Command failed' } }), message: 'UnexpectedStatus: 500' },
+    {
+      title: 'a network failure',
+      route: () => {
+        throw new Error('network down')
+      },
+      message: 'Transport: network down',
+    },
+  ])('shows the failure message for $title', async ({ route, message }) => {
+    const { result } = renderHookWithProviders(() => useLoadSkill('ses_skill'), {
+      ...hookProviders,
+      fetchRoutes: [{ method: 'POST', path: skillRoute, respond: route }],
     })
 
-    expect(showToast.error).toHaveBeenCalledTimes(1)
-    expect(showToast.error).toHaveBeenCalledWith('Command failed')
-  })
-
-  it('calls showToast.error with default message for non-Error objects', async () => {
-    mocks.activateSkill.mockRejectedValue('string error')
-
-    const { result } = renderHook(
-      () => useLoadSkill('test-session-id'),
-      { wrapper: createWrapper() }
-    )
-
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
+    await act(async () => {
+      await expect(result.current.mutateAsync({ skillName: 'my-skill' })).rejects.toThrow(message)
     })
 
-    expect(showToast.error).toHaveBeenCalledTimes(1)
-    expect(showToast.error).toHaveBeenCalledWith('Failed to load skill')
+    expect(await screen.findByText(message)).toBeInTheDocument()
   })
 })

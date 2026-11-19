@@ -62,12 +62,7 @@ export function useOpenCodeServers(options: { enabled?: boolean } = {}) {
   return {
     servers: serversQuery.data ?? [],
     isLoading: serversQuery.isLoading,
-    /**
-     * True only while no server list is cached, no error settled and the fetch is not paused, so a
-     * restore is not read as a missing server and an offline pause is not read as a load.
-     */
     showsInitialLoading: serversListState.showsInitialLoading && !isPaused,
-    /** True while TanStack Query holds the server list fetch because the browser is offline. */
     isPaused,
     isSuccess: serversQuery.isSuccess,
     error: serversQuery.error,

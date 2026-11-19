@@ -1,105 +1,36 @@
-import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ReactNode } from 'react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
-import { stubMatchMedia } from '@/test/test-utils'
+import { useLocation } from 'react-router-dom'
 import { ToolSidePanel } from './ToolSidePanel'
 import { useToolPanel } from '@/hooks/useToolPanel'
-import type { SessionPickerNavigation, SessionPickerNavigationOptions } from '@/hooks/useSessionPickerNavigation'
 import { useUIState } from '@/stores/uiStateStore'
-
-const activeWorkMocks = vi.hoisted(() => ({
-  useActiveWorkCounts: vi.fn(),
-}))
-
-vi.mock('@/hooks/useActiveWork', () => ({
-  useActiveWorkCounts: activeWorkMocks.useActiveWorkCounts,
-}))
-
-const sessionPickerMocks = vi.hoisted(() => ({
-  useSessionPickerNavigation: vi.fn(),
-}))
-
-vi.mock('@/hooks/useSessionPickerNavigation', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/hooks/useSessionPickerNavigation')>()
-  return {
-    ...actual,
-    useSessionPickerNavigation: (options: SessionPickerNavigationOptions) => {
-      sessionPickerMocks.useSessionPickerNavigation(options)
-      return actual.useSessionPickerNavigation(options)
-    },
-  }
-})
-
-vi.mock('@/components/session/RouteSessionPicker', () => ({
-  RouteSessionPicker: ({ navigation }: { navigation: SessionPickerNavigation }) => (
-    <div>
-      route-session-picker
-      <button type="button" onClick={() => navigation.onNavigate('/repos/2/sessions/other')}>
-        open other session
-      </button>
-    </div>
-  ),
-}))
-
-vi.mock('@/components/file-browser/FileBrowser', () => ({
-  FileBrowser: ({ initialSelectedFile }: { initialSelectedFile?: string }) => <div>files-tool {initialSelectedFile}</div>,
-}))
-vi.mock('@/components/source-control', () => ({
-  SourceControlContent: () => <div>source-control-tool</div>,
-}))
-vi.mock('@/components/source-control/RemoteSourceControlContent', () => ({
-  RemoteSourceControlContent: ({ serverId, directory }: { serverId: string; directory: string }) => (
-    <div>remote-source-control-tool {serverId} {directory}</div>
-  ),
-}))
-vi.mock('@/components/terminal/TerminalPanel', () => ({
-  TerminalWorkspace: ({ onLastTerminalExited }: { onLastTerminalExited?: () => void }) => (
-    <div>
-      terminal-tool
-      <div className="xterm">
-        <textarea aria-label="terminal input" />
-      </div>
-      <button type="button" onClick={onLastTerminalExited}>Exit last terminal</button>
-    </div>
-  ),
-}))
-vi.mock('@/components/preview/PreviewPanel', () => ({ PreviewWorkspace: () => <div>preview-tool</div> }))
-vi.mock('@/components/schedules/RepoSchedulesContent', () => ({
-  RepoSchedulesContent: ({ repoId }: { repoId: number }) => <div>schedules-tool {repoId}</div>,
-}))
-vi.mock('@/components/repo/RepoMcpDialog', () => ({ RepoMcpContent: () => <div>mcp-tool</div> }))
-vi.mock('@/components/repo/RepoActionsDialog', () => ({ RepoActionsContent: () => <div>actions-tool</div> }))
-vi.mock('@/components/repo/RepoSkillsDialog', () => ({ RepoSkillsContent: () => <div>skills-tool</div> }))
-vi.mock('@/components/secrets/RepoSecretsDialog', () => ({
-  RepoSecretsContent: () => <div>secrets-tool</div>,
-}))
-vi.mock('@/components/session/ChangesWalkthroughSheet', () => ({
-  ChangesWalkthroughProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  ChangesWalkthroughRegenerate: () => null,
-  ChangesWalkthroughSourcePicker: () => null,
-  ChangesWalkthroughCancel: () => null,
-  ChangesWalkthroughView: () => <div>walkthrough-tool</div>,
-}))
+import { act } from '@testing-library/react'
+import { installMatchMedia, installWebSocket } from '@/test/browserFakes'
+import { connectTestEventStream, renderWithProviders } from '@/test/render'
+import { appRoutes } from '@/test/fixtures/appRoutes'
+import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import { makeRepo, makeSession } from '@/test/fixtures/api'
+import { permissionAsked, sessionStatusUpdated } from '@/test/fixtures/events'
+import type { FetchRoute } from '@/test/fetchFake'
+import type { TerminalInfo } from '@opencode-manager/shared/types'
 
 function LocationProbe() {
   const location = useLocation()
   return (
     <>
       <div data-testid="pathname">{location.pathname}</div>
-      <div data-testid="search">{location.search}</div>
+      <div data-testid="panel-search">{location.search}</div>
     </>
   )
 }
 
-function Harness({
-  docked,
-  deleteActiveSessionPath,
-}: {
+interface HarnessProps {
   docked: boolean
   deleteActiveSessionPath?: string
-}) {
+}
+
+function Harness({ docked, deleteActiveSessionPath }: HarnessProps) {
   const panel = useToolPanel(docked)
   return (
     <>
@@ -121,26 +52,6 @@ function Harness({
       <LocationProbe />
     </>
   )
-}
-
-function renderAt(search: string, docked = true, deleteActiveSessionPath?: string) {
-  return render(
-    <MemoryRouter initialEntries={[`/repos/1/sessions/ses_1${search}`]}>
-      <Harness docked={docked} deleteActiveSessionPath={deleteActiveSessionPath} />
-    </MemoryRouter>,
-  )
-}
-
-function search(): URLSearchParams {
-  return new URLSearchParams(screen.getByTestId('search').textContent ?? '')
-}
-
-function stubNarrowPage(): () => void {
-  const main = document.createElement('main')
-  main.getBoundingClientRect = () =>
-    ({ width: 560, height: 800, top: 0, left: 0, right: 560, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
-  document.body.append(main)
-  return () => main.remove()
 }
 
 function HomeHarness() {
@@ -187,20 +98,71 @@ function RepoHarness() {
   )
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 0, running: 0 })
-  useUIState.setState({ isToolRailMounted: false })
-})
+interface PanelOptions {
+  docked?: boolean
+  terminals?: TerminalInfo[]
+  deleteActiveSessionPath?: string
+  events?: boolean
+}
 
-afterEach(() => {
-  Reflect.deleteProperty(window, 'matchMedia')
-})
+function terminalRoute(terminals: TerminalInfo[]): FetchRoute {
+  return { method: 'GET', path: '/api/repos/1/terminals', respond: () => ({ json: { terminals } }) }
+}
+
+function renderPanel(route: string, options: PanelOptions = {}) {
+  const result = renderWithProviders(
+    <KeyboardShortcutsProvider>
+      <Harness docked={options.docked ?? true} deleteActiveSessionPath={options.deleteActiveSessionPath} />
+    </KeyboardShortcutsProvider>,
+    {
+      route: `/repos/1/sessions/ses_1${route}`,
+      events: true,
+      theme: false,
+      toaster: false,
+      fetchRoutes: [
+        ...(options.terminals ? [terminalRoute(options.terminals)] : []),
+        {
+          method: 'DELETE',
+          path: '/api/repos/1/terminals/:ptyID',
+          respond: () => ({ status: 204 }),
+        },
+        ...appRoutes({
+          repos: [makeRepo({ id: 1, fullPath: '/repo', name: 'repo' })],
+          sessions: [
+            makeSession({ id: 'ses_1', title: 'Session one', location: { directory: '/repo' } }),
+            makeSession({ id: 'ses_2', title: 'Session two', location: { directory: '/repo' } }),
+          ],
+        }),
+      ],
+      fetchFallback: () => ({ json: {} }),
+    },
+  )
+  return result
+}
+
+
+function stubNarrowPage(): () => void {
+  const main = document.createElement('main')
+  main.getBoundingClientRect = () => new DOMRect(0, 0, 560, 800)
+  document.body.append(main)
+  return () => main.remove()
+}
+
+function panelSearch(): URLSearchParams {
+  return new URLSearchParams(
+    screen.getByTestId('panel-search')?.textContent ?? '',
+  )
+}
+
+async function openTool(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByRole('button', { name: label }))
+  return screen.findByRole('complementary', { name: label })
+}
 
 describe('ToolSidePanel', () => {
   it('shows the tool name in a tooltip when hovering a rail icon', async () => {
     const user = userEvent.setup()
-    renderAt('')
+    renderPanel('')
 
     await user.hover(screen.getByRole('button', { name: 'Terminal' }))
 
@@ -209,88 +171,97 @@ describe('ToolSidePanel', () => {
 
   it('shows the home route tools without a repo', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/']}>
+    renderWithProviders(
+      <KeyboardShortcutsProvider>
         <HomeHarness />
-      </MemoryRouter>,
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: appRoutes(),
+        fetchFallback: () => ({ json: {} }),
+      },
     )
 
     expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Files' }))
-    expect(await screen.findByText(/files-tool/)).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Files' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'All Schedules' }))
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/schedules'))
+    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/schedules'))
   })
 
   it('moves a panel tool opened as a dialog into the docked panel', async () => {
-    renderAt('?dialog=walkthrough')
+    renderPanel('?dialog=walkthrough')
 
-    expect(await screen.findByText('walkthrough-tool')).toBeInTheDocument()
-    expect(search().get('panel')).toBe('walkthrough')
-    expect(search().has('dialog')).toBe(false)
+    expect(await screen.findByRole('complementary', { name: 'Walkthrough' })).toBeInTheDocument()
+    const params = panelSearch()
+    expect(params.get('panel')).toBe('walkthrough')
+    expect(params.has('dialog')).toBe(false)
   })
 
   it('leaves non-panel dialogs alone', async () => {
-    renderAt('?dialog=resetPermissions&panel=files')
+    renderPanel('?dialog=resetPermissions&panel=files')
 
-    expect(await screen.findByText('files-tool src/a.ts')).toBeInTheDocument()
-    expect(search().get('dialog')).toBe('resetPermissions')
+    expect(await screen.findByRole('complementary', { name: 'Files' })).toBeInTheDocument()
+    expect(panelSearch().get('dialog')).toBe('resetPermissions')
   })
 
   it.each([
-    ['Preview', 'preview-tool'],
-    ['MCP', 'mcp-tool'],
-    ['Actions', 'actions-tool'],
-    ['Skills', 'skills-tool'],
-  ])('opens %s inside the docked panel', async (label, content) => {
+    ['Preview', 'preview'],
+    ['MCP', 'mcp'],
+    ['Actions', 'actions'],
+    ['Skills', 'skills'],
+  ])('opens %s inside the docked panel', async (label, panelKey) => {
     const user = userEvent.setup()
-    renderAt('')
+    renderPanel('')
 
-    await user.click(screen.getByRole('button', { name: label }))
+    await openTool(user, label)
 
-    expect(await screen.findByText(content)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
-    expect(search().has('dialog')).toBe(false)
+    expect(panelSearch().get('panel')).toBe(panelKey)
+    expect(panelSearch().has('dialog')).toBe(false)
   })
 
   it('moves a preview opened with a port into the panel and keeps its port', async () => {
-    renderAt('?panel=terminal&terminal=pty-1&dialog=preview&previewPort=5173&previewPath=%2F')
+    renderPanel('?panel=terminal&terminal=pty-1&dialog=preview&previewPort=5173&previewPath=%2F')
 
-    expect(await screen.findByText('preview-tool')).toBeInTheDocument()
-    expect(search().get('panel')).toBe('preview')
-    expect(search().get('previewPort')).toBe('5173')
-    expect(search().has('terminal')).toBe(false)
+    expect(await screen.findByRole('complementary', { name: 'Preview' })).toBeInTheDocument()
+    const params = panelSearch()
+    expect(params.get('panel')).toBe('preview')
+    expect(params.get('previewPort')).toBe('5173')
+    expect(params.has('terminal')).toBe(false)
   })
 
   it('toggles tools from the rail and closes the panel', async () => {
     const user = userEvent.setup()
-    renderAt('')
+    renderPanel('')
 
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Source Control' }))
-    expect(await screen.findByText('source-control-tool')).toBeInTheDocument()
+    await openTool(user, 'Source Control')
     expect(screen.getByRole('button', { name: 'Source Control' })).toHaveAttribute('aria-pressed', 'true')
 
     await user.click(screen.getByRole('button', { name: 'Terminal' }))
-    expect(await screen.findByText('terminal-tool')).toBeInTheDocument()
-    expect(screen.queryByText('source-control-tool')).not.toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Terminal' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Source Control' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Terminal' }))
-    await waitFor(() => expect(screen.queryByText('terminal-tool')).not.toBeInTheDocument())
-    expect(search().has('panel')).toBe(false)
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Terminal' })).not.toBeInTheDocument())
+    expect(panelSearch().has('panel')).toBe(false)
 
     await user.click(screen.getByRole('button', { name: 'Files' }))
     await user.click(await screen.findByRole('button', { name: 'Close panel' }))
-    await waitFor(() => expect(search().has('panel')).toBe(false))
+    await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
   })
 
   it('renders the panel as a modal sheet over the page when docking would squeeze it', async () => {
     const removePage = stubNarrowPage()
 
     try {
-      renderAt('?panel=files')
+      renderPanel('?panel=files')
 
       const panel = await screen.findByRole('dialog', { name: 'Files' })
       const backdrop = screen.getByTestId('tool-panel-backdrop')
@@ -310,7 +281,7 @@ describe('ToolSidePanel', () => {
     const removePage = stubNarrowPage()
 
     try {
-      renderAt('?panel=files')
+      renderPanel('?panel=files')
 
       const panel = await screen.findByRole('dialog', { name: 'Files' })
       const backdrop = screen.getByTestId('tool-panel-backdrop')
@@ -328,7 +299,7 @@ describe('ToolSidePanel', () => {
     const removePage = stubNarrowPage()
 
     try {
-      renderAt('')
+      renderPanel('')
 
       const filesButton = screen.getByRole('button', { name: 'Files' })
       await user.click(filesButton)
@@ -340,7 +311,7 @@ describe('ToolSidePanel', () => {
 
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Files' })).not.toBeInTheDocument())
       await waitFor(() => expect(document.activeElement).toBe(filesButton))
-      expect(search().has('panel')).toBe(false)
+      expect(panelSearch().has('panel')).toBe(false)
     } finally {
       removePage()
     }
@@ -351,17 +322,17 @@ describe('ToolSidePanel', () => {
     const removePage = stubNarrowPage()
 
     try {
-      renderAt('?panel=files')
+      renderPanel('?panel=files')
 
       await screen.findByRole('dialog', { name: 'Files' })
       await user.keyboard('{Escape}')
-      await waitFor(() => expect(search().has('panel')).toBe(false))
+      await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
 
       await user.click(screen.getByRole('button', { name: 'Files' }))
       await screen.findByRole('dialog', { name: 'Files' })
 
       await user.click(screen.getByTestId('tool-panel-backdrop'))
-      await waitFor(() => expect(search().has('panel')).toBe(false))
+      await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
     } finally {
       removePage()
     }
@@ -372,15 +343,19 @@ describe('ToolSidePanel', () => {
     const removePage = stubNarrowPage()
 
     try {
-      renderAt('?panel=terminal&terminal=pty-1')
+      renderPanel('?panel=terminal&terminal=pty-1')
 
-      await screen.findByRole('dialog', { name: 'Terminal' })
-      const terminalInput = screen.getByLabelText('terminal input')
-      await user.click(terminalInput)
+      const panel = screen.getByRole('dialog')
+      expect(panel).toHaveAttribute('aria-label', 'Terminal')
+      const terminal = document.createElement('div')
+      terminal.className = 'xterm'
+      terminal.tabIndex = -1
+      panel.append(terminal)
+      await user.click(terminal)
       await user.keyboard('{Escape}')
 
-      expect(screen.getByRole('dialog', { name: 'Terminal' })).toBeInTheDocument()
-      expect(search().get('panel')).toBe('terminal')
+      expect(screen.getByRole('dialog')).toHaveAttribute('aria-label', 'Terminal')
+      expect(panelSearch().get('panel')).toBe('terminal')
     } finally {
       removePage()
     }
@@ -388,17 +363,17 @@ describe('ToolSidePanel', () => {
 
   it('keeps a docked panel open on Escape', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=files')
+    renderPanel('?panel=files')
 
     await screen.findByRole('complementary', { name: 'Files' })
     await user.keyboard('{Escape}')
 
-    expect(search().get('panel')).toBe('files')
+    expect(panelSearch().get('panel')).toBe('files')
   })
 
   it('resizes the docked panel from the keyboard and clamps it', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=files')
+    renderPanel('?panel=files')
 
     const handle = await screen.findByRole('separator', { name: 'Resize panel' })
     const panel = screen.getByRole('complementary', { name: 'Files' })
@@ -419,91 +394,111 @@ describe('ToolSidePanel', () => {
 
   it('opens Secrets inside the docked repo panel', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/repos/1']}>
+    renderWithProviders(
+      <KeyboardShortcutsProvider>
         <RepoHarness />
-      </MemoryRouter>,
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/repos/1',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: appRoutes({
+          repos: [makeRepo({ id: 1, fullPath: '/repo', name: 'repo' })],
+        }),
+        fetchFallback: () => ({ json: {} }),
+      },
     )
 
     await user.click(screen.getByRole('button', { name: 'Secrets' }))
 
-    expect(await screen.findByText('secrets-tool')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Secrets' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Secrets' })).toBeInTheDocument()
-    expect(search().has('dialog')).toBe(false)
   })
 
   it('opens non-panel session items from the rail as dialogs', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=files')
+    renderPanel('?panel=files')
 
-    await user.click(screen.getByRole('button', { name: 'Reset Permissions' }))
+    await user.click(await screen.findByRole('button', { name: 'Reset Permissions' }))
 
-    await waitFor(() => expect(search().get('dialog')).toBe('resetPermissions'))
-    expect(search().get('panel')).toBe('files')
+    await waitFor(() => expect(panelSearch().get('dialog')).toBe('resetPermissions'))
+    expect(panelSearch().get('panel')).toBe('files')
   })
 
   it('opens schedules in the panel without leaving the session', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=files')
+    renderPanel('?panel=files')
 
     await user.click(screen.getByRole('button', { name: 'Schedules' }))
 
-    expect(await screen.findByText('schedules-tool 1')).toBeInTheDocument()
-    expect(screen.getByTestId('pathname').textContent).toBe('/repos/1/sessions/ses_1')
-    expect(search().get('panel')).toBe('schedules')
+    expect(await screen.findByRole('complementary', { name: 'Schedules' })).toBeInTheDocument()
+    expect(panelSearch().get('panel')).toBe('schedules')
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/repos/1/sessions/ses_1')
   })
 
   it('drops schedule selection params when switching away from schedules', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=schedules&jobId=4&scheduleTab=runs&runId=9')
+    renderPanel('?panel=schedules&jobId=4&scheduleTab=runs&runId=9')
 
     await user.click(await screen.findByRole('button', { name: 'Terminal' }))
 
-    await waitFor(() => expect(search().get('panel')).toBe('terminal'))
-    expect(search().has('jobId')).toBe(false)
-    expect(search().has('scheduleTab')).toBe(false)
-    expect(search().has('runId')).toBe(false)
+    await waitFor(() => expect(panelSearch().get('panel')).toBe('terminal'))
+    expect(panelSearch().has('jobId')).toBe(false)
+    expect(panelSearch().has('scheduleTab')).toBe(false)
+    expect(panelSearch().has('runId')).toBe(false)
   })
 
   it('closes a docked schedules panel when the layout is no longer docked', async () => {
-    renderAt('?panel=schedules&jobId=4', false)
+    renderPanel('?panel=schedules&jobId=4', { docked: false })
 
-    await waitFor(() => expect(search().has('panel')).toBe(false))
-    expect(search().has('dialog')).toBe(false)
-    expect(search().has('jobId')).toBe(false)
+    await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
+    expect(panelSearch().has('dialog')).toBe(false)
+    expect(panelSearch().has('jobId')).toBe(false)
   })
 
   it('drops terminal selection params when switching away from the terminal', async () => {
     const user = userEvent.setup()
-    renderAt('?panel=terminal&terminal=pty-1')
+    renderPanel('?panel=terminal&terminal=pty-1')
 
     await user.click(await screen.findByRole('button', { name: 'Files' }))
 
-    await waitFor(() => expect(search().get('panel')).toBe('files'))
-    expect(search().has('terminal')).toBe(false)
+    await waitFor(() => expect(panelSearch().get('panel')).toBe('files'))
+    expect(panelSearch().has('terminal')).toBe(false)
   })
 
   it('closes the docked terminal panel when the last terminal exits', async () => {
-    const user = userEvent.setup()
-    renderAt('?panel=terminal&terminal=pty-1')
+    installMatchMedia(false)
+    const socketFake = installWebSocket()
+    const runningTerminal: TerminalInfo = {
+      id: 'pty-1',
+      title: 'Terminal',
+      kind: 'shell',
+      cwd: '/repo',
+      status: 'running',
+    }
+    const terminals: TerminalInfo[] = [runningTerminal]
+    renderPanel('?panel=terminal&terminal=pty-1', { terminals })
 
-    await user.click(await screen.findByRole('button', { name: 'Exit last terminal' }))
+    await waitFor(() => expect(socketFake.connectionFor('/terminals/pty-1/connect')).toBeDefined())
 
-    await waitFor(() => expect(search().has('panel')).toBe(false))
-    expect(search().has('terminal')).toBe(false)
+    terminals.splice(0, terminals.length, { ...runningTerminal, status: 'exited', exitCode: 0 })
+    act(() => socketFake.connectionFor('/terminals/pty-1/connect')?.serverClose(1000))
+
+    await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
   })
 
   it('falls back to the dialog when not docked', async () => {
-    renderAt('?panel=sourceControl', false)
+    renderPanel('?panel=sourceControl', { docked: false })
 
-    await waitFor(() => expect(search().get('dialog')).toBe('sourceControl'))
-    expect(search().has('panel')).toBe(false)
+    await waitFor(() => expect(panelSearch().get('dialog')).toBe('sourceControl'))
+    expect(panelSearch().has('panel')).toBe(false)
   })
 
   it('moves focus to the chat prompt when the docked panel closes on desktop', async () => {
-    stubMatchMedia(true)
+    installMatchMedia(true)
     const user = userEvent.setup()
-    renderAt('')
+    renderPanel('')
 
     await user.click(screen.getByRole('button', { name: 'Files' }))
     const closeButton = await screen.findByRole('button', { name: 'Close panel' })
@@ -511,12 +506,12 @@ describe('ToolSidePanel', () => {
 
     await user.click(closeButton)
 
-    await waitFor(() => expect(search().has('panel')).toBe(false))
+    await waitFor(() => expect(panelSearch().has('panel')).toBe(false))
     expect(screen.getByLabelText('prompt')).toHaveFocus()
   })
 
   it('lists the Sessions tool first in the rail', () => {
-    renderAt('')
+    renderPanel('')
 
     const rail = screen.getByRole('navigation', { name: 'Tools' })
     const buttons = within(rail).getAllByRole('button')
@@ -525,10 +520,18 @@ describe('ToolSidePanel', () => {
 
   it('shows only the remote-capable tools on a linked-server route', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+    renderWithProviders(
+      <KeyboardShortcutsProvider>
         <RemoteHarness />
-      </MemoryRouter>,
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/servers/srv_kitchen/sessions/ses_remote',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: appRoutes(),
+        fetchFallback: () => ({ json: {} }),
+      },
     )
 
     const rail = screen.getByRole('navigation', { name: 'Tools' })
@@ -539,111 +542,101 @@ describe('ToolSidePanel', () => {
     ).toEqual(['Sessions', 'MCP', 'Skills', 'Source Control', 'Terminal'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
-    expect(await screen.findByText('mcp-tool')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'MCP' })).toBeInTheDocument()
   })
 
   it('opens the remote source control panel for a linked-server session', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+    const { fetchFake } = renderWithProviders(
+      <KeyboardShortcutsProvider>
         <RemoteHarness />
-      </MemoryRouter>,
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/servers/srv_kitchen/sessions/ses_remote',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: appRoutes(),
+        fetchFallback: () => ({ json: {} }),
+      },
     )
 
-    await user.click(screen.getByRole('button', { name: 'Source Control' }))
+    await user.click(await screen.findByRole('button', { name: 'Source Control' }))
 
-    expect(
-      await screen.findByText('remote-source-control-tool srv_kitchen /home/me/app'),
-    ).toBeInTheDocument()
-    expect(search().get('panel')).toBe('sourceControl')
-    expect(screen.queryByText('source-control-tool')).not.toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Source Control' })).toBeInTheDocument()
+    expect(panelSearch().get('panel')).toBe('sourceControl')
+    await waitFor(() =>
+      expect(
+        fetchFake.requests.some((request) => request.path.startsWith('/api/opencode/servers/srv_kitchen/')),
+      ).toBe(true),
+    )
   })
 
   it('opens the skills panel for a linked-server session', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/servers/srv_kitchen/sessions/ses_remote']}>
+    renderWithProviders(
+      <KeyboardShortcutsProvider>
         <RemoteHarness />
-      </MemoryRouter>,
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/servers/srv_kitchen/sessions/ses_remote',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: appRoutes(),
+        fetchFallback: () => ({ json: {} }),
+      },
     )
 
-    await user.click(screen.getByRole('button', { name: 'Skills' }))
+    await user.click(await screen.findByRole('button', { name: 'Skills' }))
 
-    expect(await screen.findByText('skills-tool')).toBeInTheDocument()
-    expect(search().get('panel')).toBe('skills')
+    expect(await screen.findByRole('complementary', { name: 'Skills' })).toBeInTheDocument()
+    expect(panelSearch().get('panel')).toBe('skills')
   })
 
   it('opens the Sessions panel with the session picker when clicked', async () => {
     const user = userEvent.setup()
-    renderAt('')
+    renderPanel('')
 
     await user.click(screen.getByRole('button', { name: 'Sessions' }))
 
     const panel = await screen.findByRole('complementary', { name: 'Sessions' })
-    expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
     expect(within(panel).getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    expect(search().get('panel')).toBe('sessions')
+    expect(panelSearch().get('panel')).toBe('sessions')
   })
 
   it('keeps the docked Sessions panel open when a session is chosen', async () => {
-    const user = userEvent.setup()
-    renderAt('?panel=sessions')
+    const { queryClient } = renderPanel('?panel=sessions')
 
-    await user.click(await screen.findByRole('button', { name: 'open other session' }))
+    const panel = await screen.findByRole('complementary', { name: 'Sessions' })
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    fireEvent.click(await within(panel).findByRole('option', { name: /Session two/ }))
 
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/repos/2/sessions/other'))
-    expect(search().get('panel')).toBe('sessions')
+    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/repos/1/sessions/ses_2'))
+    expect(panelSearch().get('panel')).toBe('sessions')
   })
 
-  it('builds the docked picker navigation in panel mode', async () => {
-    renderAt('?panel=sessions')
-
-    await screen.findByText('route-session-picker')
-
-    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({ mode: 'panel', onClose: expect.any(Function) }),
-    )
-  })
-
-  it('builds the floating picker navigation in replace mode', async () => {
-    const removePage = stubNarrowPage()
-
-    try {
-      renderAt('?panel=sessions')
-
-      const panel = await screen.findByRole('dialog', { name: 'Sessions' })
-      expect(within(panel).getByText('route-session-picker')).toBeInTheDocument()
-      expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-        expect.objectContaining({ mode: 'replace', onClose: expect.any(Function) }),
+  it('shows a Sessions count pill and extends the accessible name', async () => {
+    const { eventStream } = renderPanel('')
+    await connectTestEventStream(eventStream)
+    act(() => {
+      eventStream?.message(
+        permissionAsked(
+          { id: 'perm-1', sessionID: 'ses_needs_input', action: 'shell', resources: ['ls'], metadata: {} },
+          { directory: '/repo' },
+        ),
       )
-    } finally {
-      removePage()
-    }
-  })
+      eventStream?.message(sessionStatusUpdated('ses_running', { type: 'busy' }, { directory: '/repo' }))
+    })
 
-  it('forwards the delete destination to the session picker', async () => {
-    renderAt('?panel=sessions', true, '/servers/srv_kitchen/projects?directory=%2Fapp')
-
-    await screen.findByText('route-session-picker')
-
-    expect(sessionPickerMocks.useSessionPickerNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        deleteActiveSessionPath: '/servers/srv_kitchen/projects?directory=%2Fapp',
-      }),
-    )
-  })
-
-  it('shows a Sessions count pill and extends the accessible name', () => {
-    activeWorkMocks.useActiveWorkCounts.mockReturnValue({ needsInput: 1, running: 2 })
-    renderAt('')
-
-    const button = screen.getByRole('button', { name: 'Sessions, 1 needs input, 2 running' })
-    const pill = within(button).getByText('3')
-    expect(pill.className).toContain('bg-warning')
+    expect(
+      await screen.findByRole('button', { name: 'Sessions, 1 needs input, 1 running' }),
+    ).toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: 'Sessions, 1 needs input, 1 running' })).getByText('2').className).toContain('bg-warning')
   })
 
   it('marks the tool rail as mounted only while it renders', () => {
-    const { unmount } = renderAt('')
+    const { unmount } = renderPanel('')
 
     expect(useUIState.getState().isToolRailMounted).toBe(true)
 

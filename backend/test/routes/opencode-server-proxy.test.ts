@@ -1,62 +1,88 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
-import type { MiddlewareHandler } from 'hono'
+import type { Database } from 'bun:sqlite'
+import { buildOpenCodeBasicAuth } from '@opencode-manager/shared/opencode'
+import type { ServerResponse } from 'node:http'
+import { z } from 'zod'
+import { createInternalTokenMiddleware } from '../../src/auth/internal-token-middleware'
 import { createOpenCodeServerProxyRoutes } from '../../src/routes/opencode-server-proxy'
-import {
-  OpenCodeServerError,
-  OpenCodeServerNotFoundError,
-  type OpenCodeServerRegistry,
-} from '../../src/services/opencode-server-registry'
+import { OpenCodeServerRegistry } from '../../src/services/opencode-server-registry'
+import { getOrCreateInternalToken } from '../../src/services/internal-token'
+import { createTestDatabase, seedOpenCodeServer } from '../helpers/test-database'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
+import { startHttpUpstream, type HttpUpstream, type RecordedUpstreamRequest } from '../helpers/http-upstream'
+import { readJson } from '../helpers/read-json'
 
-const getConnectionMock = vi.hoisted(() => vi.fn())
+const ErrorResponseSchema = z.object({ error: z.string() })
 
-const registry = { getConnection: getConnectionMock } as unknown as OpenCodeServerRegistry
+const STORED_PASSWORD = 'secret'
 
-const basicAuth = `Basic ${Buffer.from('opencode:secret').toString('base64')}`
-
-const passThroughAuth: MiddlewareHandler = async (_c, next) => {
-  await next()
-}
-
-function buildApp(
-  fetchFn: typeof fetch,
-  requireAuth: MiddlewareHandler = passThroughAuth,
-  upstreamHeadersTimeoutMs?: number,
-): Hono {
-  const app = new Hono()
-  app.route(
-    '/api/opencode/servers',
-    createOpenCodeServerProxyRoutes(registry, requireAuth, fetchFn, upstreamHeadersTimeoutMs),
-  )
-  return app
-}
-
-function createFetchMock(response: Response = new Response('ok', { status: 200 })) {
-  return vi.fn().mockResolvedValue(response)
-}
-
-function readBody(body: RequestInit['body']): Promise<string> {
-  return new Response(body as unknown as string).text()
+function respondOk(_request: RecordedUpstreamRequest, response: ServerResponse): void {
+  response.writeHead(200, { 'content-type': 'text/plain' })
+  response.end('ok')
 }
 
 describe('opencode server proxy routes', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    getConnectionMock.mockReturnValue({ baseUrl: 'https://remote.example:4096', authorization: basicAuth })
+  let db: Database
+  let upstream: HttpUpstream
+  let registry: OpenCodeServerRegistry
+  let token: string
+  let serverId: string
+
+  beforeAll(async () => {
+    upstream = await startHttpUpstream()
   })
 
+  afterAll(async () => {
+    await upstream.close()
+  })
+
+  beforeEach(() => {
+    db = createTestDatabase()
+    upstream.requests.length = 0
+    upstream.setResponder(respondOk)
+    token = getOrCreateInternalToken(db)
+    registry = new OpenCodeServerRegistry(db, createStubOpenCodeClient(), fetch)
+    serverId = seedOpenCodeServer(db, { baseUrl: upstream.baseUrl, password: STORED_PASSWORD }).id
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  function buildApp(upstreamHeadersTimeoutMs?: number): Hono {
+    const app = new Hono()
+    app.route(
+      '/api/opencode/servers',
+      createOpenCodeServerProxyRoutes(
+        registry,
+        createInternalTokenMiddleware(db),
+        undefined,
+        upstreamHeadersTimeoutMs,
+      ),
+    )
+    return app
+  }
+
+  async function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    return buildApp().request(path, { ...init, headers })
+  }
+
+  function serverPath(path: string): string {
+    return `/api/opencode/servers/${serverId}${path}`
+  }
+
   it('forwards method, path, query, and streamed body to the upstream with registry credentials', async () => {
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
     const payload = JSON.stringify({ parts: [{ type: 'text', text: 'hi' }] })
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1/message?directory=%2Fwork', {
+    const res = await authorizedFetch(serverPath('/api/session/ses_1/message?directory=%2Fwork'), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         cookie: 'session=cookie-value',
         host: 'manager.local',
-        authorization: 'Bearer client-token',
         origin: 'https://manager.local',
         referer: 'https://manager.local/chat',
       },
@@ -64,238 +90,182 @@ describe('opencode server proxy routes', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(upstream.requests).toHaveLength(1)
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://remote.example:4096/api/session/ses_1/message?directory=%2Fwork')
-    expect(init.method).toBe('POST')
-    expect(init.redirect).toBe('manual')
-    expect(await readBody(init.body)).toBe(payload)
-
-    const headers = init.headers as Record<string, string>
-    expect(headers.Authorization).toBe(basicAuth)
-    expect(headers['content-type']).toBe('application/json')
-    const headerNames = Object.keys(headers).map((name) => name.toLowerCase())
-    expect(headerNames).not.toContain('cookie')
-    expect(headerNames).not.toContain('host')
-    expect(headerNames).not.toContain('origin')
-    expect(headerNames).not.toContain('referer')
-    expect(headerNames).not.toContain('x-opencode-directory')
-    expect(headerNames.filter((name) => name === 'authorization')).toHaveLength(1)
+    const [recorded] = upstream.requests
+    expect(recorded?.method).toBe('POST')
+    expect(recorded?.url).toBe('/api/session/ses_1/message?directory=%2Fwork')
+    expect(recorded?.body).toBe(payload)
+    expect(recorded?.headers.authorization).toBe(buildOpenCodeBasicAuth(STORED_PASSWORD))
+    expect(recorded?.headers['content-type']).toBe('application/json')
+    expect(recorded?.headers.cookie).toBeUndefined()
+    expect(recorded?.headers.host).not.toBe('manager.local')
+    expect(recorded?.headers.origin).toBeUndefined()
+    expect(recorded?.headers.referer).toBeUndefined()
+    expect(recorded?.headers['x-opencode-directory']).toBeUndefined()
   })
 
   it('does not add a default directory header on GET requests', async () => {
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    const res = await authorizedFetch(serverPath('/api/session'), { method: 'GET' })
 
-    await app.request('/api/opencode/servers/srv_1/api/session', { method: 'GET' })
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    const headers = init.headers as Record<string, string>
-    expect(Object.keys(headers).map((name) => name.toLowerCase())).not.toContain('x-opencode-directory')
-    expect(init.body).toBeUndefined()
+    expect(res.status).toBe(200)
+    const [recorded] = upstream.requests
+    expect(recorded?.headers['x-opencode-directory']).toBeUndefined()
+    expect(recorded?.body).toBe('')
   })
 
   it('returns 404 for an unknown server', async () => {
-    getConnectionMock.mockImplementation(() => {
-      throw new OpenCodeServerNotFoundError('srv_missing')
-    })
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
-
-    const res = await app.request('/api/opencode/servers/srv_missing/api/session')
+    const res = await authorizedFetch('/api/opencode/servers/srv_missing/api/session')
 
     expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ error: 'OpenCode server not found: srv_missing' })
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: 'OpenCode server not found: srv_missing',
+    })
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 404 for a disabled server', async () => {
-    getConnectionMock.mockImplementation(() => {
-      throw new OpenCodeServerNotFoundError('srv_off', 'disabled')
-    })
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    const disabled = seedOpenCodeServer(db, { baseUrl: upstream.baseUrl, enabled: false })
 
-    const res = await app.request('/api/opencode/servers/srv_off/api/session')
+    const res = await authorizedFetch(`/api/opencode/servers/${disabled.id}/api/session`)
 
     expect(res.status).toBe(404)
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: `OpenCode server is disabled: ${disabled.id}`,
+    })
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 400 for the local server', async () => {
-    getConnectionMock.mockImplementation(() => {
-      throw new OpenCodeServerError('The local OpenCode server has no remote connection', 400)
-    })
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
-
-    const res = await app.request('/api/opencode/servers/local/api/session')
+    const res = await authorizedFetch('/api/opencode/servers/local/api/session')
 
     expect(res.status).toBe(400)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 400 for encoded traversal segments', async () => {
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
-
-    const res = await app.request('/api/opencode/servers/srv_1/api/session%2F..%2Fsecrets')
+    const res = await authorizedFetch(serverPath('/api/session%2F..%2Fsecrets'))
 
     expect(res.status).toBe(400)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 400 for repeated encoded traversal that survives segment decoding', async () => {
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
-
-    const res = await app.request('/api/opencode/servers/srv_1/api/%25252e%25252e/config')
+    const res = await authorizedFetch(serverPath('/api/%25252e%25252e/config'))
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'Invalid proxy path' })
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Invalid proxy path' })
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 400 when a prefixed base URL would be escaped by path normalization', async () => {
-    getConnectionMock.mockReturnValue({ baseUrl: 'http://remote.example:4096/prefix', authorization: basicAuth })
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    const prefixed = seedOpenCodeServer(db, {
+      baseUrl: `${upstream.baseUrl}/prefix`,
+      password: STORED_PASSWORD,
+    })
 
-    const res = await app.request(
-      '/api/opencode/servers/srv_1/api/session/%25252e%25252e/%25252e%25252e/config',
+    const res = await authorizedFetch(
+      `/api/opencode/servers/${prefixed.id}/api/session/%25252e%25252e/%25252e%25252e/config`,
     )
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'Invalid proxy path' })
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({ error: 'Invalid proxy path' })
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('proxies a normal API path under a prefixed base URL unchanged', async () => {
-    getConnectionMock.mockReturnValue({ baseUrl: 'http://remote.example:4096/prefix', authorization: basicAuth })
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    const prefixed = seedOpenCodeServer(db, {
+      baseUrl: `${upstream.baseUrl}/prefix`,
+      password: STORED_PASSWORD,
+    })
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+    const res = await authorizedFetch(`/api/opencode/servers/${prefixed.id}/api/session`)
 
     expect(res.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('http://remote.example:4096/prefix/api/session')
+    expect(upstream.requests).toHaveLength(1)
+    expect(upstream.requests[0]?.url).toBe('/prefix/api/session')
   })
 
   it('returns 404 for upstream paths outside /api', async () => {
-    const fetchMock = createFetchMock()
-    const app = buildApp(fetchMock as unknown as typeof fetch)
-
-    const res = await app.request('/api/opencode/servers/srv_1/config')
+    const res = await authorizedFetch(serverPath('/config'))
 
     expect(res.status).toBe(404)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 
   it('returns 502 when the upstream fetch fails', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'))
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    const unreachable = seedOpenCodeServer(db, {
+      baseUrl: 'http://127.0.0.1:1',
+      password: STORED_PASSWORD,
+    })
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+    const res = await authorizedFetch(`/api/opencode/servers/${unreachable.id}/api/session`)
 
     expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'Remote OpenCode server unreachable' })
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: 'Remote OpenCode server unreachable',
+    })
   })
 
   it('returns 504 when a GET upstream does not send headers before the timeout', async () => {
-    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      init.signal?.addEventListener('abort', () => {
-        reject(new DOMException('Aborted', 'AbortError'))
-      })
-    }))
-    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 20)
+    upstream.setResponder(() => undefined)
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+    const res = await buildApp(20).request(serverPath('/api/session'), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
 
     expect(res.status).toBe(504)
-    expect(await res.json()).toEqual({ error: 'Remote OpenCode server timed out' })
+    await expect(readJson(res, ErrorResponseSchema)).resolves.toEqual({
+      error: 'Remote OpenCode server timed out',
+    })
   })
 
-  it('does not time out a POST that takes longer than the headers timeout', async () => {
-    let receivedSignal: AbortSignal | null | undefined
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      receivedSignal = init.signal
-      await new Promise((resolve) => setTimeout(resolve, 40))
-      return new Response('ok', { status: 200 })
+  it.each([
+    ['with a body', '/api/session/ses_1/message', { method: 'POST', body: '{}' }],
+    ['without a body', '/api/session/ses_1/abort', { method: 'POST' }],
+  ])('does not time out a POST %s that takes longer than the headers timeout', async (_label, path, init) => {
+    upstream.setResponder((_request, response) => {
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'text/plain' })
+        response.end('ok')
+      }, 40)
     })
-    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1/message', {
-      method: 'POST',
-      body: '{}',
+    const res = await buildApp(10).request(serverPath(path), {
+      ...init,
+      headers: { Authorization: `Bearer ${token}` },
     })
 
     expect(res.status).toBe(200)
-    expect(receivedSignal?.aborted).toBe(false)
-  })
-
-  it('does not time out a bodyless POST that takes longer than the headers timeout', async () => {
-    let receivedSignal: AbortSignal | null | undefined
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      receivedSignal = init.signal
-      await new Promise((resolve) => setTimeout(resolve, 40))
-      return new Response('ok', { status: 200 })
-    })
-    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
-
-    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1/abort', {
-      method: 'POST',
-    })
-
-    expect(res.status).toBe(200)
-    expect(receivedSignal?.aborted).toBe(false)
   })
 
   it('keeps streaming the upstream body after headers arrive', async () => {
-    const encoder = new TextEncoder()
-    let receivedSignal: AbortSignal | null | undefined
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      receivedSignal = init.signal
-      const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          controller.enqueue(encoder.encode('data: one\n\n'))
-          await new Promise((resolve) => setTimeout(resolve, 40))
-          controller.enqueue(encoder.encode('data: two\n\n'))
-          controller.close()
-        },
-      })
-      return new Response(stream, {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      })
+    upstream.setResponder((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: one\n\n')
+      setTimeout(() => {
+        response.write('data: two\n\n')
+        response.end()
+      }, 40)
     })
-    const app = buildApp(fetchMock as unknown as typeof fetch, passThroughAuth, 10)
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/event')
+    const res = await buildApp(10).request(serverPath('/api/event'), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
 
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('data: one\n\ndata: two\n\n')
-    expect(receivedSignal?.aborted).toBe(false)
   })
 
   it('streams the upstream response body and drops set-cookie', async () => {
-    const encoder = new TextEncoder()
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('data: one\n\n'))
-        controller.enqueue(encoder.encode('data: two\n\n'))
-        controller.close()
-      },
+    upstream.setResponder((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'set-cookie': 'leak=1' })
+      response.write('data: one\n\n')
+      response.write('data: two\n\n')
+      response.end()
     })
-    const fetchMock = createFetchMock(new Response(stream, {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream', 'set-cookie': 'leak=1' },
-    }))
-    const app = buildApp(fetchMock as unknown as typeof fetch)
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/event')
+    const res = await authorizedFetch(serverPath('/api/event'))
 
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('text/event-stream')
@@ -304,24 +274,21 @@ describe('opencode server proxy routes', () => {
   })
 
   it('returns a null body for bodyless upstream statuses', async () => {
-    const fetchMock = createFetchMock(new Response(null, { status: 204 }))
-    const app = buildApp(fetchMock as unknown as typeof fetch)
+    upstream.setResponder((_request, response) => {
+      response.writeHead(204)
+      response.end()
+    })
 
-    const res = await app.request('/api/opencode/servers/srv_1/api/session/ses_1', { method: 'DELETE' })
+    const res = await authorizedFetch(serverPath('/api/session/ses_1'), { method: 'DELETE' })
 
     expect(res.status).toBe(204)
     expect(await res.text()).toBe('')
   })
 
   it('rejects unauthenticated requests before reaching the upstream', async () => {
-    const fetchMock = createFetchMock()
-    const denyAuth: MiddlewareHandler = async (c) => c.json({ error: 'Unauthorized' }, 401)
-    const app = buildApp(fetchMock as unknown as typeof fetch, denyAuth)
-
-    const res = await app.request('/api/opencode/servers/srv_1/api/session')
+    const res = await buildApp().request(serverPath('/api/session'))
 
     expect(res.status).toBe(401)
-    expect(fetchMock).not.toHaveBeenCalled()
-    expect(getConnectionMock).not.toHaveBeenCalled()
+    expect(upstream.requests).toHaveLength(0)
   })
 })
