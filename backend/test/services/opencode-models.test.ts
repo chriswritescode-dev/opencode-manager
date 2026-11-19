@@ -6,7 +6,7 @@ import {
   MODEL_LOAD_TIMEOUT_MS,
   resolveOpenCodeModel,
 } from '../../src/services/opencode-models'
-import { createStubOpenCodeClient, modelInfo } from '../helpers/stub-opencode-client'
+import { createStubOpenCodeClient, modelInfo, pluginInfo } from '../helpers/stub-opencode-client'
 
 const DIR = '/workspace/repos/sample-project'
 const LOCATION = { directory: DIR }
@@ -26,6 +26,7 @@ interface ClientStubInput {
   listError?: Error
   defaultError?: Error
   configError?: Error
+  pluginList?: OpenCodeApi['plugin']['list']
 }
 
 function createdClient(input: ClientStubInput): OpenCodeClient {
@@ -47,6 +48,7 @@ function createdClient(input: ClientStubInput): OpenCodeClient {
           return input.configEntries ?? []
         }),
       },
+      plugin: input.pluginList ? { list: input.pluginList } : undefined,
     },
   })
 }
@@ -308,6 +310,152 @@ describe('resolveOpenCodeModel', () => {
       model: 'anthropic/claude-sonnet-4',
     })
     await vi.advanceTimersByTimeAsync(MODEL_LOAD_POLL_MS)
+    await assertion
+  })
+
+  it('waits for the plugin catalog before choosing a default model', async () => {
+    let listCalls = 0
+    let pluginCalls = 0
+    const client = createStubOpenCodeClient({
+      api: {
+        model: {
+          list: vi.fn<OpenCodeApi['model']['list']>(async () => {
+            listCalls += 1
+            return {
+              location: LOCATION,
+              data: listCalls === 1
+                ? [model('openai', 'gpt-5-mini')]
+                : [model('openai', 'gpt-5-mini'), model('anthropic', 'claude-sonnet-4')],
+            }
+          }),
+          default: vi.fn<OpenCodeApi['model']['default']>(async () => ({
+            location: LOCATION,
+            data: listCalls === 1
+              ? model('openai', 'gpt-5-mini')
+              : model('anthropic', 'claude-sonnet-4'),
+          })),
+        },
+        plugin: {
+          list: vi.fn<OpenCodeApi['plugin']['list']>(async () => {
+            pluginCalls += 1
+            return {
+              location: LOCATION,
+              data: pluginCalls === 1 ? [] : [pluginInfo()],
+            }
+          }),
+        },
+        config: { get: vi.fn<OpenCodeApi['config']['get']>(async () => []) },
+      },
+    })
+
+    const promise = resolveOpenCodeModel(client, DIR)
+    const assertion = expect(promise).resolves.toEqual({
+      providerID: 'anthropic',
+      id: 'claude-sonnet-4',
+      model: 'anthropic/claude-sonnet-4',
+    })
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_POLL_MS)
+    await assertion
+    expect(pluginCalls).toBe(2)
+  })
+
+  it('keeps polling when a catalog read reports plugins still activating', async () => {
+    let listCalls = 0
+    const client = createStubOpenCodeClient({
+      api: {
+        model: {
+          list: vi.fn<OpenCodeApi['model']['list']>(async () => {
+            listCalls += 1
+            if (listCalls === 1) {
+              throw Object.assign(new Error('Location plugins did not finish activating'), {
+                _tag: 'ServiceUnavailableError',
+                service: 'plugin',
+              })
+            }
+            return { location: LOCATION, data: [model('openai', 'gpt-5')] }
+          }),
+          default: vi.fn<OpenCodeApi['model']['default']>(async () => ({
+            location: LOCATION,
+            data: model('openai', 'gpt-5'),
+          })),
+        },
+        config: { get: vi.fn<OpenCodeApi['config']['get']>(async () => []) },
+      },
+    })
+
+    const promise = resolveOpenCodeModel(client, DIR)
+    const assertion = expect(promise).resolves.toEqual({
+      providerID: 'openai',
+      id: 'gpt-5',
+      model: 'openai/gpt-5',
+    })
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_POLL_MS)
+    await assertion
+    expect(listCalls).toBe(2)
+  })
+
+  it('propagates a service unavailable error from a different service', async () => {
+    const otherService = Object.assign(new Error('session service unavailable'), {
+      _tag: 'ServiceUnavailableError',
+      service: 'session',
+    })
+    await expect(resolveOpenCodeModel(createdClient({ models: [], listError: otherService }), DIR))
+      .rejects.toThrow('session service unavailable')
+
+    const missingService = Object.assign(new Error('catalog unavailable'), {
+      _tag: 'ServiceUnavailableError',
+    })
+    await expect(resolveOpenCodeModel(createdClient({ models: [], listError: missingService }), DIR))
+      .rejects.toThrow('catalog unavailable')
+  })
+
+  it('does not read the plugin list when a target model is requested', async () => {
+    const preferredPluginList = vi.fn<OpenCodeApi['plugin']['list']>(
+      async () => ({ location: LOCATION, data: [] }),
+    )
+    const preferredClient = createdClient({
+      models: [model('openai', 'gpt-5')],
+      pluginList: preferredPluginList,
+    })
+
+    await expect(resolveOpenCodeModel(preferredClient, DIR, { preferredModel: 'openai/gpt-5' }))
+      .resolves.toEqual({ providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5' })
+    expect(preferredPluginList).not.toHaveBeenCalled()
+
+    const configuredPluginList = vi.fn<OpenCodeApi['plugin']['list']>(
+      async () => ({ location: LOCATION, data: [] }),
+    )
+    const configuredClient = createdClient({
+      models: [model('openai', 'gpt-5')],
+      configEntries: [configEntry('openai/gpt-5')],
+      pluginList: configuredPluginList,
+    })
+
+    await expect(resolveOpenCodeModel(configuredClient, DIR))
+      .resolves.toEqual({ providerID: 'openai', id: 'gpt-5', model: 'openai/gpt-5' })
+    expect(configuredPluginList).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the loaded default when plugins never finish loading', async () => {
+    const client = createdClient({
+      models: [model('openai', 'gpt-5-mini')],
+      defaultModel: model('openai', 'gpt-5-mini'),
+      pluginList: vi.fn<OpenCodeApi['plugin']['list']>(async () => ({ location: LOCATION, data: [] })),
+    })
+
+    const promise = resolveOpenCodeModel(client, DIR)
+    let settled = false
+    void promise.then(() => { settled = true }, () => { settled = true })
+
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_POLL_MS)
+    expect(settled).toBe(false)
+
+    const assertion = expect(promise).resolves.toEqual({
+      providerID: 'openai',
+      id: 'gpt-5-mini',
+      model: 'openai/gpt-5-mini',
+    })
+    await vi.advanceTimersByTimeAsync(MODEL_LOAD_TIMEOUT_MS)
     await assertion
   })
 

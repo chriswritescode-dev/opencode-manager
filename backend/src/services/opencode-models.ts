@@ -80,11 +80,16 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-type PollingResult<T> = { ok: true; value: T } | { ok: false }
+type PollingResult<T> = { ok: true; value: T } | { ok: false; retry?: true }
 
 const abortLikeErrorSchema = z.object({
   name: z.string().optional(),
   cause: z.unknown().optional(),
+})
+
+const pluginsActivatingErrorSchema = z.object({
+  _tag: z.literal('ServiceUnavailableError'),
+  service: z.literal('plugin'),
 })
 
 function isAbortLike(cause: unknown, signal: AbortSignal): boolean {
@@ -119,8 +124,16 @@ async function runPollingRequest<T>(
       return { ok: false }
     }
 
+    if (pluginsActivatingErrorSchema.safeParse(error).success) {
+      return { ok: false, retry: true }
+    }
+
     throw error
   }
+}
+
+function isRetrying<T>(result: PollingResult<T> | undefined): boolean {
+  return result !== undefined && !result.ok && result.retry === true
 }
 
 async function readConfiguredRef(
@@ -164,7 +177,7 @@ export async function resolveOpenCodeModel(
         break
       }
 
-      const [listResult, defaultResult] = await Promise.all([
+      const [listResult, defaultResult, pluginResult] = await Promise.all([
         runPollingRequest(
           () => client.api.model.list(location, { signal }),
           external,
@@ -175,6 +188,13 @@ export async function resolveOpenCodeModel(
           external,
           timeoutController.signal,
         ),
+        targetRef === undefined
+          ? runPollingRequest(
+            () => client.api.plugin.list(location, { signal }),
+            external,
+            timeoutController.signal,
+          )
+          : undefined,
       ])
 
       if (listResult.ok) {
@@ -183,6 +203,11 @@ export async function resolveOpenCodeModel(
 
       if (defaultResult.ok) {
         defaultModel = defaultResult.value.data
+      }
+
+      if (isRetrying(listResult) || isRetrying(defaultResult) || isRetrying(pluginResult)) {
+        await sleep(MODEL_LOAD_POLL_MS, signal)
+        continue
       }
 
       if (!listResult.ok || !defaultResult.ok) {
@@ -195,8 +220,11 @@ export async function resolveOpenCodeModel(
         break
       }
 
+      const pluginsLoaded = pluginResult === undefined
+        || (pluginResult.ok && pluginResult.value.data.length > 0)
+
       const resolved = resolveFromLoadedModels(models, defaultModel, configuredRef, preferredRef)
-      if (resolved && isTargetLoaded(models, targetRef)) {
+      if (resolved && isTargetLoaded(models, targetRef) && pluginsLoaded) {
         return resolved
       }
 
