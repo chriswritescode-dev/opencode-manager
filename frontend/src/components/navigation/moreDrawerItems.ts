@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound, BarChart3 } from 'lucide-react'
+import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound, BarChart3, Gauge } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -84,7 +84,21 @@ export function toolKeyOf(item: MoreDrawerItem): string | null {
 function buildRouteNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
-  if (SERVER_SESSION_DETAIL_PATH.test(pathname) || SERVER_PROJECT_PATH.test(pathname)) {
+  if (SERVER_SESSION_DETAIL_PATH.test(pathname)) {
+    return {
+      primary: [getAssistantNavItem()],
+      items: [
+        { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
+        { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+        { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+        { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
+        { key: 'session-usage', label: 'Session usage', icon: Gauge, dialog: 'usage' },
+        ...baseItems,
+      ],
+    }
+  }
+
+  if (SERVER_PROJECT_PATH.test(pathname)) {
     return {
       primary: [getAssistantNavItem()],
       items: [
@@ -133,6 +147,7 @@ function buildRouteNavModel(pathname: string): NavModel {
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       { key: 'terminal', label: 'Terminal', icon: SquareTerminal, dialog: 'terminal' },
       { key: 'walkthrough', label: 'Walkthrough', icon: BookOpen, dialog: 'walkthrough' },
+      { key: 'session-usage', label: 'Session usage', icon: Gauge, dialog: 'usage' },
       ...(isAssistantRepo
         ? []
         : [{ key: 'actions', label: 'Actions', icon: Play, dialog: 'actions' }]),

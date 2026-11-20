@@ -48,6 +48,7 @@ import { ProjectActionsMenu } from "@/components/repo/ProjectActionsMenu";
 import { RepoActionsDialog } from "@/components/repo/RepoActionsDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
+import { SessionUsageDialog } from "@/components/usage/SessionUsageDialog";
 import { compactSession, findRemoteProjectForDirectory, forkSession, listSessionMessages, remoteProjectName } from "@/api/opencode";
 import { useOpenCodeServerId, isLocalOpenCodeServer } from "@/contexts/opencode-server-context";
 import { useRemoteProjects } from "@/hooks/useRemoteProjects";
@@ -145,6 +146,7 @@ export function SessionDetail() {
   const [previewOpen, setPreviewOpen] = useDialogParam('preview');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
   const [walkthroughOpen, setWalkthroughOpen] = useDialogParam('walkthrough');
+  const [usageOpen, setUsageOpen] = useDialogParam('usage');
   const [requestedWalkthroughSource, setRequestedWalkthroughSource] = useState<WalkthroughSourceRequest | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -1089,6 +1091,12 @@ export function SessionDetail() {
           onSkillLoaded={handleSkillLoaded}
         />
       )}
+
+      <SessionUsageDialog
+        open={!docked && usageOpen}
+        onOpenChange={setUsageOpen}
+        sessionId={sessionId}
+      />
 
       {!isRemoteServer && sessionId && (
         <ChangesWalkthroughSheet

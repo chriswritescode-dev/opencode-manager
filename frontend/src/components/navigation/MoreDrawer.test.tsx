@@ -166,7 +166,7 @@ describe('MoreDrawer', () => {
     const sectionLabels = (name: string) =>
       within(screen.getByRole('region', { name })).getAllByRole('button').map((button) => button.textContent)
 
-    expect(sectionLabels('Workspace')).toEqual(['Files', 'Source Control', 'Terminal', 'Walkthrough', 'Preview'])
+    expect(sectionLabels('Workspace')).toEqual(['Files', 'Source Control', 'Terminal', 'Walkthrough', 'Session usage', 'Preview'])
     expect(sectionLabels('Project')).toEqual(['MCP', 'Skills', 'Reset Permissions', 'Schedules', 'Actions'])
     expect(screen.getAllByText('Settings')).toHaveLength(1)
     expect(screen.getAllByText('Logout')).toHaveLength(1)
@@ -253,6 +253,7 @@ describe('MoreDrawer', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
     expect(screen.getByText('Terminal')).toBeInTheDocument()
+    expect(screen.getByText('Session usage')).toBeInTheDocument()
     expect(screen.getByText('Sessions')).toBeInTheDocument()
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
     expect(screen.getByText('Source Control')).toBeInTheDocument()
@@ -260,6 +261,33 @@ describe('MoreDrawer', () => {
     expect(screen.queryByText('Schedules')).not.toBeInTheDocument()
     expect(screen.queryByText('Reset Permissions')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Assistant' })).not.toBeInTheDocument()
+
+    const workspaceButtons = within(screen.getByRole('region', { name: 'Workspace' }))
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+    expect(workspaceButtons).toEqual(['Source Control', 'Terminal', 'Session usage'])
+  })
+
+  it('opens the Session usage dialog from a local session', async () => {
+    const { capturedPathname, capturedSearch } = renderMoreDrawer(
+      '/repos/1/sessions/session-1?mobileTab=more',
+      '/repos/:id/sessions/:sessionId',
+    )
+
+    fireEvent.click(screen.getByText('Session usage'))
+
+    await waitFor(() => expect(new URLSearchParams(capturedSearch.current).get('dialog')).toBe('usage'))
+    expect(new URLSearchParams(capturedSearch.current).get('mobileTab')).toBeNull()
+    expect(capturedPathname.current).toBe('/repos/1/sessions/session-1')
+  })
+
+  it.each([
+    ['/repos/1', '/repos/:id'],
+    ['/', '*'],
+  ])('does not render Session usage on %s', (entry, routePath) => {
+    renderMoreDrawer(entry, routePath)
+
+    expect(screen.queryByText('Session usage')).not.toBeInTheDocument()
   })
 
   it('shows unread reports and marks them all read', async () => {

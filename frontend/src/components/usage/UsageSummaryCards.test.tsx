@@ -48,6 +48,31 @@ describe('UsageSummaryCards', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
+  it('renders average tokens per second after spend when provided', () => {
+    renderWithProviders(
+      <UsageSummaryCards cost={1.5} tokens={tokens} steps={7} tokensPerSecond={100} />,
+      providerOptions,
+    )
+
+    const labels = screen.getAllByText(/^(Spend|Avg tokens\/s|Tokens|Steps)$/)
+    expect(labels.map((node) => node.textContent)).toEqual([
+      'Spend',
+      'Avg tokens/s',
+      'Tokens',
+      'Steps',
+    ])
+    expect(screen.getByText('100.0 tok/s')).toBeInTheDocument()
+  })
+
+  it('omits average tokens per second when undefined', () => {
+    renderWithProviders(
+      <UsageSummaryCards cost={1.5} tokens={tokens} steps={7} />,
+      providerOptions,
+    )
+
+    expect(screen.queryByText('Avg tokens/s')).not.toBeInTheDocument()
+  })
+
   it('omits prompts, active days and streak when undefined', () => {
     renderWithProviders(
       <UsageSummaryCards cost={1.5} tokens={tokens} steps={7} />,

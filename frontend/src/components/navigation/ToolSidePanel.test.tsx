@@ -14,6 +14,7 @@ import { makeRepo, makeSession } from '@/test/fixtures/api'
 import { permissionAsked, sessionStatusUpdated } from '@/test/fixtures/events'
 import type { FetchRoute } from '@/test/fetchFake'
 import type { TerminalInfo } from '@opencode-manager/shared/types'
+import type { SessionMessageAssistant } from '@opencode-manager/shared/opencode'
 
 function LocationProbe() {
   const location = useLocation()
@@ -109,6 +110,29 @@ function terminalRoute(terminals: TerminalInfo[]): FetchRoute {
   return { method: 'GET', path: '/api/repos/1/terminals', respond: () => ({ json: { terminals } }) }
 }
 
+function usageStep(): SessionMessageAssistant {
+  return {
+    id: 'msg_usage',
+    type: 'assistant',
+    agent: 'build',
+    model: { providerID: 'anthropic', id: 'claude' },
+    time: { created: 1000 },
+    content: [],
+    cost: 1,
+    tokens: { input: 1000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  }
+}
+
+function usageMessagesRoute(serverId?: string): FetchRoute {
+  return {
+    method: 'GET',
+    path: serverId
+      ? `/api/opencode/servers/${serverId}/api/session/:sessionID/message`
+      : '/api/opencode/api/session/:sessionID/message',
+    respond: () => ({ json: { data: [usageStep()], cursor: {} } }),
+  }
+}
+
 function renderPanel(route: string, options: PanelOptions = {}) {
   const result = renderWithProviders(
     <KeyboardShortcutsProvider>
@@ -121,6 +145,7 @@ function renderPanel(route: string, options: PanelOptions = {}) {
       toaster: false,
       fetchRoutes: [
         ...(options.terminals ? [terminalRoute(options.terminals)] : []),
+        usageMessagesRoute(),
         {
           method: 'DELETE',
           path: '/api/repos/1/terminals/:ptyID',
@@ -539,10 +564,64 @@ describe('ToolSidePanel', () => {
       within(rail)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-    ).toEqual(['Sessions', 'MCP', 'Skills', 'Source Control', 'Terminal'])
+    ).toEqual(['Sessions', 'MCP', 'Skills', 'Source Control', 'Terminal', 'Session usage'])
 
     await user.click(screen.getByRole('button', { name: 'MCP' }))
     expect(await screen.findByRole('complementary', { name: 'MCP' })).toBeInTheDocument()
+  })
+
+  it('opens the usage panel for a local session', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderPanel('')
+
+    const rail = screen.getByRole('navigation', { name: 'Tools' })
+    expect(within(rail).getByRole('button', { name: 'Session usage' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Session usage' }))
+
+    expect(await screen.findByRole('complementary', { name: 'Session usage' })).toBeInTheDocument()
+    expect(panelSearch().get('panel')).toBe('usage')
+    expect(panelSearch().has('dialog')).toBe(false)
+    expect(await screen.findByText('Spend')).toBeInTheDocument()
+
+    const request = fetchFake.lastRequest('GET', '/api/opencode/api/session/ses_1/message')
+    expect(request?.path).toBe('/api/opencode/api/session/ses_1/message')
+    expect(request?.searchParams.get('type')).toBe('assistant')
+    expect(request?.searchParams.get('limit')).toBe('200')
+  })
+
+  it('opens the usage panel for a linked-server session', async () => {
+    const user = userEvent.setup()
+    const { fetchFake } = renderWithProviders(
+      <KeyboardShortcutsProvider>
+        <RemoteHarness />
+      </KeyboardShortcutsProvider>,
+      {
+        route: '/servers/srv_kitchen/sessions/ses_remote',
+        serverId: 'srv_kitchen',
+        events: true,
+        theme: false,
+        toaster: false,
+        fetchRoutes: [...appRoutes(), usageMessagesRoute('srv_kitchen')],
+        fetchFallback: () => ({ json: {} }),
+      },
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Session usage' }))
+
+    expect(await screen.findByRole('complementary', { name: 'Session usage' })).toBeInTheDocument()
+    expect(panelSearch().get('panel')).toBe('usage')
+    expect(await screen.findByText('Spend')).toBeInTheDocument()
+
+    const request = fetchFake.lastRequest(
+      'GET',
+      '/api/opencode/servers/srv_kitchen/api/session/ses_remote/message',
+    )
+    expect(request?.path).toBe('/api/opencode/servers/srv_kitchen/api/session/ses_remote/message')
+    expect(request?.searchParams.get('type')).toBe('assistant')
+    expect(
+      fetchFake.findRequests('GET', '/api/opencode/api/session/ses_remote/message'),
+    ).toHaveLength(0)
   })
 
   it('opens the remote source control panel for a linked-server session', async () => {

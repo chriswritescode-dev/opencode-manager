@@ -29,6 +29,31 @@ describe('sessions tool', () => {
   })
 })
 
+describe('usage tool', () => {
+  it('is a panel tool', () => {
+    expect(isPanelTool('usage')).toBe(true)
+  })
+
+  it('rewrites to the usage dialog when the panel is not docked', async () => {
+    function Probe() {
+      useToolPanel(false)
+      const location = useLocation()
+      return createElement('div', { 'data-testid': 'search' }, location.search)
+    }
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ['/repos/1/sessions/abc?panel=usage'] },
+        createElement(Probe),
+      ),
+    )
+
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('panel=usage'))
+    expect(screen.getByTestId('search').textContent).toContain('dialog=usage')
+  })
+})
+
 describe('toggleToolPanelParams', () => {
   it('opens a tool, clears other tools owned params, and preserves unrelated params', () => {
     const params = new URLSearchParams('previewPort=3000&previewPath=%2Fx&keep=1')

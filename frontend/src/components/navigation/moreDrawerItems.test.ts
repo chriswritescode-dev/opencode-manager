@@ -45,7 +45,7 @@ describe('buildMoreItems', () => {
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
     const items = buildMoreItems('/repos/42/sessions/abc')
-    expect(items).toHaveLength(14)
+    expect(items).toHaveLength(15)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
     expect(items[2].key).toBe('mcp')
@@ -58,13 +58,16 @@ describe('buildMoreItems', () => {
     expect(items[7].dialog).toBe('terminal')
     expect(items[8].key).toBe('walkthrough')
     expect(items[8].dialog).toBe('walkthrough')
-    expect(items[9].key).toBe('actions')
-    expect(items[9].dialog).toBe('actions')
-    expect(items[10].key).toBe('preview')
-    expect(items[10].dialog).toBe('preview')
-    expect(items[11].key).toBe('usage')
-    expect(items[12].key).toBe('settings')
-    expect(items[13].key).toBe('logout')
+    expect(items[9].key).toBe('session-usage')
+    expect(items[9].label).toBe('Session usage')
+    expect(items[9].dialog).toBe('usage')
+    expect(items[10].key).toBe('actions')
+    expect(items[10].dialog).toBe('actions')
+    expect(items[11].key).toBe('preview')
+    expect(items[11].dialog).toBe('preview')
+    expect(items[12].key).toBe('usage')
+    expect(items[13].key).toBe('settings')
+    expect(items[14].key).toBe('logout')
   })
 
   it('returns only the server tools a linked server can serve for /servers/:id/sessions/:sid', () => {
@@ -75,6 +78,7 @@ describe('buildMoreItems', () => {
       'skills',
       'source-control',
       'terminal',
+      'session-usage',
       'usage',
       'settings',
       'logout',
@@ -98,15 +102,16 @@ describe('buildMoreItems', () => {
 
   it('omits the Actions item for an Assistant session', () => {
     const items = buildMoreItems('/repos/0/sessions/abc')
-    expect(items).toHaveLength(13)
+    expect(items).toHaveLength(14)
     expect(items.map((item) => item.key)).not.toContain('actions')
     expect(items[7].key).toBe('terminal')
     expect(items[8].key).toBe('walkthrough')
-    expect(items[9].key).toBe('preview')
-    expect(items[9].dialog).toBe('preview')
-    expect(items[10].key).toBe('usage')
-    expect(items[11].key).toBe('settings')
-    expect(items[12].key).toBe('logout')
+    expect(items[9].key).toBe('session-usage')
+    expect(items[10].key).toBe('preview')
+    expect(items[10].dialog).toBe('preview')
+    expect(items[11].key).toBe('usage')
+    expect(items[12].key).toBe('settings')
+    expect(items[13].key).toBe('logout')
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
@@ -198,6 +203,7 @@ describe('buildToolItems', () => {
       'source-control',
       'terminal',
       'walkthrough',
+      'session-usage',
       'actions',
       'preview',
     ])
@@ -210,6 +216,7 @@ describe('buildToolItems', () => {
       'skills',
       'source-control',
       'terminal',
+      'session-usage',
     ])
   })
 

@@ -1,12 +1,13 @@
 import type { TokenUsageInfo } from '@opencode-manager/shared/opencode'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatCompactTokens } from '@/lib/contextUsage'
-import { formatUsd, totalTokens } from '@/lib/usageStats'
+import { formatTokensPerSecond, formatUsd, totalTokens } from '@/lib/usageStats'
 
 interface UsageSummaryCardsProps {
   cost: number
   tokens: TokenUsageInfo
   steps: number
+  tokensPerSecond?: number | null
   prompts?: number
   activeDays?: number
   streak?: number
@@ -21,15 +22,23 @@ export function UsageSummaryCards({
   cost,
   tokens,
   steps,
+  tokensPerSecond,
   prompts,
   activeDays,
   streak,
 }: UsageSummaryCardsProps) {
   const stats: UsageStat[] = [
     { label: 'Spend', value: formatUsd(cost) },
+  ]
+
+  if (tokensPerSecond !== undefined) {
+    stats.push({ label: 'Avg tokens/s', value: formatTokensPerSecond(tokensPerSecond) })
+  }
+
+  stats.push(
     { label: 'Tokens', value: formatCompactTokens(totalTokens(tokens)) },
     { label: 'Steps', value: String(steps) },
-  ]
+  )
 
   if (prompts !== undefined) stats.push({ label: 'Prompts', value: String(prompts) })
   if (activeDays !== undefined) stats.push({ label: 'Active days', value: String(activeDays) })

@@ -21,6 +21,7 @@ import { RepoActionsContent } from '@/components/repo/RepoActionsDialog'
 import { RepoSkillsContent } from '@/components/repo/RepoSkillsDialog'
 import { RepoSecretsContent } from '@/components/secrets/RepoSecretsDialog'
 import { RepoSchedulesContent } from '@/components/schedules/RepoSchedulesContent'
+import { SessionUsageContent } from '@/components/usage/SessionUsageContent'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 import type { ModelRef } from '@opencode-manager/shared/opencode'
 import { buildToolItems, toolKeyOf, type MoreDrawerItem } from '@/components/navigation/moreDrawerItems'
@@ -128,7 +129,7 @@ function PanelResizeHandle({ width, minWidth, maxWidth, onWidthChange }: PanelRe
   )
 }
 
-const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['sessions', 'mcp', 'skills', 'source-control', 'terminal'])
+const REMOTE_TOOL_KEYS: ReadonlySet<string> = new Set(['sessions', 'mcp', 'skills', 'source-control', 'terminal', 'session-usage'])
 
 function useFloatingPanelDismiss(
   floating: boolean,
@@ -368,6 +369,7 @@ export function ToolSidePanel({
         ? null
         : <SourceControlContent repoId={repoId} isOpen currentBranch={currentBranch} compact />
     }
+    if (tool === 'usage') return sessionId ? <SessionUsageContent sessionId={sessionId} compact /> : null
     if (repoId === undefined) return null
     switch (tool) {
       case 'actions':
