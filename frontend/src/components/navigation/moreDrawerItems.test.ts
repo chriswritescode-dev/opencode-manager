@@ -2,19 +2,20 @@ import { describe, it, expect } from 'vitest'
 import { buildMoreItems, buildNavModel, buildToolItems } from './moreDrawerItems'
 
 describe('buildMoreItems', () => {
-  it('returns Home + All Schedules + Files + Settings + Logout for root path', () => {
+  it('returns Home + All Schedules + Files + Usage + Settings + Logout for root path', () => {
     const items = buildMoreItems('/')
-    expect(items).toHaveLength(5)
+    expect(items).toHaveLength(6)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('all-schedules')
     expect(items[2].key).toBe('files')
-    expect(items[3].key).toBe('settings')
-    expect(items[4].key).toBe('logout')
+    expect(items[3].key).toBe('usage')
+    expect(items[4].key).toBe('settings')
+    expect(items[5].key).toBe('logout')
   })
 
   it('returns repo-specific items for /repos/:id', () => {
     const items = buildMoreItems('/repos/42')
-    expect(items).toHaveLength(13)
+    expect(items).toHaveLength(14)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
     expect(items[1].dialog).toBe('files')
@@ -37,13 +38,14 @@ describe('buildMoreItems', () => {
     expect(items[9].dialog).toBe('actions')
     expect(items[10].key).toBe('preview')
     expect(items[10].dialog).toBe('preview')
-    expect(items[11].key).toBe('settings')
-    expect(items[12].key).toBe('logout')
+    expect(items[11].key).toBe('usage')
+    expect(items[12].key).toBe('settings')
+    expect(items[13].key).toBe('logout')
   })
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
     const items = buildMoreItems('/repos/42/sessions/abc')
-    expect(items).toHaveLength(13)
+    expect(items).toHaveLength(14)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
     expect(items[2].key).toBe('mcp')
@@ -60,8 +62,9 @@ describe('buildMoreItems', () => {
     expect(items[9].dialog).toBe('actions')
     expect(items[10].key).toBe('preview')
     expect(items[10].dialog).toBe('preview')
-    expect(items[11].key).toBe('settings')
-    expect(items[12].key).toBe('logout')
+    expect(items[11].key).toBe('usage')
+    expect(items[12].key).toBe('settings')
+    expect(items[13].key).toBe('logout')
   })
 
   it('returns only the server tools a linked server can serve for /servers/:id/sessions/:sid', () => {
@@ -72,6 +75,7 @@ describe('buildMoreItems', () => {
       'skills',
       'source-control',
       'terminal',
+      'usage',
       'settings',
       'logout',
     ])
@@ -85,6 +89,7 @@ describe('buildMoreItems', () => {
       'skills',
       'source-control',
       'terminal',
+      'usage',
       'settings',
       'logout',
     ])
@@ -93,19 +98,20 @@ describe('buildMoreItems', () => {
 
   it('omits the Actions item for an Assistant session', () => {
     const items = buildMoreItems('/repos/0/sessions/abc')
-    expect(items).toHaveLength(12)
+    expect(items).toHaveLength(13)
     expect(items.map((item) => item.key)).not.toContain('actions')
     expect(items[7].key).toBe('terminal')
     expect(items[8].key).toBe('walkthrough')
     expect(items[9].key).toBe('preview')
     expect(items[9].dialog).toBe('preview')
-    expect(items[10].key).toBe('settings')
-    expect(items[11].key).toBe('logout')
+    expect(items[10].key).toBe('usage')
+    expect(items[11].key).toBe('settings')
+    expect(items[12].key).toBe('logout')
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
     const items = buildMoreItems('/repos/42/assistant')
-    expect(items).toHaveLength(11)
+    expect(items).toHaveLength(12)
     expect(items[0].key).toBe('home')
     expect(items[1].key).toBe('files')
     expect(items[1].dialog).toBe('files')
@@ -118,32 +124,36 @@ describe('buildMoreItems', () => {
     expect(items[7].dialog).toBe('terminal')
     expect(items[8].key).toBe('preview')
     expect(items[8].dialog).toBe('preview')
-    expect(items[9].key).toBe('settings')
-    expect(items[10].key).toBe('logout')
+    expect(items[9].key).toBe('usage')
+    expect(items[10].key).toBe('settings')
+    expect(items[11].key).toBe('logout')
   })
 
-  it('returns only Home + Settings + Logout for /schedules', () => {
+  it('returns only Home + Usage + Settings + Logout for /schedules', () => {
     const items = buildMoreItems('/schedules')
-    expect(items).toHaveLength(3)
+    expect(items).toHaveLength(4)
     expect(items[0].key).toBe('home')
-    expect(items[1].key).toBe('settings')
-    expect(items[2].key).toBe('logout')
+    expect(items[1].key).toBe('usage')
+    expect(items[2].key).toBe('settings')
+    expect(items[3].key).toBe('logout')
   })
 
-  it('returns only Home + Settings + Logout for /repos/:id/schedules', () => {
+  it('returns only Home + Usage + Settings + Logout for /repos/:id/schedules', () => {
     const items = buildMoreItems('/repos/42/schedules')
-    expect(items).toHaveLength(3)
+    expect(items).toHaveLength(4)
     expect(items[0].key).toBe('home')
-    expect(items[1].key).toBe('settings')
-    expect(items[2].key).toBe('logout')
+    expect(items[1].key).toBe('usage')
+    expect(items[2].key).toBe('settings')
+    expect(items[3].key).toBe('logout')
   })
 
-  it('returns only Home + Settings + Logout for unknown paths', () => {
+  it('returns only Home + Usage + Settings + Logout for unknown paths', () => {
     const items = buildMoreItems('/unknown/path')
-    expect(items).toHaveLength(3)
+    expect(items).toHaveLength(4)
     expect(items[0].key).toBe('home')
-    expect(items[1].key).toBe('settings')
-    expect(items[2].key).toBe('logout')
+    expect(items[1].key).toBe('usage')
+    expect(items[2].key).toBe('settings')
+    expect(items[3].key).toBe('logout')
   })
 
   it('leads every route with a Home item routed to /', () => {
@@ -225,6 +235,10 @@ describe('buildToolItems', () => {
     const secrets = buildToolItems('/repos/42').find((item) => item.key === 'secrets')
     expect(secrets?.dialog).toBe('secrets')
     expect(secrets?.panelTool).toBeUndefined()
+  })
+
+  it('keeps the Usage entry out of the tool rail', () => {
+    expect(buildToolItems('/repos/42/sessions/abc').map((item) => item.key)).not.toContain('usage')
   })
 
   it.each(['/schedules', '/repos/42/schedules'])('returns only the Sessions tool on %s', (path) => {

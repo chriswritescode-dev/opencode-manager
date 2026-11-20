@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound } from 'lucide-react'
+import { BookOpen, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, SquareTerminal, Settings, LogOut, Bot, Folder, Home, List, Play, Globe, KeyRound, BarChart3 } from 'lucide-react'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -42,6 +42,7 @@ function getHomeItem(): MoreDrawerItem {
 
 function getBaseItems(): MoreDrawerItem[] {
   return [
+    { key: 'usage', label: 'Usage', icon: BarChart3 },
     { key: 'settings', label: 'Settings', icon: Settings },
     { key: 'logout', label: 'Logout', icon: LogOut },
   ]
@@ -55,7 +56,7 @@ export function isSessionDetailPath(pathname: string): boolean {
   return SESSION_DETAIL_PATH.test(pathname)
 }
 
-const NON_TOOL_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
+const NON_TOOL_ITEM_KEYS = new Set(['home', 'usage', 'settings', 'logout'])
 
 const MANAGER_ONLY_ITEM_KEYS: ReadonlySet<string> = new Set([
   'files',

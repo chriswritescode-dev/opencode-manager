@@ -12,6 +12,7 @@ import { ScheduleReportsList } from '@/components/notifications/ScheduleReportsB
 import { useMarkAllScheduleRunsViewed, useUnreadScheduleRuns } from '@/hooks/useSchedules'
 import { buildMoreItems, buildNavModel, isManagerOnlyNavItem, isSessionDetailPath, type MoreDrawerItem } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
+import { useUsageDialog } from '@/hooks/useUsageDialog'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { getPathWithReturnTo, isAssistantPath, parseServerSessionRoute } from '@/lib/navigation'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
@@ -81,6 +82,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const isAssistantSession = isSessionDetail && searchParams.get('assistant') === '1'
   const isRemoteRoute = !isLocalOpenCodeServer(useRouteOpenCodeServerId())
   const { open: openMobileSheet } = useMobileTabBar()
+  const { open: openUsageDialog } = useUsageDialog()
   const { data: unreadReports } = useUnreadScheduleRuns()
   const markAllReportsViewed = useMarkAllScheduleRunsViewed()
   const total = unreadReports?.total ?? 0
@@ -122,6 +124,10 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   }
 
   const handleItemClick = (item: MoreDrawerItem) => {
+    if (item.key === 'usage') {
+      openUsageDialog('replace')
+      return
+    }
     if (item.key === 'settings') {
       handleSettingsClick()
       return

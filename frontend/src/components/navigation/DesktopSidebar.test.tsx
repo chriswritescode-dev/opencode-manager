@@ -93,7 +93,7 @@ describe('DesktopSidebar', () => {
     async (path) => {
       renderSidebar({ route: path })
 
-      for (const label of ['Home', 'Settings', 'Logout']) {
+      for (const label of ['Home', 'Usage', 'Settings', 'Logout']) {
         expect(await screen.findByText(label)).toBeInTheDocument()
       }
       for (const label of [
@@ -143,6 +143,17 @@ describe('DesktopSidebar', () => {
     expect(searchParams(capturedSearch).get('settingsTab')).toBe('account')
   })
 
+  it('opens usage by updating usage query params', async () => {
+    const { capturedPathname, capturedSearch } = renderSidebar({ route: '/?dialog=files&mobileTab=more' })
+
+    fireEvent.click(await screen.findByText('Usage'))
+
+    await waitFor(() => expect(searchParams(capturedSearch).get('usage')).toBe('open'))
+    expect(capturedPathname.current).toBe('/')
+    expect(searchParams(capturedSearch).get('dialog')).toBe('files')
+    expect(searchParams(capturedSearch).get('mobileTab')).toBeNull()
+  })
+
   it('renders the session tree with home and account items in the footer', async () => {
     renderSidebar({ route: '/repos/5' })
 
@@ -150,6 +161,7 @@ describe('DesktopSidebar', () => {
     expect(within(region).getByLabelText('Search sessions')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Sessions' })).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.getByText('Usage')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
   })
@@ -167,6 +179,7 @@ describe('DesktopSidebar', () => {
     expect(await screen.findByText('Sessions')).toBeInTheDocument()
     expect(screen.queryByLabelText('Search sessions')).toBeNull()
     expect(screen.getByText('Home')).toBeInTheDocument()
+    expect(screen.getByText('Usage')).toBeInTheDocument()
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.queryByText('Files')).toBeNull()
   })

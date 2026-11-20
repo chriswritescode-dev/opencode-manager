@@ -75,6 +75,18 @@ describe('MoreDrawer', () => {
 
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
+    expect(screen.getAllByText('Usage')).toHaveLength(1)
+    expect(screen.getByText('Home').closest('section')).toContainElement(screen.getByText('Usage'))
+  })
+
+  it('opens the usage dialog from the drawer without navigating', async () => {
+    const { capturedPathname, capturedSearch } = renderMoreDrawer('/?mobileTab=more')
+
+    fireEvent.click(screen.getByText('Usage'))
+
+    await waitFor(() => expect(capturedSearch.current).toContain('usage=open'))
+    expect(new URLSearchParams(capturedSearch.current).get('mobileTab')).toBeNull()
+    expect(capturedPathname.current).toBe('/')
   })
 
   it('does not render theme controls', () => {

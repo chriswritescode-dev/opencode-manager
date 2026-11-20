@@ -9,6 +9,7 @@ import { useOpenNavItem } from '@/hooks/useOpenNavItem'
 import { useSessionPickerRouteScope } from '@/hooks/useSessionPickerRouteScope'
 import { useSessionPickerNavigation } from '@/hooks/useSessionPickerNavigation'
 import { useToolPanelToggle } from '@/hooks/useToolPanel'
+import { useUsageDialog } from '@/hooks/useUsageDialog'
 import { useUIState } from '@/stores/uiStateStore'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { SessionPickerDialog } from '@/components/session/SessionPickerDialog'
@@ -21,7 +22,7 @@ import {
 } from '@/components/ui/sidebar'
 import { List } from 'lucide-react'
 
-const FOOTER_ITEM_KEYS = new Set(['home', 'settings', 'logout'])
+const FOOTER_ITEM_KEYS = new Set(['home', 'usage', 'settings', 'logout'])
 
 function DesktopSessionsPicker({ onDismiss }: { onDismiss: () => void }) {
   const { currentRepo, activeSessionID, remote } = useSessionPickerRouteScope(true)
@@ -52,6 +53,7 @@ export function DesktopSidebar() {
   const { isAuthenticated, isLoading, logout } = useAuth()
   const isToolRailMounted = useUIState((state) => state.isToolRailMounted)
   const togglePanelTool = useToolPanelToggle()
+  const { open: openUsageDialog } = useUsageDialog()
 
   const isDesktop = useDesktop()
 
@@ -67,7 +69,9 @@ export function DesktopSidebar() {
 
   const handleItemClick = (item: MoreDrawerItem) => {
     if (openNavItem(item)) return
-    if (item.key === 'logout') {
+    if (item.key === 'usage') {
+      openUsageDialog()
+    } else if (item.key === 'logout') {
       logout()
     } else if (item.key === 'settings') {
       updateParams((p) => {

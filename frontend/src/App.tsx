@@ -17,6 +17,7 @@ import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { AssistantRedirect } from './pages/AssistantRedirect'
 import { SettingsDialog } from './components/settings/SettingsDialog'
+import { UsageDialog } from '@/components/usage/UsageDialog'
 import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
@@ -241,6 +242,7 @@ export function AppShell() {
           <PermissionDialogWrapper />
           <SSHHostKeyDialogWrapper />
           <SettingsDialog />
+          <UsageDialog />
           <HealthMonitor />
           <VersionNotifier />
         </KeyboardShortcutsProvider>
