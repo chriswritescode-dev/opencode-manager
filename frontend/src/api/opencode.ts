@@ -129,6 +129,7 @@ export interface SessionMessagesPage {
 export interface SessionMessagesInput {
   cursor?: string
   limit?: number
+  type?: 'assistant'
 }
 
 export interface SendPromptInput {
@@ -505,6 +506,7 @@ export async function listSessionMessages(
         sessionID,
         limit: input.limit,
         cursor: input.cursor,
+        type: input.type,
         order: input.cursor === undefined ? 'desc' : undefined,
       }),
     serverId,
