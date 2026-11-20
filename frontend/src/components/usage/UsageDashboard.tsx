@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { format } from 'date-fns'
 import type { SessionStatsInfo } from '@opencode-manager/shared/opencode'
 import { ActivitySpinner } from '@/components/ui/activity-spinner'
@@ -12,6 +12,7 @@ import {
 } from '@/hooks/useUsagePreferences'
 import {
   DEFAULT_GLOBAL_USAGE_RANGE,
+  describeUnresolvedUsageRange,
   rangeHasDailyActivity,
   resolveUsageRange,
   type ResolvedUsageRange,
@@ -50,8 +51,11 @@ export function UsageDashboard({ serverId }: UsageDashboardProps) {
     DEFAULT_GLOBAL_USAGE_RANGE,
   )
   const [models, setModels] = useUsageModelsPreference()
-  const resolvedRange = resolveUsageRange(range, Date.now())
   const stats = useUsageStats(range, serverId)
+  const resolvedRange = useMemo(
+    () => resolveUsageRange(range, stats.dataUpdatedAt || Date.now()),
+    [range, stats.dataUpdatedAt],
+  )
   const data = stats.data
 
   useEffect(() => {
@@ -112,7 +116,7 @@ export function UsageDashboard({ serverId }: UsageDashboardProps) {
 
   function renderContent() {
     if (resolvedRange === null) {
-      return <p>Choose a start and end time to see usage for a custom range.</p>
+      return <p>{describeUnresolvedUsageRange(range)}</p>
     }
     if (stats.isPending) {
       return (

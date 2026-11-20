@@ -62,10 +62,12 @@ const BOUNDED_USAGE_RANGE_PRESETS = USAGE_RANGE_PRESETS.filter(
   (preset): preset is BoundedUsageRangePreset => preset !== 'custom',
 )
 
+const USAGE_RANGE_MAX_TIMESTAMP = 8_640_000_000_000_000
+
 const CustomUsageRangeSelectionSchema = z.object({
   preset: z.literal('custom'),
-  from: z.number().nullable(),
-  to: z.number().nullable(),
+  from: z.number().int().min(0).max(USAGE_RANGE_MAX_TIMESTAMP).nullable(),
+  to: z.number().int().min(0).max(USAGE_RANGE_MAX_TIMESTAMP).nullable(),
 })
 
 export const usageRangeSelectionSchema: z.ZodType<UsageRangeSelection> = z.discriminatedUnion(
@@ -95,6 +97,15 @@ export function resolveUsageRange(
   if (selection.preset === 'all') return {}
 
   return { from: now - RELATIVE_USAGE_RANGE_DURATIONS[selection.preset], to: now }
+}
+
+export function describeUnresolvedUsageRange(selection: UsageRangeSelection): string {
+  if (selection.preset === 'custom') {
+    if (selection.from !== null && selection.to !== null && selection.from >= selection.to) {
+      return 'End must be after start.'
+    }
+  }
+  return 'Choose a start and end time to see usage for a custom range.'
 }
 
 export function rangeHasDailyActivity(selection: UsageRangeSelection, now: number): boolean {

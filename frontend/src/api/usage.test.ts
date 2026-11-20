@@ -29,6 +29,12 @@ function assistantMessage(id: string, created: number) {
   }
 }
 
+function fullPage(page: number): ReturnType<typeof assistantMessage>[] {
+  return Array.from({ length: SESSION_USAGE_PAGE_LIMIT }, (_, index) =>
+    assistantMessage(`msg_${page}_${index}`, page * 10_000 + index),
+  )
+}
+
 function userMessage(id: string, created: number) {
   return { id, type: 'user', time: { created }, payload: { text: 'Run the tests' } }
 }
@@ -86,7 +92,7 @@ describe('usage api', () => {
         respond: (request) =>
           request.searchParams.get('cursor') === 'cursor_1'
             ? { json: { data: [assistantMessage('msg_1', 1000)], cursor: {} } }
-            : { json: { data: [assistantMessage('msg_2', 2000)], cursor: { next: 'cursor_1' } } },
+            : { json: { data: fullPage(2), cursor: { next: 'cursor_1' } } },
       },
     ])
 
@@ -98,7 +104,33 @@ describe('usage api', () => {
     ])
   })
 
+  it('stops after a short page even when the server still returns a cursor', async () => {
+    const fetchFake = installRoutes([
+      {
+        method: 'GET',
+        path: messagesUrl,
+        respond: () => ({
+          json: {
+            data: [assistantMessage('msg_2', 2000), assistantMessage('msg_1', 1000)],
+            cursor: { next: 'cursor_1' },
+          },
+        }),
+      },
+    ])
+
+    const result = await loadSessionUsageMessages('ses_1')
+
+    expect(result.steps.map((step) => step.id)).toEqual(['msg_1', 'msg_2'])
+    expect(result.truncated).toBe(false)
+    expect(fetchFake.findRequests('GET', messagesUrl).map((request) => request.searchParams.toString())).toEqual([
+      'limit=200&order=desc&type=assistant',
+    ])
+  })
+
   it('keeps only assistant steps and joins pages oldest-first', async () => {
+    const olderShells = Array.from({ length: SESSION_USAGE_PAGE_LIMIT - 3 }, (_, index) =>
+      shellMessage(`msg_shell_${index}`, 100 + index),
+    )
     const fetchFake = installRoutes([
       {
         method: 'GET',
@@ -117,6 +149,7 @@ describe('usage api', () => {
                     assistantMessage('msg_5', 5000),
                     userMessage('msg_4', 4000),
                     assistantMessage('msg_3', 3000),
+                    ...olderShells,
                   ],
                   cursor: { next: 'cursor_1' },
                 },
@@ -131,20 +164,20 @@ describe('usage api', () => {
     expect(fetchFake.findRequests('GET', messagesUrl)).toHaveLength(2)
   })
 
-  const truncationCases: Array<{ title: string; fifthCursor: string | undefined; truncated: boolean }> = [
+  const truncationCases: Array<{ title: string; fifthPageLength: number; truncated: boolean }> = [
     {
-      title: 'reports truncation when the fifth page still has a cursor',
-      fifthCursor: 'cursor_5',
+      title: 'reports truncation when five full pages still leave a cursor',
+      fifthPageLength: SESSION_USAGE_PAGE_LIMIT,
       truncated: true,
     },
     {
-      title: 'reports no truncation when the fifth page is the last one',
-      fifthCursor: undefined,
+      title: 'reports no truncation when the fifth page is short',
+      fifthPageLength: SESSION_USAGE_PAGE_LIMIT - 1,
       truncated: false,
     },
   ]
 
-  it.each(truncationCases)('$title', async ({ fifthCursor, truncated }) => {
+  it.each(truncationCases)('$title', async ({ fifthPageLength, truncated }) => {
     let page = 0
     const fetchFake = installRoutes([
       {
@@ -152,12 +185,12 @@ describe('usage api', () => {
         path: messagesUrl,
         respond: () => {
           page += 1
-          return {
-            json: {
-              data: [assistantMessage(`msg_${page}`, page * 1000)],
-              cursor: page < 5 ? { next: `cursor_${page}` } : fifthCursor ? { next: fifthCursor } : {},
-            },
-          }
+          const current = page
+          const messages =
+            current < SESSION_USAGE_MAX_PAGES
+              ? fullPage(current)
+              : fullPage(current).slice(0, fifthPageLength)
+          return { json: { data: messages, cursor: { next: `cursor_${current}` } } }
         },
       },
     ])
@@ -165,6 +198,9 @@ describe('usage api', () => {
     const result = await loadSessionUsageMessages('ses_1')
 
     expect(fetchFake.findRequests('GET', messagesUrl)).toHaveLength(5)
+    expect(result.steps).toHaveLength(
+      (SESSION_USAGE_MAX_PAGES - 1) * SESSION_USAGE_PAGE_LIMIT + fifthPageLength,
+    )
     expect(result.truncated).toBe(truncated)
   })
 })

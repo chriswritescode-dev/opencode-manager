@@ -6,6 +6,7 @@ import type {
   SessionMessageAssistant,
   SessionMessageAssistantTool,
 } from '@opencode-manager/shared/opencode'
+import { SESSION_USAGE_PAGE_LIMIT } from '@/api/usage'
 import { installPointerCapture } from '@/test/browserFakes'
 import type { FetchRoute } from '@/test/fetchFake'
 import { renderWithProviders, type TestProviderOptions } from '@/test/render'
@@ -98,6 +99,12 @@ function statText(label: string): string {
   const grid = screen.getByText('Spend').parentElement?.parentElement
   if (!grid) throw new Error('Summary grid not found')
   return within(grid).getByText(label).parentElement?.textContent ?? ''
+}
+
+function assistantPage(page: number): SessionMessageAssistant[] {
+  return Array.from({ length: SESSION_USAGE_PAGE_LIMIT }, (_, index) =>
+    assistantStep({ id: `msg_${page}_${index}`, created: page * 10_000 + index }),
+  )
 }
 
 interface RenderOptions {
@@ -301,7 +308,7 @@ describe('SessionUsageContent', () => {
             page += 1
             return {
               json: {
-                data: [assistantStep({ id: `msg_${page}`, created: page })],
+                data: assistantPage(page),
                 cursor: { next: `cursor_${page}` },
               },
             }
@@ -313,6 +320,39 @@ describe('SessionUsageContent', () => {
     await screen.findByText('Only the newest 1,000 steps of this session are summarized.')
 
     expect(result.fetchFake.findRequests('GET', LOCAL_MESSAGES_PATH)).toHaveLength(5)
+  })
+
+  it('asks for a custom range instead of summarizing all time when the range is incomplete', async () => {
+    window.localStorage.setItem(
+      'oc:usage:session-range',
+      JSON.stringify({ preset: 'custom', from: null, to: null }),
+    )
+
+    renderContent({
+      fetchRoutes: [
+        messagesRoute({
+          messages: [assistantStep({ id: 'msg_1', created: 1000, cost: 1, input: 1000 })],
+        }),
+      ],
+    })
+
+    expect(
+      await screen.findByText('Choose a start and end time to see usage for a custom range.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Range' })).toHaveTextContent('Custom')
+    expect(screen.queryByText('Spend')).not.toBeInTheDocument()
+    expect(screen.queryByText('No assistant steps in this range.')).not.toBeInTheDocument()
+  })
+
+  it('scrolls compact content inside the panel body', () => {
+    const result = renderWithProviders(<SessionUsageContent sessionId="ses_1" compact />, {
+      ...providerOptions,
+      toaster: false,
+      fetchRoutes: [messagesRoute({ messages: [] })],
+    })
+
+    expect(result.container.firstElementChild).toHaveClass('overflow-y-auto')
+    expect(result.container.firstElementChild).toHaveClass('min-h-0', 'flex-1')
   })
 
   it('shows the error banner when the request fails', async () => {

@@ -39,6 +39,7 @@ function buildSessionUsageQueryOptions(sessionID: string | undefined, serverId: 
     },
     enabled: sessionID !== undefined,
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
     retry: false,
   }
 }

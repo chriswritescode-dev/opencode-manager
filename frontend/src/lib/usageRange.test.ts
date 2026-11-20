@@ -4,6 +4,7 @@ import {
   DEFAULT_SESSION_USAGE_RANGE,
   USAGE_RANGE_LABELS,
   USAGE_RANGE_PRESETS,
+  describeUnresolvedUsageRange,
   isWithinUsageRange,
   rangeHasDailyActivity,
   resolveUsageRange,
@@ -110,6 +111,30 @@ describe('resolveUsageRange', () => {
   })
 })
 
+describe('describeUnresolvedUsageRange', () => {
+  it('asks for both bounds when a custom range is incomplete', () => {
+    const message = 'Choose a start and end time to see usage for a custom range.'
+    expect(describeUnresolvedUsageRange({ preset: 'custom', from: null, to: null })).toBe(message)
+    expect(describeUnresolvedUsageRange({ preset: 'custom', from: 10, to: null })).toBe(message)
+    expect(describeUnresolvedUsageRange({ preset: 'custom', from: null, to: 20 })).toBe(message)
+  })
+
+  it('reports a reversed or empty custom range', () => {
+    expect(describeUnresolvedUsageRange({ preset: 'custom', from: 20, to: 10 })).toBe(
+      'End must be after start.',
+    )
+    expect(describeUnresolvedUsageRange({ preset: 'custom', from: 10, to: 10 })).toBe(
+      'End must be after start.',
+    )
+  })
+
+  it('falls back to asking for a custom range for presets', () => {
+    expect(describeUnresolvedUsageRange({ preset: 'all' })).toBe(
+      'Choose a start and end time to see usage for a custom range.',
+    )
+  })
+})
+
 describe('rangeHasDailyActivity', () => {
   it('enables daily activity for multi-day presets and all time', () => {
     for (const preset of ['7d', '30d', '90d', 'all'] as const) {
@@ -198,5 +223,31 @@ describe('usageRangeSelectionSchema', () => {
     expect(
       usageRangeSelectionSchema.safeParse({ preset: 'custom', from: 1, to: '2' }).success,
     ).toBe(false)
+  })
+
+  it('rejects corrupt stored bounds outside the supported timestamp range', () => {
+    expect(usageRangeSelectionSchema.safeParse({ preset: 'custom', from: 1e20, to: 2 }).success).toBe(
+      false,
+    )
+    expect(
+      usageRangeSelectionSchema.safeParse({ preset: 'custom', from: -1, to: 2 }).success,
+    ).toBe(false)
+    expect(
+      usageRangeSelectionSchema.safeParse({ preset: 'custom', from: 1, to: 1.5 }).success,
+    ).toBe(false)
+    expect(
+      usageRangeSelectionSchema.safeParse({
+        preset: 'custom',
+        from: 1,
+        to: 8_640_000_000_000_001,
+      }).success,
+    ).toBe(false)
+    expect(
+      usageRangeSelectionSchema.safeParse({
+        preset: 'custom',
+        from: 0,
+        to: 8_640_000_000_000_000,
+      }).success,
+    ).toBe(true)
   })
 })

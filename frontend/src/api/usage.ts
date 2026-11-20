@@ -40,10 +40,10 @@ export async function loadSessionUsageMessages(
       serverId,
     )
     steps.unshift(...result.messages.filter(isAssistantMessage))
-    cursor = result.nextCursor
-    if (cursor === undefined) {
+    if (result.nextCursor === undefined || result.messages.length < SESSION_USAGE_PAGE_LIMIT) {
       return { steps, truncated: false }
     }
+    cursor = result.nextCursor
   }
 
   return { steps, truncated: true }

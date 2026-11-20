@@ -382,4 +382,24 @@ describe('UsageDashboard', () => {
     expect(screen.queryByText('Loading usage…')).not.toBeInTheDocument()
     expect(result.fetchFake.findRequests('GET', statsPath)).toHaveLength(0)
   })
+
+  it('reports a reversed custom range instead of loading stats', () => {
+    window.localStorage.setItem(
+      'oc:usage:range',
+      JSON.stringify({ preset: 'custom', from: 2_000, to: 1_000 }),
+    )
+
+    const result = renderWithProviders(<UsageDashboard serverId={LOCAL_OPENCODE_SERVER_ID} />, {
+      ...providerOptions,
+      fetchRoutes: [statsRoute(), localSessionsRoute(), reposRoute()],
+      fetchFallback: sessionMessageFallback,
+    })
+
+    expect(screen.getByText('End must be after start.')).toBeInTheDocument()
+    expect(
+      screen.queryByText('Choose a start and end time to see usage for a custom range.'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading usage…')).not.toBeInTheDocument()
+    expect(result.fetchFake.findRequests('GET', statsPath)).toHaveLength(0)
+  })
 })

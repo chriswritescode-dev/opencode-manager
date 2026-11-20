@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas'
 import type { SessionUsageMessages } from '@/api/usage'
 import { findRepoForDirectory } from '@/components/navigation/sidebar-session-tree'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import { useSessionsAcrossDirectories } from '@/hooks/useOpenCode'
 import { useNavigableRepos } from '@/hooks/useSidebarRepoGroups'
 import { useSessionUsageQueries } from '@/hooks/useUsage'
 import { formatCompactTokens } from '@/lib/contextUsage'
-import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
-import { isWithinUsageRange, type ResolvedUsageRange } from '@/lib/usageRange'
+import { getServerSessionPath, getSessionPath, withQueryParam } from '@/lib/navigation'
+import type { ResolvedUsageRange } from '@/lib/usageRange'
 import {
   formatTokensPerSecond,
   formatUsd,
@@ -28,6 +29,9 @@ interface SessionMetrics {
   throughput: string
 }
 
+const SESSION_PAGE_LIMIT = 100
+const MAX_SESSION_PAGES = 5
+const SESSION_CAP = SESSION_PAGE_LIMIT * MAX_SESSION_PAGES
 const INITIAL_ROWS = 10
 const ROW_INCREMENT = 10
 
@@ -35,22 +39,40 @@ function hasSpendOrTokens(session: SessionInfo): boolean {
   return session.cost > 0 || totalTokens(session.tokens) > 0
 }
 
+function isSessionActiveFrom(session: SessionInfo, range: ResolvedUsageRange): boolean {
+  return range.from === undefined || session.time.updated >= range.from
+}
+
+const sessionMetricsCache = new WeakMap<SessionUsageMessages, SessionMetrics>()
+
 function sessionMetrics(
   query: UseQueryResult<SessionUsageMessages> | undefined,
 ): SessionMetrics {
   if (!query || query.isPending) return { steps: '…', throughput: '…' }
   if (!query.data) return { steps: '—', throughput: '—' }
+  const cached = sessionMetricsCache.get(query.data)
+  if (cached) return cached
   const summary = summarizeSessionSteps(query.data.steps, { range: {}, models: [] })
-  return {
-    steps: String(summary.steps),
+  const metrics = {
+    steps: query.data.truncated ? `${summary.steps}+` : String(summary.steps),
     throughput: formatTokensPerSecond(summary.averageTokensPerSecond),
   }
+  sessionMetricsCache.set(query.data, metrics)
+  return metrics
 }
 
 export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps) {
-  const { data: sessions, isLoading } = useSessionsAcrossDirectories([], {
+  const {
+    data: sessions,
+    isLoading,
+    isError,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useSessionsAcrossDirectories([], {
     allDirectories: true,
-    limit: 100,
+    limit: SESSION_PAGE_LIMIT,
     serverId,
   })
   const isLocal = serverId === LOCAL_OPENCODE_SERVER_ID
@@ -58,20 +80,40 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
   const location = useLocation()
   const [showCount, setShowCount] = useState(INITIAL_ROWS)
 
-  const search = useMemo(() => {
-    const params = new URLSearchParams(location.search)
-    params.delete('usage')
-    const remaining = params.toString()
-    return remaining ? `?${remaining}` : ''
-  }, [location.search])
+  const panelId = useMemo(
+    () => new URLSearchParams(location.search).get('panel'),
+    [location.search],
+  )
+
+  const hasLoadedSessions = sessions.length > 0
+  const oldestLoadedUpdated = hasLoadedSessions
+    ? sessions[sessions.length - 1].time.updated
+    : undefined
+  const isOldestLoadedInRange =
+    range.from === undefined ||
+    (oldestLoadedUpdated !== undefined && oldestLoadedUpdated >= range.from)
+  const isAtSessionCap = sessions.length >= SESSION_CAP
+  const showsCapNote = isAtSessionCap && hasNextPage && isOldestLoadedInRange
+
+  useEffect(() => {
+    if (!hasLoadedSessions || !hasNextPage || isFetchingNextPage || isError) return
+    if (isAtSessionCap || !isOldestLoadedInRange) return
+    void fetchNextPage()
+  }, [
+    fetchNextPage,
+    hasLoadedSessions,
+    hasNextPage,
+    isAtSessionCap,
+    isError,
+    isFetchingNextPage,
+    isOldestLoadedInRange,
+    sessions.length,
+  ])
 
   const sortedSessions = useMemo(
     () =>
       sessions
-        .filter(
-          (session) =>
-            isWithinUsageRange(session.time.updated, range) && hasSpendOrTokens(session),
-        )
+        .filter((session) => isSessionActiveFrom(session, range) && hasSpendOrTokens(session))
         .sort((a, b) => b.cost - a.cost || totalTokens(b.tokens) - totalTokens(a.tokens)),
     [sessions, range],
   )
@@ -82,6 +124,10 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
     serverId,
   )
 
+  function sessionLinkPath(path: string): string {
+    return panelId ? withQueryParam(path, 'panel', panelId) : path
+  }
+
   function renderTitle(session: SessionInfo) {
     const title = session.title ?? session.id
     if (isLocal) {
@@ -89,7 +135,7 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
       if (repo) {
         return (
           <Link
-            to={{ pathname: getSessionPath(repo.id, session.id), search }}
+            to={sessionLinkPath(getSessionPath(repo.id, session.id))}
             className="transition-colors hover:text-primary"
           >
             {title}
@@ -100,7 +146,7 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
     }
     return (
       <Link
-        to={{ pathname: getServerSessionPath(serverId, session.id), search }}
+        to={sessionLinkPath(getServerSessionPath(serverId, session.id))}
         className="transition-colors hover:text-primary"
       >
         {title}
@@ -114,7 +160,13 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
       <p className="text-xs text-muted-foreground">
         Lifetime totals of sessions active in this range.
       </p>
-      {isLoading && sortedSessions.length === 0 ? (
+      {isError && sessions.length === 0 ? (
+        <ErrorBanner
+          title="Sessions unavailable"
+          summary="This OpenCode server could not list its sessions."
+          detail={error instanceof Error ? error.message : undefined}
+        />
+      ) : isLoading && sortedSessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">Loading sessions…</p>
       ) : sortedSessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No sessions in this range.</p>
@@ -180,7 +232,17 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
               Show more
             </button>
           )}
+          {showsCapNote && (
+            <p className="text-xs text-muted-foreground">
+              {`Ranked from the ${SESSION_CAP} most recently active sessions.`}
+            </p>
+          )}
         </>
+      )}
+      {isError && sessions.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Some sessions could not be loaded, so this ranking may be incomplete.
+        </p>
       )}
     </div>
   )
