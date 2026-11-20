@@ -172,57 +172,59 @@ export function UsageSessionsTable({ serverId, range }: UsageSessionsTableProps)
         <p className="text-sm text-muted-foreground">No sessions in this range.</p>
       ) : (
         <>
-          <table className="w-full text-sm">
-            <thead className="border-b border-border/60 text-xs uppercase text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-3 py-2.5 text-left font-medium">
-                  Session
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Steps
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Input
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Output
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Cache read
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Avg tokens/s
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">
-                  Cost
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {visibleSessions.map((session, index) => {
-                const metrics = sessionMetrics(usageQueries[index])
-                return (
-                  <tr key={session.id}>
-                    <td className="px-3 py-2.5">{renderTitle(session)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{metrics.steps}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {formatCompactTokens(session.tokens.input)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {formatCompactTokens(session.tokens.output)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {formatCompactTokens(session.tokens.cache.read)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{metrics.throughput}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {formatUsd(session.cost)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-sm">
+              <thead className="border-b border-border/60 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-3 py-2.5 text-left font-medium">
+                    Session
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Steps
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Input
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Output
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Cache read
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Avg tokens/s
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">
+                    Cost
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {visibleSessions.map((session, index) => {
+                  const metrics = sessionMetrics(usageQueries[index])
+                  return (
+                    <tr key={session.id}>
+                      <td className="px-3 py-2.5">{renderTitle(session)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{metrics.steps}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatCompactTokens(session.tokens.input)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatCompactTokens(session.tokens.output)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatCompactTokens(session.tokens.cache.read)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{metrics.throughput}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {formatUsd(session.cost)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
           {sortedSessions.length > showCount && (
             <button
               type="button"

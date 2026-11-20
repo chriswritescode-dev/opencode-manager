@@ -70,7 +70,7 @@ export function SessionUsageContent({ sessionId, compact }: SessionUsageContentP
     query.error instanceof Error ? query.error.message : 'The session usage request failed.'
 
   return (
-    <div className={compact ? 'min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-3' : 'space-y-6'}>
+    <div className={compact ? 'min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto px-3 pb-3' : 'space-y-6'}>
       <div className="flex flex-wrap items-end gap-2">
         <UsageRangePicker value={range} onChange={setRange} />
         <UsageModelFilter

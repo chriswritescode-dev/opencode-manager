@@ -18,7 +18,7 @@ export function UsageDialog() {
       }}
     >
       <DialogContent fullscreen>
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-full min-h-0 min-w-0 flex-col">
           <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <DialogTitle className="text-base font-semibold">Usage</DialogTitle>
             <div className="flex items-center gap-2">
@@ -28,7 +28,7 @@ export function UsageDialog() {
               </Button>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
             {isOpen && <UsageDashboard serverId={serverId} />}
           </div>
         </div>
