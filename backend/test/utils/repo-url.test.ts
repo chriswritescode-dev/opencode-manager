@@ -5,6 +5,7 @@ import {
   normalizeSSHUrl,
   extractHostFromSSHUrl,
   getRepoNameFromUrl,
+  getChatIdFromDirectory,
   normalizeRepoUrlForCompare,
 } from '@opencode-manager/shared/utils'
 
@@ -184,5 +185,31 @@ describe('normalizeRepoUrlForCompare', () => {
   it('leaves local paths and file URLs alone', () => {
     expect(normalizeRepoUrlForCompare('/Users/me/repo')).toBe('/users/me/repo')
     expect(normalizeRepoUrlForCompare('file:///Users/me/repo')).toBe('file:///users/me/repo')
+  })
+})
+
+describe('getChatIdFromDirectory', () => {
+  const chatId = '20260101-120000-abcdef'
+
+  it('reads a chat id from a workspace chat root', () => {
+    expect(getChatIdFromDirectory(`/workspace/chats/${chatId}`)).toBe(chatId)
+  })
+
+  it('ignores trailing slashes and backslashes', () => {
+    expect(getChatIdFromDirectory(`/workspace/chats/${chatId}/`)).toBe(chatId)
+    expect(getChatIdFromDirectory(`C:\\workspace\\chats\\${chatId}\\`)).toBe(chatId)
+  })
+
+  it('returns null for a directory nested inside a chat', () => {
+    expect(getChatIdFromDirectory(`/workspace/chats/${chatId}/subagent`)).toBeNull()
+  })
+
+  it('returns null when the parent directory is not the chats directory', () => {
+    expect(getChatIdFromDirectory(`/workspace/repos/${chatId}`)).toBeNull()
+  })
+
+  it('returns null for a malformed chat id', () => {
+    expect(getChatIdFromDirectory('/workspace/chats/20260101-120000-xyzxyz')).toBeNull()
+    expect(getChatIdFromDirectory('/workspace/chats/not-a-chat')).toBeNull()
   })
 })

@@ -356,7 +356,7 @@ export const useDeleteSession = (directory?: string | string[]) => {
   });
 };
 
-const removeDeletedSessionsFromListCaches = (
+export const removeDeletedSessionsFromListCaches = (
   queryClient: ReturnType<typeof useQueryClient>,
   variables: DeleteSessionTarget | DeleteSessionTarget[],
 ) => {
@@ -380,7 +380,7 @@ const removeDeletedSessionsFromListCaches = (
   );
 };
 
-const cleanupSessionPins = (
+export const cleanupSessionPins = (
   queryClient: ReturnType<typeof useQueryClient>,
   variables: DeleteSessionTarget | DeleteSessionTarget[],
   primaryDirectory?: string,

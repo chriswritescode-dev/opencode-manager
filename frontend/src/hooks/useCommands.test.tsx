@@ -182,4 +182,20 @@ describe('useCommands', () => {
     }
     expect(result.current.findCommand('mcp')).toBeDefined()
   })
+
+  it('omits mcp, skills, and walkthrough on a chat session route', () => {
+    const { result } = renderHookWithProviders(() => useCommands({ enabled: false }), {
+      ...hookProviders,
+      route: '/chats/20260101-120000-abcdef/sessions/ses_chat',
+    })
+
+    const commandNames = names(result.current.searchCommands(''))
+
+    expect(commandNames).not.toContain('mcp')
+    expect(commandNames).not.toContain('skills')
+    expect(commandNames).not.toContain('walkthrough')
+    expect(commandNames).toContain('sessions')
+    expect(commandNames).toContain('models')
+    expect(commandNames).toContain('compact')
+  })
 })

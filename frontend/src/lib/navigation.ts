@@ -1,4 +1,4 @@
-import { ASSISTANT_REPO_ID, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
+import { ASSISTANT_REPO_ID, buildChatSessionPath, buildServerSessionPath, buildSessionPath } from '@opencode-manager/shared/utils';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 export function getAssistantPath(): string {
@@ -32,6 +32,10 @@ export function getServerSessionPath(serverId: string, sessionId: string): strin
   return buildServerSessionPath(serverId, sessionId);
 }
 
+export function getChatSessionPath(chatId: string, sessionId: string): string {
+  return buildChatSessionPath(chatId, sessionId);
+}
+
 export function getServerProjectPath(serverId: string, directory: string): string {
   return `/servers/${encodeURIComponent(serverId)}/projects?directory=${encodeURIComponent(directory)}`;
 }
@@ -61,6 +65,11 @@ export interface ServerSessionRoute {
   sessionId: string
 }
 
+export interface ChatSessionRoute {
+  chatId: string
+  sessionId: string
+}
+
 export interface ActivePickerSession {
   sessionId?: string
   serverId?: string
@@ -81,10 +90,23 @@ export function parseServerSessionRoute(pathname: string): ServerSessionRoute | 
   return { serverId, sessionId };
 }
 
+export function parseChatSessionRoute(pathname: string): ChatSessionRoute | null {
+  const match = /^\/chats\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  const chatId = decodePathSegment(match[1]);
+  const sessionId = decodePathSegment(match[2]);
+  if (chatId === null || sessionId === null) return null;
+  return { chatId, sessionId };
+}
+
 export function parseActivePickerSession(pathname: string): ActivePickerSession {
   const repoRoute = parseRepoRoute(pathname);
   if (repoRoute.sessionId) {
     return { sessionId: repoRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
+  }
+  const chatSessionRoute = parseChatSessionRoute(pathname);
+  if (chatSessionRoute) {
+    return { sessionId: chatSessionRoute.sessionId, serverId: LOCAL_OPENCODE_SERVER_ID };
   }
   const serverSessionRoute = parseServerSessionRoute(pathname);
   if (!serverSessionRoute) return {};
@@ -93,7 +115,9 @@ export function parseActivePickerSession(pathname: string): ActivePickerSession 
 
 export function isSessionDetailRoute(pathname: string): boolean {
   const normalizedPathname = pathname.replace(/\/+$/, '');
-  return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(normalizedPathname) || parseServerSessionRoute(normalizedPathname) !== null;
+  return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(normalizedPathname)
+    || parseServerSessionRoute(normalizedPathname) !== null
+    || parseChatSessionRoute(normalizedPathname) !== null;
 }
 
 export function parseRepoRoute(pathname: string): RepoRoute {
@@ -151,6 +175,11 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
 
   const serverSession = parseServerSessionRoute(pathname);
   if (serverSession) {
+    return '/';
+  }
+
+  const chatSession = parseChatSessionRoute(pathname);
+  if (chatSession) {
     return '/';
   }
 

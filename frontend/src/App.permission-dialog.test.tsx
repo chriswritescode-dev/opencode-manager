@@ -29,7 +29,9 @@ const localPermission: PermissionRequest = {
   metadata: {},
 }
 
-function buildRoutes(options: { repos?: Array<ReturnType<typeof makeRepo>> } = {}): FetchRoute[] {
+function buildRoutes(
+  options: { repos?: Array<ReturnType<typeof makeRepo>>, localSessionDirectory?: string } = {},
+): FetchRoute[] {
   return [
     { method: 'GET', path: '/api/repos', respond: () => ({ json: options.repos ?? [repo] }) },
     { method: 'GET', path: '/api/opencode-servers', respond: () => ({ json: { servers: [] } }) },
@@ -48,7 +50,7 @@ function buildRoutes(options: { repos?: Array<ReturnType<typeof makeRepo>> } = {
       method: 'GET',
       path: '/api/opencode/api/session/ses_local',
       respond: () => ({
-        json: { data: makeSession({ id: 'ses_local', title: 'Local work', location: { directory: '/workspace/demo' } }) },
+        json: { data: makeSession({ id: 'ses_local', title: 'Local work', location: { directory: options.localSessionDirectory ?? '/workspace/demo' } }) },
       }),
     },
     {
@@ -134,6 +136,35 @@ describe('PermissionDialogWrapper', () => {
     await pushPermission(eventStream, localPermission, { directory: repo.fullPath })
 
     expect(await screen.findByRole('button', { name: 'Open session' })).toBeInTheDocument()
+  })
+
+  it('offers the session for a local permission resolved through its chat', async () => {
+    const chatId = '20260101-120000-abcdef'
+    const capturedPathname = { current: '' }
+    const capturedSearch = { current: '' }
+    const { eventStream } = renderWithProviders(
+      <>
+        <LocationCatcher capturedPathname={capturedPathname} capturedSearch={capturedSearch} />
+        <Routes>
+          <Route path="/chats/:chatId/sessions/:sessionId" element={<PermissionDialogWrapper />} />
+        </Routes>
+      </>,
+      {
+        route: `/chats/${chatId}/sessions/ses_viewer`,
+        events: true,
+        fetchRoutes: buildRoutes({ localSessionDirectory: `/workspace/chats/${chatId}` }),
+      },
+    )
+
+    await pushPermission(eventStream, localPermission, { directory: `/workspace/chats/${chatId}` })
+
+    expect(await screen.findByText('Permission Request')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Open session' }))
+
+    await waitFor(() => {
+      expect(capturedPathname.current).toBe(`/chats/${chatId}/sessions/ses_local`)
+    })
   })
 
   it('hides the session action for a local permission without a Manager repository', async () => {

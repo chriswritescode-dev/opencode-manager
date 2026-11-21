@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { SessionInfo } from '@opencode-manager/shared/opencode'
 import type { RepoSibling } from '@opencode-manager/shared/utils'
-import type { SessionPin } from '@opencode-manager/shared/schemas'
+import type { Chat, SessionPin } from '@opencode-manager/shared/schemas'
 import { DesktopSessionTree } from './DesktopSessionTree'
 import { connectTestEventStream, renderWithProviders } from '@/test/render'
 import { LocationCatcher } from '@/test/test-components'
@@ -12,6 +12,7 @@ import { formCreated, permissionAsked } from '@/test/fixtures/events'
 import { makeRepo, makeSession } from '@/test/fixtures/api'
 import type { Repo } from '@/api/types'
 import type { FetchRoute } from '@/test/fetchFake'
+import { useSidebarServerStore } from '@/stores/sidebarServerStore'
 
 const repoA = makeRepo({ id: 1, name: 'Alpha', fullPath: '/repos/a', localPath: 'repos/a', lastAccessedAt: 20, branch: undefined, currentBranch: undefined })
 const repoB = makeRepo({ id: 2, name: 'Beta', fullPath: '/repos/b', localPath: 'repos/b', lastAccessedAt: 10, branch: undefined, currentBranch: undefined })
@@ -19,6 +20,10 @@ const repoC = makeRepo({ id: 3, name: 'Gamma', fullPath: '/repos/c', localPath: 
 
 function createSession(id: string, directory: string, updated = Date.now()): SessionInfo {
   return makeSession({ id, title: `Session ${id}`, location: { directory }, time: { created: updated - 10000, updated } })
+}
+
+function createChat(id: string, directory: string, createdAt = Date.now()): Chat {
+  return { id, directory, filesPath: `${directory}/.chats/${id}`, createdAt }
 }
 
 const defaultSessions = [
@@ -39,6 +44,7 @@ interface RenderOptions {
   siblingsError?: boolean
   permissionSessionID?: string
   formSessionID?: string
+  chats?: readonly Chat[]
 }
 
 function renderTree(options: RenderOptions = {}) {
@@ -79,6 +85,7 @@ function renderTree(options: RenderOptions = {}) {
       fetchRoutes: [
         ...searchErrorRoute,
         ...siblingsErrorRoute,
+        { method: 'GET', path: '/api/chats', respond: () => ({ json: { chats: [...(options.chats ?? [])] } }) },
         ...appRoutes({
           repos: options.repos ?? [repoA, repoB, repoC],
           siblings: options.siblings ?? [],
@@ -145,8 +152,68 @@ describe('DesktopSessionTree', () => {
       .getAllByRole('button', { name: /^Show sessions in / })
       .map((button) => button.getAttribute('aria-label'))
 
-    expect(names).toEqual(['Show sessions in Gamma', 'Show sessions in Alpha', 'Show sessions in Beta'])
+    expect(names).toEqual([
+      'Show sessions in Chats',
+      'Show sessions in Gamma',
+      'Show sessions in Alpha',
+      'Show sessions in Beta',
+    ])
     expect(screen.queryByText('Recent')).toBeNull()
+  })
+
+  it('puts the Chats group above the Assistant and every repository', async () => {
+    renderTree({
+      route: '/',
+      repos: [
+        repoA,
+        makeRepo({
+          id: 0,
+          name: 'Assistant',
+          fullPath: '/assistant',
+          localPath: 'assistant',
+          lastAccessedAt: 40,
+          branch: undefined,
+          currentBranch: undefined,
+        }),
+      ],
+    })
+
+    await screen.findByText('Assistant')
+    const names = screen
+      .getAllByRole('button', { name: /^Show sessions in / })
+      .map((button) => button.getAttribute('aria-label'))
+
+    expect(names).toEqual([
+      'Show sessions in Chats',
+      'Show sessions in Assistant',
+      'Show sessions in Alpha',
+    ])
+  })
+
+  it('opens the newest chat from the Chats group header', async () => {
+    const user = userEvent.setup()
+    const chat = createChat('20240103-120000-aaaaaa', '/chats/a', 1000)
+    const { capturedPathname } = renderTree({
+      route: '/',
+      sessions: [createSession('chat1', '/chats/a')],
+      chats: [chat],
+    })
+
+    await screen.findByRole('button', { name: /^Session chat1/ })
+    await user.click(screen.getByRole('button', { name: 'Chats' }))
+
+    await waitFor(() =>
+      expect(capturedPathname.current).toBe('/chats/20240103-120000-aaaaaa/sessions/chat1'),
+    )
+  })
+
+  it('shows no Chats group for a linked server', async () => {
+    useSidebarServerStore.setState({ serverId: 'srv_remote' })
+
+    renderTree({ route: '/' })
+
+    expect(await screen.findByText('Server not found')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show sessions in Chats' })).toBeNull()
   })
 
   it('opens the active repo by default and lazily fetches only its sessions', async () => {

@@ -1,19 +1,39 @@
 export type TerminalTarget =
   | { kind: 'repo'; repoId: number }
   | { kind: 'server'; serverId: string }
+  | { kind: 'chat'; chatId: string }
 
 export function terminalTargetScope(target: TerminalTarget): number | string {
-  return target.kind === 'repo' ? target.repoId : target.serverId
+  switch (target.kind) {
+    case 'repo':
+      return target.repoId
+    case 'server':
+      return target.serverId
+    case 'chat':
+      return target.chatId
+  }
 }
 
 export function terminalTargetKey(target: TerminalTarget): string {
-  return target.kind === 'repo' ? `repo:${target.repoId}` : `server:${target.serverId}`
+  switch (target.kind) {
+    case 'repo':
+      return `repo:${target.repoId}`
+    case 'server':
+      return `server:${target.serverId}`
+    case 'chat':
+      return `chat:${target.chatId}`
+  }
 }
 
 export function terminalCollectionPath(target: TerminalTarget): string {
-  return target.kind === 'repo'
-    ? `/api/repos/${target.repoId}/terminals`
-    : `/api/opencode-servers/${encodeURIComponent(target.serverId)}/terminals`
+  switch (target.kind) {
+    case 'repo':
+      return `/api/repos/${target.repoId}/terminals`
+    case 'server':
+      return `/api/opencode-servers/${encodeURIComponent(target.serverId)}/terminals`
+    case 'chat':
+      return `/api/chats/${encodeURIComponent(target.chatId)}/terminals`
+  }
 }
 
 export function terminalItemPath(target: TerminalTarget, ptyID: string): string {

@@ -2,6 +2,7 @@ import { act, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useLocation } from 'react-router-dom'
 import { KeyboardShortcutsProvider } from '@/contexts/KeyboardShortcutsContext'
+import type { UserPreferences } from '@/api/types/settings'
 import { useGlobalShortcutActions } from './useGlobalShortcutActions'
 import { renderWithProviders } from '@/test/render'
 import { installWindowSize } from '@/test/browserFakes'
@@ -14,12 +15,16 @@ const LOCAL_SESSION_PATH = '/api/opencode/api/session'
 const REMOTE_SESSION_PATH = '/api/opencode/servers/srv_kitchen/api/session'
 const REMOTE_SESSION_ID_PATH = '/api/opencode/servers/srv_kitchen/api/session/ses_1'
 
-const leaderKeyRoute: FetchRoute = {
-  method: 'GET',
-  path: '/api/settings',
-  respond: () => ({
-    json: makeSettingsResponse({ preferences: makeUserPreferences({ leaderKey: 'Ctrl+O' }) }),
-  }),
+function settingsRoute(preferences: Partial<UserPreferences> = {}): FetchRoute {
+  return {
+    method: 'GET',
+    path: '/api/settings',
+    respond: () => ({
+      json: makeSettingsResponse({
+        preferences: makeUserPreferences({ leaderKey: 'Ctrl+O', ...preferences }),
+      }),
+    }),
+  }
 }
 
 function repoRoute(id: number, fullPath: string): FetchRoute {
@@ -73,13 +78,17 @@ function pressLeaderFollowUp(key: string) {
   pressKey({ key })
 }
 
-async function renderShortcuts(route: string, routes: FetchRoute[] = []) {
+async function renderShortcuts(
+  route: string,
+  routes: FetchRoute[] = [],
+  preferences: Partial<UserPreferences> = {},
+) {
   const result = renderWithProviders(
     <KeyboardShortcutsProvider>
       <Harness />
       <LocationDisplay />
     </KeyboardShortcutsProvider>,
-    { route, fetchRoutes: [leaderKeyRoute, ...routes] },
+    { route, fetchRoutes: [settingsRoute(preferences), ...routes] },
   )
   await waitFor(() => expect(result.queryClient.getQueryState(['settings', 'default'])?.status).toBe('success'))
   return { ...result, location: () => screen.getByTestId('location').textContent }
@@ -184,6 +193,23 @@ describe('useGlobalShortcutActions', () => {
     await waitFor(() => expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe('true'))
 
     expect(location()).toBe('/servers/srv_kitchen/sessions/ses_1')
+    expect(fetchFake.findRequests('GET', '/api/repos/:id')).toHaveLength(0)
+  })
+
+  it('does not fall back to a Manager host for a tool the chat session route lacks', async () => {
+    const { location, fetchFake } = await renderShortcuts(
+      '/chats/20240102120000-aaaaaa/sessions/ses_1',
+      [],
+      { keyboardShortcuts: { toggleSourceControl: 'G' } },
+    )
+
+    pressLeaderFollowUp('g')
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(location()).toBe('/chats/20240102120000-aaaaaa/sessions/ses_1')
     expect(fetchFake.findRequests('GET', '/api/repos/:id')).toHaveLength(0)
   })
 

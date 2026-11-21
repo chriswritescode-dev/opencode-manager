@@ -72,6 +72,27 @@ describe('isCurrentSessionItem', () => {
   })
 })
 
+describe('isCurrentSessionItem for chat rows', () => {
+  const chatId = '20240103120000-aaaaaa'
+  const item = {
+    key: `/chats/${chatId}:c1`,
+    session: createSession('c1', NOW, `/chats/${chatId}`),
+    chatId,
+    repoLabel: 'Chat',
+    branchLabel: null,
+    isWorktree: false,
+    isPinned: false,
+    path: `/chats/${chatId}/sessions/c1`,
+  }
+
+  it('matches only the exact chat and session route', () => {
+    expect(isCurrentSessionItem(item, `/chats/${chatId}/sessions/c1`)).toBe(true)
+    expect(isCurrentSessionItem(item, `/chats/${chatId}/sessions/c2`)).toBe(false)
+    expect(isCurrentSessionItem(item, '/chats/20240102120000-bbbbbb/sessions/c1')).toBe(false)
+    expect(isCurrentSessionItem(item, `/repos/1/sessions/c1`)).toBe(false)
+  })
+})
+
 describe('isRepoReady', () => {
   it('is true only for ready repos', () => {
     expect(isRepoReady(createRepo({ id: 1, fullPath: '/repos/a' }))).toBe(true)

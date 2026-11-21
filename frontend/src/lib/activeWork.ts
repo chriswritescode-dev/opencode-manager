@@ -3,10 +3,10 @@ import { LOCAL_OPENCODE_SERVER_ID, parseServerDirectoryKey } from '@opencode-man
 import type { ChildOutcome } from '@/lib/backgroundWork'
 import type { SessionStatusType } from '@/stores/sessionStatusStore'
 import { getSessionKey } from '@/lib/sessionKey'
-import { getServerSessionPath, getSessionPath } from '@/lib/navigation'
+import { getChatSessionPath, getServerSessionPath, getSessionPath } from '@/lib/navigation'
 import { getRepoBranchLabel } from '@/lib/utils'
 import { findRepoForDirectory, normalizeDirectory } from '@/components/navigation/sidebar-session-tree'
-import { isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
+import { getChatIdFromDirectory, isWorktreeSibling, type RepoSibling } from '@opencode-manager/shared/utils'
 
 function localDirectoryOf(directory?: string | null): string | null {
   if (!directory) return null
@@ -293,6 +293,7 @@ export function hasUnmatchedActiveDirectory(
   repos: Repo[],
 ): boolean {
   for (const directory of index.keys()) {
+    if (getChatIdFromDirectory(directory)) continue
     if (!findRepoForDirectory(repos, directory)) return true
   }
   return false
@@ -362,6 +363,7 @@ export function needsWorktreeLookup(input: {
   return sessions.some((session) => {
     if (session.time.archived) return false
     if (sessionServers?.has(session.id)) return false
+    if (getChatIdFromDirectory(session.location.directory)) return false
     if (findRepoForDirectory(repos, session.location.directory)) return false
     if (session.time.updated >= windowStart) return true
     const rootID = rootSessionID(session.id, parents)
@@ -443,7 +445,28 @@ export function buildActiveWork(input: {
     const directory = normalizeDirectory(session.location.directory)
     const worktree = directory ? worktreeByDirectory.get(directory) : undefined
     const repo = worktree?.ownerRepo ?? findRepoForDirectory(repos, session.location.directory)
-    if (!repo) continue
+
+    if (!repo) {
+      const chatId = getChatIdFromDirectory(session.location.directory)
+      if (!chatId) continue
+      seen.add(session.id)
+      const item: ActiveWorkItem = {
+        key: getSessionKey(session),
+        session,
+        repo: null,
+        serverId: null,
+        serverName: null,
+        state,
+        updatedAt,
+        outcome: outcomes.get(session.id),
+        worktreeBranch: null,
+        path: getChatSessionPath(chatId, session.id),
+      }
+      if (state === 'needs-input') needsInput.push(item)
+      else if (state === 'running') running.push(item)
+      else recent.push(item)
+      continue
+    }
     if (worktree?.isSchedule && state === 'recent') continue
 
     seen.add(session.id)

@@ -13,6 +13,7 @@ import {
 } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@opencode-manager/shared'
+import { getChatIdFromDirectory } from '@opencode-manager/shared/utils'
 import {
   buildServerDirectoryKey,
   LOCAL_OPENCODE_SERVER_ID,
@@ -37,7 +38,7 @@ import type { Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { getServerSessionPath, getSessionPath, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
+import { getChatSessionPath, getServerSessionPath, getSessionPath, parseChatSessionRoute, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from '@/lib/navigation'
 import { serverScopedKey } from '@/lib/serverScope'
 import { repoMatchesDirectory } from '@/components/navigation/sidebar-session-tree'
 import { changeWalkthroughQueryKey } from '@/hooks/useChangeWalkthrough'
@@ -352,7 +353,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [location.pathname, location.search])
 
   const viewedSessionId = useMemo(
-    () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
+    () => parseServerSessionRoute(location.pathname)?.sessionId ?? parseChatSessionRoute(location.pathname)?.sessionId ?? parseRepoRoute(location.pathname).sessionId,
     [location.pathname],
   )
 
@@ -427,15 +428,17 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return key ? parseServerDirectoryKey(key).directory : null
   }, [findSessionDirectoryKey])
 
-  const getRepoIdForSession = useCallback((sessionID: string): number | null => {
-    if (!repos) return null
+  const getLocalSessionPath = useCallback((sessionID: string): string | null => {
     if (useSessionStatus.getState().sessionServers.has(sessionID)) return null
     const key = findSessionDirectoryKey(sessionID)
     if (!key) return null
     const { serverId, directory } = parseServerDirectoryKey(key)
     if (!isLocalOpenCodeServer(serverId)) return null
+    const chatId = getChatIdFromDirectory(directory)
+    if (chatId) return getChatSessionPath(chatId, sessionID)
+    if (!repos) return null
     const repo = repos.find(r => repoMatchesDirectory(r, directory))
-    return repo?.id ?? null
+    return repo ? getSessionPath(repo.id, sessionID) : null
   }, [repos, findSessionDirectoryKey])
 
   const currentPermissionDirectory = useMemo(
@@ -592,18 +595,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [formsBySession])
 
   const navigateToSession = useCallback((sessionID: string, serverId: string) => {
-    let targetPath: string
-    if (isLocalOpenCodeServer(serverId)) {
-      const repoId = getRepoIdForSession(sessionID)
-      if (repoId === null) return
-      targetPath = getSessionPath(repoId, sessionID)
-    } else {
-      targetPath = getServerSessionPath(serverId, sessionID)
-    }
+    const targetPath = isLocalOpenCodeServer(serverId)
+      ? getLocalSessionPath(sessionID)
+      : getServerSessionPath(serverId, sessionID)
+    if (!targetPath) return
     if (`${window.location.pathname}${window.location.search}` !== targetPath) {
       navigate(targetPath)
     }
-  }, [getRepoIdForSession, navigate])
+  }, [getLocalSessionPath, navigate])
 
   const navigateToCurrentForm = useCallback(() => {
     if (!currentForm) return
@@ -1267,7 +1266,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       forgetPendingActionsForSession,
     },
     sseHealth,
-    getRepoIdForSession,
+    getLocalSessionPath,
   }), [
     sshHostKeyRequest,
     respondToSSHHostKey,
@@ -1296,7 +1295,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     syncFormsForSession,
     forgetPendingActionsForSession,
     sseHealth,
-    getRepoIdForSession,
+    getLocalSessionPath,
   ])
 
   return <EventContext.Provider value={value}>{children}</EventContext.Provider>

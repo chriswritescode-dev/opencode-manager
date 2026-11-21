@@ -10,6 +10,7 @@ import { useSessionSearch } from '@/hooks/useSessionSearch'
 import { useSessionPins } from '@/hooks/useSessionPins'
 import { useSidebarServerSelection } from '@/hooks/useSidebarServerSelection'
 import { RemoteProjectNavList } from '@/components/navigation/RemoteProjectNav'
+import { ChatsNavGroup } from '@/components/navigation/ChatsNavGroup'
 import {
   LocalRepoNewSessionButton,
   RepoNavGroup,
@@ -187,16 +188,19 @@ function LocalSessionTree() {
           isSearchError={isSearchError}
         />
       ) : (
-        <RepoSessionNavList
-          repos={repos}
-          activeRepoId={getActiveRepoId(location.pathname)}
-          isVisible
-          onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
-          onSelectSession={navigate}
-          renderActions={(repo) => (
-            <LocalRepoNewSessionButton repo={repo} onOpenSession={navigate} />
-          )}
-        />
+        <>
+          <ChatsNavGroup />
+          <RepoSessionNavList
+            repos={repos}
+            activeRepoId={getActiveRepoId(location.pathname)}
+            isVisible
+            onOpenRepo={(repoId) => navigate(getRepoPath(repoId))}
+            onSelectSession={navigate}
+            renderActions={(repo) => (
+              <LocalRepoNewSessionButton repo={repo} onOpenSession={navigate} />
+            )}
+          />
+        </>
       )}
     </SessionTreeLayout>
   )

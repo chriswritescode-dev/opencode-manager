@@ -72,7 +72,16 @@ const MANAGER_ONLY_COMMAND_ACTIONS: ReadonlySet<BuiltinCommandAction> = new Set(
   'showWalkthrough',
 ])
 
-export function getBuiltinCommands(isLocalServer: boolean): readonly BuiltinCommand[] {
-  if (isLocalServer) return BUILTIN_COMMANDS
-  return BUILTIN_COMMANDS.filter((command) => !MANAGER_ONLY_COMMAND_ACTIONS.has(command.action))
+const CHAT_UNAVAILABLE_COMMAND_ACTIONS: ReadonlySet<BuiltinCommandAction> = new Set([
+  'showMcp',
+  'showSkills',
+  'showWalkthrough',
+])
+
+export function getBuiltinCommands(isLocalServer: boolean, isChat = false): readonly BuiltinCommand[] {
+  const available = isLocalServer
+    ? BUILTIN_COMMANDS
+    : BUILTIN_COMMANDS.filter((command) => !MANAGER_ONLY_COMMAND_ACTIONS.has(command.action))
+  if (!isChat) return available
+  return available.filter((command) => !CHAT_UNAVAILABLE_COMMAND_ACTIONS.has(command.action))
 }

@@ -201,12 +201,12 @@ function Harness() {
 }
 
 function CacheResolutionHarness({ sessionID }: { sessionID: string }) {
-  const { getRepoIdForSession } = useEventContext()
-  const repoId = getRepoIdForSession(sessionID)
+  const { getLocalSessionPath } = useEventContext()
+  const sessionPath = getLocalSessionPath(sessionID)
 
   return (
     <div>
-      <div data-testid="repo-id">{repoId ?? 'none'}</div>
+      <div data-testid="session-path">{sessionPath ?? 'none'}</div>
     </div>
   )
 }
@@ -1400,7 +1400,7 @@ describe('EventProvider permissions and forms', () => {
       fetchRoutes: providerRoutes(createApiState({ repos: [makeRepo({ id: 123, fullPath: '/repo' })] })),
     })
 
-    await waitFor(() => expect(screen.getByTestId('repo-id')).toHaveTextContent('123'))
+    await waitFor(() => expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/123/sessions/ses-infinite'))
   })
 
   it('resolves a session directory from the single-session cache without a remembered event directory', async () => {
@@ -1415,7 +1415,26 @@ describe('EventProvider permissions and forms', () => {
       fetchRoutes: providerRoutes(createApiState({ repos: [makeRepo({ id: 123, fullPath: '/repo' })] })),
     })
 
-    await waitFor(() => expect(screen.getByTestId('repo-id')).toHaveTextContent('123'))
+    await waitFor(() => expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/123/sessions/ses-detail'))
+  })
+
+  it('resolves a chat session to its chat route without a repo', async () => {
+    const chatId = '20260101-120000-abcdef'
+    const directory = `/workspace/chats/${chatId}`
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(
+      ['opencode', 'session', 'ses-chat', directory],
+      makeSession({ id: 'ses-chat', title: 'Chat Session', location: { directory } }),
+    )
+    renderWithProviders(<CacheResolutionHarness sessionID="ses-chat" />, {
+      events: true,
+      queryClient,
+      fetchRoutes: providerRoutes(createApiState()),
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-path')).toHaveTextContent(`/chats/${chatId}/sessions/ses-chat`)
+    })
   })
 
   it('resolves a session in the second directory page of the session list cache', async () => {
@@ -1444,7 +1463,7 @@ describe('EventProvider permissions and forms', () => {
       })),
     })
 
-    await waitFor(() => expect(screen.getByTestId('repo-id')).toHaveTextContent('456'))
+    await waitFor(() => expect(screen.getByTestId('session-path')).toHaveTextContent('/repos/456/sessions/ses-second'))
   })
 
   it('prioritizes the viewed session permission over an earlier unrelated one', async () => {

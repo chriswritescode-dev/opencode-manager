@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, isSessionDetailRoute, parseActivePickerSession, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, isAssistantPath, getPathWithReturnTo, getReturnToPath, getRepoPath, getServerProjectPath, getServerSessionPath, getSessionPath, getChatSessionPath, isSessionDetailRoute, parseActivePickerSession, parseChatSessionRoute, parseRepoRoute, parseServerProjectRoute, parseServerSessionRoute } from './navigation';
 import { LOCAL_OPENCODE_SERVER_ID } from '@opencode-manager/shared/schemas';
 
 describe('isAssistantPath', () => {
@@ -88,6 +88,15 @@ describe('linked server paths', () => {
   it('builds server and server session paths with encoded segments', () => {
     expect(getServerSessionPath('srv_kitchen', 'ses_1')).toBe('/servers/srv_kitchen/sessions/ses_1');
     expect(getServerSessionPath('srv a/b', 'ses 1')).toBe('/servers/srv%20a%2Fb/sessions/ses%201');
+  });
+});
+
+describe('getChatSessionPath', () => {
+  it('builds a chat session path with encoded segments', () => {
+    expect(getChatSessionPath('20260101-120000-abcdef', 'ses_1')).toBe(
+      '/chats/20260101-120000-abcdef/sessions/ses_1'
+    );
+    expect(getChatSessionPath('chat a/b', 'ses 1')).toBe('/chats/chat%20a%2Fb/sessions/ses%201');
   });
 });
 
@@ -180,9 +189,46 @@ describe('parseServerSessionRoute', () => {
   });
 });
 
+describe('parseChatSessionRoute', () => {
+  it('parses a chat session route', () => {
+    expect(parseChatSessionRoute('/chats/20260101-120000-abcdef/sessions/ses_1')).toEqual({
+      chatId: '20260101-120000-abcdef',
+      sessionId: 'ses_1',
+    });
+  });
+
+  it('returns null for other routes', () => {
+    expect(parseChatSessionRoute('/chats/20260101-120000-abcdef')).toBeNull();
+    expect(parseChatSessionRoute('/repos/5/sessions/ses_1')).toBeNull();
+    expect(parseChatSessionRoute('/servers/srv_kitchen/sessions/ses_1')).toBeNull();
+  });
+
+  it('returns null for a malformed chat id segment', () => {
+    expect(parseChatSessionRoute('/chats/%E0%A4%A/sessions/ses_1')).toBeNull();
+  });
+
+  it('returns null for a malformed session id segment', () => {
+    expect(parseChatSessionRoute('/chats/20260101-120000-abcdef/sessions/%E0%A4%A')).toBeNull();
+  });
+
+  it('decodes valid encoded segments', () => {
+    expect(parseChatSessionRoute('/chats/chat%20a%2Fb/sessions/ses%201')).toEqual({
+      chatId: 'chat a/b',
+      sessionId: 'ses 1',
+    });
+  });
+});
+
 describe('parseActivePickerSession', () => {
   it('reads a local session route on the local server', () => {
     expect(parseActivePickerSession('/repos/5/sessions/ses_1')).toEqual({
+      sessionId: 'ses_1',
+      serverId: LOCAL_OPENCODE_SERVER_ID,
+    });
+  });
+
+  it('reads a chat session route on the local server', () => {
+    expect(parseActivePickerSession('/chats/20260101-120000-abcdef/sessions/ses_1')).toEqual({
       sessionId: 'ses_1',
       serverId: LOCAL_OPENCODE_SERVER_ID,
     });
@@ -198,6 +244,7 @@ describe('parseActivePickerSession', () => {
   it('returns no session outside a session route', () => {
     expect(parseActivePickerSession('/repos/5')).toEqual({});
     expect(parseActivePickerSession('/servers/srv_kitchen/projects')).toEqual({});
+    expect(parseActivePickerSession('/chats/20260101-120000-abcdef')).toEqual({});
   });
 });
 
@@ -227,6 +274,11 @@ describe('isSessionDetailRoute', () => {
     expect(isSessionDetailRoute('/servers/https%3A%2F%2Fhost/sessions/ses_abc')).toBe(true);
   });
 
+  it('matches chat session detail routes', () => {
+    expect(isSessionDetailRoute('/chats/20260101-120000-abcdef/sessions/ses_abc')).toBe(true);
+    expect(isSessionDetailRoute('/chats/20260101-120000-abcdef/sessions/ses_abc/')).toBe(true);
+  });
+
   it('matches trailing-slash session detail routes', () => {
     expect(isSessionDetailRoute('/repos/42/sessions/abc/')).toBe(true);
     expect(isSessionDetailRoute('/servers/srv_kitchen/sessions/ses_abc/')).toBe(true);
@@ -237,6 +289,7 @@ describe('isSessionDetailRoute', () => {
     expect(isSessionDetailRoute('/repos/42')).toBe(false);
     expect(isSessionDetailRoute('/servers/srv_kitchen/projects')).toBe(false);
     expect(isSessionDetailRoute('/servers/srv_kitchen/sessions')).toBe(false);
+    expect(isSessionDetailRoute('/chats/20260101-120000-abcdef')).toBe(false);
     expect(isSessionDetailRoute('/assistant')).toBe(false);
   });
 });
@@ -301,6 +354,12 @@ describe('getSwipeBackTarget', () => {
       expect(() => getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).not.toThrow();
       expect(getSwipeBackTarget('/servers/srv_kitchen/sessions/%E0%A4%A', '')).toBeNull();
       expect(() => getSwipeBackTarget('/servers/%E0%A4%A/projects', '?directory=%2Fa')).not.toThrow();
+    });
+  });
+
+  describe('chat routes', () => {
+    it('returns root for a chat session detail', () => {
+      expect(getSwipeBackTarget('/chats/20260101-120000-abcdef/sessions/ses_1', '')).toBe('/');
     });
   });
 

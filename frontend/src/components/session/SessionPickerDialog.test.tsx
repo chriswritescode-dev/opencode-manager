@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
+import type { Chat } from '@opencode-manager/shared/schemas'
 import type { OpenCodeProject } from '@/api/opencode'
 import type { Repo } from '@/api/types'
 import type { UserPreferences } from '@/api/types/settings'
@@ -33,6 +34,51 @@ function deferred() {
   return { promise, resolve }
 }
 
+function makeChat(id: string, directory: string, createdAt: number): Chat {
+  return { id, directory, filesPath: `${directory}/.chats/${id}`, createdAt }
+}
+
+interface ChatSeed {
+  chats?: readonly Chat[]
+  nextCursor?: string
+  created?: { chat: Chat; sessionId: string }
+  deleteRespond?: FetchRoute['respond']
+}
+
+function chatRoutes(seed: ChatSeed = {}): FetchRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/api/chats',
+      respond: (request) => {
+        if (request.searchParams.get('cursor') !== null) return { json: { chats: [] } }
+        const chats = [...(seed.chats ?? [])]
+        return seed.nextCursor === undefined
+          ? { json: { chats } }
+          : { json: { chats, nextCursor: seed.nextCursor } }
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/chats',
+      respond: () => ({
+        json: seed.created ?? {
+          chat: makeChat('20260101-120000-abc123', '/w/chat-new', 1000),
+          sessionId: 'ses_new',
+        },
+      }),
+    },
+    {
+      method: 'DELETE',
+      path: '/api/chats/:chatId/sessions/:sessionId',
+      respond: (request, params) =>
+        seed.deleteRespond
+          ? seed.deleteRespond(request, params, undefined)
+          : { json: { deleted: true, folderRemoved: false } },
+    },
+  ]
+}
+
 const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
 
 interface RenderPickerOptions {
@@ -43,6 +89,7 @@ interface RenderPickerOptions {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   finePointer?: boolean
+  chats?: ChatSeed
 }
 
 function settingsRoute(preferences: Partial<UserPreferences>): FetchRoute {
@@ -81,6 +128,7 @@ function renderPicker(server: SessionServer, options: RenderPickerOptions = {}) 
       fetchRoutes: [
         ...(options.preferences ? [settingsRoute(options.preferences)] : []),
         ...server.routes,
+        ...chatRoutes(options.chats),
       ],
     },
   )
@@ -103,6 +151,10 @@ const openProjectsTab = () => {
 
 const openActiveTab = () => {
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Activity' }))
+}
+
+const openChatsTab = () => {
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Chats' }))
 }
 
 function listDirectories(server: SessionServer) {
@@ -573,11 +625,12 @@ describe('SessionPickerDialog', () => {
     )
   })
 
-  it('renders an Activity/Sessions/Projects tab switcher and defaults to the sessions tab', () => {
+  it('renders an Activity/Sessions/Chats/Projects tab switcher and defaults to the sessions tab', () => {
     renderPicker(createSessionServer({ repos }))
 
     expect(screen.getByRole('tab', { name: 'This project' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByRole('tab', { name: 'Projects' })).toHaveAttribute('aria-selected', 'false')
     expect(combobox()).toHaveAttribute('placeholder', 'Search sessions...')
   })
@@ -619,6 +672,10 @@ describe('SessionPickerDialog', () => {
     renderPicker(server, { finePointer })
 
     await user.click(combobox())
+    await user.keyboard('{Control>}s{/Control}')
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Search chats...')).toHaveFocus())
+
     await user.keyboard('{Control>}s{/Control}')
 
     await waitFor(() => expect(screen.getByPlaceholderText('Search projects...')).toHaveFocus())
@@ -726,10 +783,13 @@ describe('SessionPickerDialog', () => {
     expect(screen.getByText('No projects found')).toBeInTheDocument()
   })
 
-  it('cycles Activity, Sessions and Projects with the default Ctrl+S binding', async () => {
+  it('cycles Sessions, Chats, Projects and Activity with the default Ctrl+S binding', async () => {
     renderPicker(createSessionServer({ repos }))
 
     expect(screen.getByRole('tab', { name: 'This project', selected: true })).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Chats', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 's', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
@@ -747,6 +807,9 @@ describe('SessionPickerDialog', () => {
     })
 
     expect(await screen.findByText(/Ctrl\+G projects/)).toBeInTheDocument()
+
+    fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
+    expect(await screen.findByRole('tab', { name: 'Chats', selected: true })).toBeInTheDocument()
 
     fireEvent.keyDown(combobox(), { key: 'g', ctrlKey: true })
     expect(await screen.findByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument()
@@ -921,6 +984,161 @@ describe('SessionPickerDialog', () => {
     )
   })
 
+  describe('chats tab', () => {
+    const newestChat = makeChat('20260103-100000-cccccc', '/w/chat-newest', 3000)
+    const middleChat = makeChat('20260102-100000-bbbbbb', '/w/chat-mid', 2000)
+    const oldestChat = makeChat('20260101-100000-aaaaaa', '/w/chat-old', 1000)
+    const chatSessions = [
+      session('ses_new', 'Newest chat', '/w/chat-newest', 3000),
+      session('ses_mid', 'Middle chat', '/w/chat-mid', 2000),
+      session('ses_old', 'Oldest chat', '/w/chat-old', 1000),
+    ]
+    const allChats = [newestChat, middleChat, oldestChat]
+
+    it('lists chat sessions newest first in the order the chats are returned', async () => {
+      renderPicker(createSessionServer({ repos, sessions: chatSessions }), {
+        chats: { chats: allChats },
+      })
+
+      openChatsTab()
+
+      const options = await screen.findAllByRole('option')
+      expect(options).toHaveLength(3)
+      expect(options[0]).toHaveTextContent('Newest chat')
+      expect(options[1]).toHaveTextContent('Middle chat')
+      expect(options[2]).toHaveTextContent('Oldest chat')
+    })
+
+    it('filters chats by title without matching other tabs', async () => {
+      renderPicker(createSessionServer({ repos, sessions: chatSessions }), {
+        chats: { chats: allChats },
+      })
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+
+      fireEvent.change(combobox(), { target: { value: 'middle' } })
+
+      expect(screen.queryByRole('option', { name: /Newest chat/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Middle chat/ })).toBeInTheDocument()
+
+      fireEvent.change(combobox(), { target: { value: 'zzz' } })
+
+      expect(screen.getByText('No chats found')).toBeInTheDocument()
+    })
+
+    it('requests the next chat page from the show more action', async () => {
+      const { fetchFake } = renderPicker(createSessionServer({ repos, sessions: chatSessions }), {
+        chats: { chats: allChats, nextCursor: oldestChat.id },
+      })
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+
+      await waitFor(() => expect(fetchFake.findRequests('GET', '/api/chats')).toHaveLength(2))
+      expect(fetchFake.lastRequest('GET', '/api/chats')?.searchParams.get('cursor')).toBe(oldestChat.id)
+    })
+
+    it('shows the show more action even when no chat sessions are visible', async () => {
+      const { fetchFake } = renderPicker(createSessionServer({ repos }), {
+        chats: { chats: [newestChat], nextCursor: newestChat.id },
+      })
+
+      openChatsTab()
+
+      expect(await screen.findByText('No chats yet')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+
+      await waitFor(() => expect(fetchFake.findRequests('GET', '/api/chats')).toHaveLength(2))
+      expect(fetchFake.lastRequest('GET', '/api/chats')?.searchParams.get('cursor')).toBe(newestChat.id)
+    })
+
+    it('creates a chat from the header action and navigates to its new session', async () => {
+      const createdChat = makeChat('20260104-090000-dddddd', '/w/chat-created', 4000)
+      const { fetchFake, onNavigate } = renderPicker(createSessionServer({ repos }), {
+        chats: { created: { chat: createdChat, sessionId: 'ses_created' } },
+      })
+
+      openChatsTab()
+      fireEvent.click(await screen.findByRole('button', { name: 'New chat' }))
+
+      await waitFor(() =>
+        expect(onNavigate).toHaveBeenCalledWith(`/chats/${createdChat.id}/sessions/ses_created`),
+      )
+      expect(fetchFake.findRequests('POST', '/api/chats')).toHaveLength(1)
+    })
+
+    it('pins a chat from the shared row menu', async () => {
+      const user = userEvent.setup()
+      const { fetchFake } = renderPicker(createSessionServer({ repos, sessions: chatSessions }), {
+        chats: { chats: [newestChat] },
+      })
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(await screen.findByText('Pin'))
+
+      await waitFor(() =>
+        expect(fetchFake.lastRequest('PUT', '/api/session-pins')?.body).toEqual({
+          sessionId: 'ses_new',
+          directory: '/w/chat-newest',
+          pinned: true,
+        }),
+      )
+    })
+
+    it('opens the delete confirmation with Ctrl+D', async () => {
+      const { fetchFake } = renderPicker(createSessionServer({ repos, sessions: chatSessions }), {
+        chats: { chats: [newestChat] },
+      })
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      fireEvent.keyDown(combobox(), { key: 'd', ctrlKey: true })
+
+      expect(await screen.findByRole('dialog', { name: 'Delete Session' })).toBeInTheDocument()
+      expect(fetchFake.findRequests('DELETE', '/api/chats/:chatId/sessions/:sessionId')).toHaveLength(0)
+    })
+
+    it('deletes a chat session after confirmation and clears the active session first', async () => {
+      const user = userEvent.setup()
+      const deletion = deferred()
+      const { fetchFake, onDeleteActiveSession } = renderPicker(
+        createSessionServer({ repos, sessions: chatSessions }),
+        {
+          activeSessionID: 'ses_new',
+          chats: { chats: [newestChat], deleteRespond: () => deletion.promise },
+        },
+      )
+
+      openChatsTab()
+      await screen.findByRole('option', { name: /Newest chat/ })
+      await user.click(screen.getByRole('button', { name: 'Session actions' }))
+      await user.click(await screen.findByText('Delete'))
+
+      const dialog = await screen.findByRole('dialog', { name: 'Delete Session' })
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() =>
+        expect(
+          fetchFake.findRequests('DELETE', `/api/chats/${newestChat.id}/sessions/ses_new`),
+        ).toHaveLength(1),
+      )
+      expect(onDeleteActiveSession).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('dialog', { name: 'Delete Session' })).toBeInTheDocument()
+
+      deletion.resolve({ json: { deleted: true, folderRemoved: false } })
+
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Delete Session' })).not.toBeInTheDocument(),
+      )
+    })
+  })
+
   describe('linked-server mode', () => {
     const remote = { serverId: 'srv_kitchen', serverName: 'Kitchen', projectDirectory: '/home/me/app' }
     const remoteSession = makeSession({
@@ -940,6 +1158,7 @@ describe('SessionPickerDialog', () => {
 
       expect(screen.getByRole('tab', { name: 'Projects' })).toBeInTheDocument()
       expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Chats' })).not.toBeInTheDocument()
 
       const row = await screen.findByRole('option', { name: /Remote session/ })
       expect(row).toHaveTextContent('Kitchen')

@@ -1,3 +1,5 @@
+import { DEFAULTS } from '../config/defaults'
+import { CHAT_ID_PATTERN } from '../schemas/chats'
 import type { Repo } from '../types'
 
 export const ASSISTANT_REPO_ID = 0
@@ -20,6 +22,23 @@ export function buildSessionPath(
   const search = params.toString()
 
   return `/repos/${repoId}/sessions/${sessionId}${search ? `?${search}` : ''}`
+}
+
+export function buildChatSessionPath(chatId: string, sessionId: string): string {
+  return `/chats/${encodeURIComponent(chatId)}/sessions/${encodeURIComponent(sessionId)}`
+}
+
+export function getChatIdFromDirectory(directory: string): string | null {
+  const normalized = trimTrailingChar(trimTrailingChar(directory.trim(), '/'), '\\')
+  if (!normalized) return null
+
+  const segments = normalized.split(/[\\/]/)
+  const chatId = segments[segments.length - 1]
+  const parent = segments[segments.length - 2]
+  if (!chatId || !parent) return null
+  if (parent !== DEFAULTS.WORKSPACE.CHATS_DIR) return null
+
+  return CHAT_ID_PATTERN.test(chatId) ? chatId : null
 }
 
 export function buildServerSessionPath(serverId: string, sessionId: string): string {

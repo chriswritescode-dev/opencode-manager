@@ -9,6 +9,7 @@ import {
   getOpenCodeGlobalSkillsPath,
   getOpenCodeToolOutputPath,
   getOpenCodeWorktreesPath,
+  getChatsPath,
   getReposPath,
   getScheduleWorktreesPath,
 } from '@opencode-manager/shared/config/env'
@@ -184,7 +185,7 @@ export function buildSandboxVerifyProvisionArgs(name: string): string[] {
 }
 
 export function sandboxProjectRoots(): string[] {
-  return [getReposPath(), getScheduleWorktreesPath(), getOpenCodeWorktreesPath(), getForgeWorktreesPath()]
+  return [getReposPath(), getChatsPath(), getScheduleWorktreesPath(), getOpenCodeWorktreesPath(), getForgeWorktreesPath()]
 }
 
 export function sandboxMountRoots(): string[] {

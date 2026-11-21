@@ -52,7 +52,7 @@ export interface EventContextValue {
     forgetPendingActionsForSession: (sessionID: string) => void
   }
   sseHealth: SSEHealthState
-  getRepoIdForSession: (sessionID: string) => number | null
+  getLocalSessionPath: (sessionID: string) => string | null
 }
 
 export const EventContext = createContext<EventContextValue | null>(null)

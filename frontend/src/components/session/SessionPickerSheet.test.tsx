@@ -60,12 +60,13 @@ function session(id: string, title: string, directory: string, updated = Date.no
 const kitchen = makeOpenCodeServer({ id: 'srv_kitchen', name: 'Kitchen' })
 
 describe('SessionPickerSheet', () => {
-  it('renders the picker in a bottom sheet with Activity, Sessions and Projects tabs', async () => {
+  it('renders the picker in a bottom sheet with Activity, Sessions, Chats and Projects tabs', async () => {
     renderSheet(createSessionServer({ repos, remoteServers: [kitchen] }), ['/'])
 
     expect(screen.getByRole('dialog', { name: 'Sessions' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Activity' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Sessions', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Chats' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Projects' })).toBeInTheDocument()
     expect(
       await screen.findByRole('button', { name: /Switch server, current:/ }),
@@ -132,6 +133,7 @@ describe('SessionPickerSheet', () => {
     const row = await screen.findByRole('option', { name: /Remote session/ })
     expect(row).toHaveTextContent('Kitchen')
     expect(screen.queryByRole('tab', { name: 'This project' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Chats' })).not.toBeInTheDocument()
 
     fireEvent.click(row)
 
